@@ -9,6 +9,9 @@
 | 3 | ProRes and HEVC encoding with audio | Done: ProRes 422 HQ at 4032x3024 |
 | 4 | Heat, crop, exposure tools, LUT import | In progress |
 | 5 | Camera experience redesign | Planned |
+| 6 | Image quality and capture | Planned |
+| 7 | Shooting tools | Planned |
+| 8 | On-phone finishing | Planned |
 
 ## Phase 4: what's left
 
@@ -41,9 +44,46 @@ Rebuild the interface to the standard of a first-party Apple camera app, with th
 - **Accessibility:** VoiceOver labels, Dynamic Type and high-contrast support.
 - **Developer tools:** the debug overlay, logs and benchmarks stay available in a hidden diagnostics screen, because phone testing depends on them.
 
+The screen design should leave room for the tools in Phases 6 and 7.
+
+## Phase 6: image quality and capture
+
+The rule for this phase: anything that adds to real-time GPU load must prove it doesn't cost frames or shorten recording.
+
+- **24 and 25 fps:** test whether the sensor mode runs at these rates under the Photo preset. RAW Cam offers 18, 24, 25 and 30 fps.
+- **Highlight reconstruction:** rebuild clipped green from red and blue, which still hold data above the point where green saturates. This could recover some highlight range that is currently clipped.
+- **Vignette correction:** apply the `FixVignetteRadial` values already found in the photo metadata.
+- **Gyro logging:** record CoreMotion data at high rate and save a Gyroflow `.gcsv` next to each clip. This costs little and can land early.
+- **Stabilization check:** find out whether optical stabilization is active during RAW capture, and how it affects gyro stabilization.
+- **Exposure modes:** 180-degree shutter, shutter priority, auto exposure with an EV slider, and lock at start.
+- **Focus while recording:** test whether focus can change during capture.
+- **Audio:** PCM recording, level meters and external microphones.
+- **Native gamuts:** S-Gamut3 and ARRI Wide Gamut for S-Log3 and LogC3, plus options for how the file is tagged.
+- **Color accuracy:** measure against a chart, and confirm the exposure default.
+- **Lenses:** test recording on the ultra wide and tele, each with its own calibration.
+
+## Phase 7: shooting tools
+
+- Focus peaking and a focus punch-in.
+- RAW histogram, waveform and vectorscope.
+- Horizon indicator, using the Phase 6 motion data.
+- Frame guides, a 3x3 grid and anamorphic desqueeze.
+- LUTs baked into recordings, as an option.
+- Timecode and Apple Watch control, if they prove useful.
+
+## Phase 8: on-phone finishing
+
+Keep recording clean, and do the heavy work after the shot, when real-time limits and most heat limits no longer apply. Each step writes a new file and leaves the original untouched.
+
+- **One-tap stabilization:** use the saved gyro data and the spare sensor area from open gate, with an optional horizon lock.
+- **One-tap denoise:** use the noise profile from the metadata, with temporal denoise where quality justifies the time.
+- **Export presets:** bake a LUT, render Rec.709 or HDR, and make small proxies for sharing.
+- **Roll-off and gamut conversions:** convert between log curves and gamuts for different grading workflows.
+
 ## Later ideas
 
-- Measure color against a chart, and confirm the exposure default.
-- Add S-Gamut3 and ARRI Wide Gamut for S-Log3 and LogC3.
-- Test recording on the ultra wide and tele lenses.
-- Add a labeled 10-bit HLG mode at 1080p 60 fps, which would not be RAW.
+- Short RAW bursts in CinemaDNG, within the 8 GB the phone can write at full speed.
+- A labeled 10-bit HLG mode at 1080p 60 fps, which would not be RAW.
+- Live gyro stabilization while recording, only if GPU headroom allows it.
+- Cloud sync, streaming and multi-camera control, which matter less for this app's goal.
+- External storage on phones with fast USB-C. The iPhone 14 Pro's Lightning port is likely too slow for this.
