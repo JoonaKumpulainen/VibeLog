@@ -20,10 +20,9 @@ struct InstrumentCell: View {
     let tint: Color
     var mark = CellMark.plain
     let hold: Hold
-    let depth: CGFloat
 
     var body: some View {
-        VStack(alignment: hold.isLandscape ? .center : .leading, spacing: 1) {
+        VStack(alignment: hold.isLandscape ? .center : .leading, spacing: 2) {
             HStack(spacing: 3) {
                 Text(title)
                     .font(Tokens.labelFont)
@@ -31,13 +30,13 @@ struct InstrumentCell: View {
                 markView
             }
             Text(value)
-                .font(Tokens.valueFont)
+                .font(hold.isLandscape ? Tokens.sidewaysReadoutFont : Tokens.readoutFont)
                 .foregroundStyle(tint)
         }
         .lineLimit(1)
-        .minimumScaleFactor(0.6)
-        .upright(hold, depth: depth - 2)
-        .padding(.horizontal, hold.isLandscape ? 0 : 8)
+        .minimumScaleFactor(0.9)
+        .upright(hold, depth: CameraGeometry.controlBarDepth - 2)
+        .padding(.horizontal, hold.isLandscape ? 0 : 10)
         .frame(
             maxWidth: .infinity, maxHeight: .infinity,
             alignment: hold.isLandscape ? .center : .leading)
@@ -62,31 +61,60 @@ struct InstrumentCell: View {
     }
 }
 
-/// The read-out row, and the dial for the chosen value above it.
+/// A smaller title over a value, for the record row.
+struct ActionCell: View {
+    let title: String
+    let value: String
+    let tint: Color
+    let hold: Hold
+
+    var body: some View {
+        VStack(spacing: 1) {
+            Text(title)
+                .font(Tokens.labelFont)
+                .foregroundStyle(Tokens.label)
+            Text(value)
+                .font(Tokens.smallValueFont)
+                .foregroundStyle(tint)
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
+        .upright(hold, depth: 56)
+        .frame(maxWidth: .infinity)
+        .frame(height: 52)
+        .contentShape(Rectangle())
+    }
+}
+
+/// The four values, and the dial for the chosen one in the tray above them.
 struct ControlPanels: View {
     @EnvironmentObject private var model: AppModel
     @AppStorage("fineDial") private var fine = false
+    @State private var showsTint = false
     @Binding var selected: ControlDial?
     let hold: Hold
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 3) {
             if let selected {
                 dialPanel(selected)
                     .transition(.opacity)
             }
             HStack(spacing: 0) {
-                cell(title: "FPS", value: "\(Int(model.frameRate))", manual: false, mark: .plain)
                 ForEach(ControlDial.allCases) { control in
-                    divider
                     Button {
                         select(control)
                     } label: {
-                        cell(
-                            title: title(control), value: value(control), manual: isManual(control),
-                            mark: mark(control))
-                            .background(selected == control ? Tokens.hairline : Color.clear)
-                            .contentShape(Rectangle())
+                        InstrumentCell(
+                            title: title(control), value: value(control),
+                            tint: isManual(control) ? Tokens.held : Tokens.value, mark: mark(control),
+                            hold: hold
+                        )
+                        .background(
+                            selected == control ? Tokens.surface : Color.clear,
+                            in: RoundedRectangle(cornerRadius: Tokens.panelRadius)
+                        )
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(name(control))
@@ -94,7 +122,6 @@ struct ControlPanels: View {
                 }
             }
             .frame(height: CameraGeometry.controlBarDepth)
-            .instrumentPanel()
         }
     }
 
@@ -104,27 +131,18 @@ struct ControlPanels: View {
             model.showNotice("Focus is held during a take", seconds: 2)
             return
         }
+        showsTint = false
         withAnimation(.easeOut(duration: 0.15)) {
             selected = selected == control ? nil : control
         }
     }
 
-    private var divider: some View {
-        Rectangle().fill(Tokens.hairline).frame(width: 0.5)
-    }
-
-    private func cell(title: String, value: String, manual: Bool, mark: CellMark) -> some View {
-        InstrumentCell(
-            title: title, value: value, tint: manual ? Tokens.held : Tokens.value, mark: mark,
-            hold: hold, depth: CameraGeometry.controlBarDepth)
-    }
-
     private func title(_ control: ControlDial) -> String {
         switch control {
         case .iso: return "ISO"
-        case .shutter: return "SHT"
-        case .whiteBalance: return "WB"
-        case .focus: return "FOC"
+        case .shutter: return selected == .shutter ? model.shutterAngleLabel : "SHUTTER"
+        case .whiteBalance: return isShowingTint(control) ? "TINT" : "WB"
+        case .focus: return "FOCUS"
         }
     }
 
@@ -137,16 +155,22 @@ struct ControlPanels: View {
         }
     }
 
+    private func isShowingTint(_ control: ControlDial) -> Bool {
+        control == .whiteBalance && showsTint && selected == .whiteBalance
+    }
+
     private func value(_ control: ControlDial) -> String {
         switch control {
         case .iso: return "\(Int(model.iso))"
         case .shutter: return model.shutterLabel
-        case .whiteBalance: return "\(Int((model.temperature / 10).rounded()) * 10)"
+        case .whiteBalance:
+            if isShowingTint(control) { return String(format: "%+d", Int(model.tint)) }
+            return "\(Int((model.temperature / 10).rounded()) * 10)"
         case .focus:
             if model.focusLocked || model.focusHeldForTake {
                 return String(format: "%.2f", model.lensPosition)
             }
-            return model.focusTapped ? "TAP" : "AF"
+            return model.focusTapped ? "AF-L" : "AF"
         }
     }
 
@@ -189,57 +213,53 @@ struct ControlPanels: View {
     }
 
     private func dialPanel(_ control: ControlDial) -> some View {
-        HStack(spacing: 8) {
-            smallButton(isHeld(control) ? "lock" : "lock.open", isOn: isHeld(control),
-                label: isHeld(control) ? "Unlock \(name(control))" : "Lock \(name(control))") {
+        let tinted = isShowingTint(control)
+        return HStack(spacing: 4) {
+            trayButton("AUTO", isOn: !isHeld(control), label: "Auto \(name(control))") {
                 toggleLock(control)
             }
             // One tap here would return to auto mid-shot.
             .disabled(model.isRecording)
             .opacity(model.isRecording ? 0 : 1)
             .accessibilityHidden(model.isRecording)
-            VStack(alignment: .leading, spacing: 2) {
-                // Sideways the bar below shows the value, and the labels need the depth.
-                if !hold.isLandscape {
-                    HStack {
-                        Text(title(control))
-                            .font(Tokens.labelFont)
-                            .foregroundStyle(Tokens.label)
-                        Spacer()
-                        Text(value(control))
-                            .font(Tokens.valueFont)
-                            .foregroundStyle(isManual(control) ? Tokens.held : Tokens.value)
-                    }
+            Dial(
+                stops: tinted ? tintStops : stops(control),
+                value: tinted ? tintBinding : binding(control), labelAngle: hold.angle,
+                isMirrored: hold == .landscapeRight || hold == .upsideDown,
+                spacing: fine ? 7 : 44, label: tinted ? "Tint" : name(control),
+                valueText: value(control)
+            )
+            .frame(height: 46)
+            if control == .whiteBalance {
+                trayButton("TINT", isOn: showsTint, label: "Tint") { showsTint.toggle() }
+            }
+            if control == .focus {
+                trayButton("PUNCH", isOn: model.isOn(.punchIn), label: "Punch-in") {
+                    model.toggle(.punchIn)
                 }
-                Dial(
-                    stops: stops(control), value: binding(control), labelAngle: hold.angle,
-                    isMirrored: hold == .landscapeRight || hold == .upsideDown,
-                    spacing: fine ? 7 : 44, label: name(control), valueText: value(control)
-                )
-                .frame(height: hold.isLandscape ? 46 : 30)
             }
-            smallButton("scope", isOn: fine, label: fine ? "Snap to stops" : "Fine adjustment") {
-                fine.toggle()
-            }
+            trayButton("FINE", isOn: fine, label: "Fine adjustment") { fine.toggle() }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .instrumentPanel()
+        .frame(height: CameraGeometry.trayDepth)
     }
 
-    private func smallButton(
-        _ symbol: String, isOn: Bool, label: String, action: @escaping () -> Void
+    private func trayButton(
+        _ text: String, isOn: Bool, label: String, action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 14))
-                .foregroundStyle(isOn ? Tokens.held : Tokens.value)
+        let shape = RoundedRectangle(cornerRadius: Tokens.panelRadius)
+        return Button(action: action) {
+            Text(text)
+                .font(Tokens.labelFont)
+                .foregroundStyle(isOn ? Tokens.value : Tokens.label)
+                .fixedSize()
                 .turnedToHold()
-                .frame(width: 44, height: 44)
+                .frame(width: 46, height: 44)
+                .background(isOn ? Tokens.surface : Color.clear, in: shape)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 
     private func toggleLock(_ control: ControlDial) {
@@ -249,6 +269,24 @@ struct ControlPanels: View {
         case .focus:
             if isHeld(.focus) { model.releaseFocus() } else { model.focusLocked = true }
         }
+    }
+
+    private var tintStops: [ExposureScales.Stop] {
+        fine ? ExposureScales.fineStops(linear: -150...150, step: 1, majorEvery: 10)
+            : (-15...15).map { step in
+                let named = step % 5 == 0
+                return ExposureScales.Stop(
+                    value: Double(step * 10), label: named ? "\(step * 10)" : "", isMajor: named)
+            }
+    }
+
+    private var tintBinding: Binding<Double> {
+        Binding(
+            get: { Double(model.tint) },
+            set: { value in
+                model.tint = Float(value)
+                if !model.whiteBalanceLocked { model.whiteBalanceLocked = true }
+            })
     }
 
     private func stops(_ control: ControlDial) -> [ExposureScales.Stop] {

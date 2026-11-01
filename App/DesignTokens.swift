@@ -13,17 +13,24 @@ enum Tokens {
     static let value = Color(white: 0.95)
     static let hairline = Color.white.opacity(0.22)
     static let opaquePanel = Color(white: 0.09)
-    static let panelRadius: CGFloat = 7
+    /// Behind whatever is selected.
+    static let surface = Color(white: 0.16)
+    static let panelRadius: CGFloat = 8
 
     static let labelFont = Font.system(size: 10, weight: .medium, design: .monospaced)
     static let valueFont = Font.system(size: 14, weight: .medium, design: .monospaced)
+    /// The values that change while shooting. Their size follows the hold, so they never shrink
+    /// one by one.
+    static let readoutFont = Font.system(size: 20, weight: .medium, design: .monospaced)
+    static let sidewaysReadoutFont = Font.system(size: 16, weight: .medium, design: .monospaced)
+    static let smallValueFont = Font.system(size: 13, weight: .medium, design: .monospaced)
     static let lineFont = Font.system(size: 11, weight: .medium, design: .monospaced)
     static let statusFont = Font.system(size: 12, weight: .medium, design: .monospaced)
     static let markFont = Font.system(size: 9, weight: .medium, design: .monospaced)
     static let clockFont = Font.system(size: 28, weight: .semibold, design: .monospaced)
     static let sidewaysClockFont = Font.system(size: 22, weight: .semibold, design: .monospaced)
-    static let noticeTitleFont = Font.system(size: 19, weight: .semibold)
-    static let noticeFont = Font.system(size: 14)
+    static let noticeTitleFont = Font.title3.weight(.semibold)
+    static let noticeFont = Font.subheadline
 }
 
 /// Where the picture sits, in portrait screen coordinates. Nothing overlaps it in any hold. Its
@@ -31,23 +38,25 @@ enum Tokens {
 struct CameraGeometry {
     let picture: CGRect
 
-    static let controlBarDepth: CGFloat = 46
-    static let recordDepth: CGFloat = 68
-    /// The row above the control bar: a dial or the monitor tools.
-    static let trayDepth: CGFloat = 58
-    /// The tool row and control bar, which a notice covers.
-    static let noticeDepth: CGFloat = 44 + 8 + controlBarDepth
-    /// The status blocks beside the Dynamic Island are square, so they fit in every hold.
-    static let statusTop: CGFloat = 14
+    static let controlBarDepth: CGFloat = 58
+    static let recordDepth: CGFloat = 72
+    /// The row above the control bar: the tools, a dial or the monitor tools.
+    static let trayDepth: CGFloat = 50
+    /// The tray and control bar, which a notice covers.
+    static let noticeDepth: CGFloat = trayDepth + 3 + controlBarDepth
+    /// The space above the picture, with the Dynamic Island in the middle.
+    static let statusDepth: CGFloat = 99
+    /// Status blocks are square, so they fit in every hold.
     static let statusSide: CGFloat = 81
+    static let statusLineWidth: CGFloat = 72
+    static let statusLineGap: CGFloat = 3
     /// The most Full view keeps beneath the picture.
-    static let fullViewDepth: CGFloat = 76
+    static let fullViewDepth: CGFloat = 80
 
     /// Share of the spare height above the picture. Estimated, not measured from the Camera app.
     private static let topShare: CGFloat = 0.3
-    private static let smallestTop = statusTop + statusSide + 4
-    /// Record row, the control bar and an open tray.
-    private static let smallestBottom: CGFloat = recordDepth + 8 + controlBarDepth + 8 + trayDepth + 4
+    /// Record row, the control bar and the tray.
+    private static let smallestBottom: CGFloat = recordDepth + 5 + noticeDepth + 4
 
     /// Full view leaves the 4:3 frame and fills the width, with only a strip beneath the picture.
     init(screen: CGSize, top: CGFloat, bottom: CGFloat, widescreen: Bool, fullView: Bool) {
@@ -57,7 +66,7 @@ struct CameraGeometry {
             picture = CGRect(x: (screen.width - width) / 2, y: top, width: width, height: height)
             return
         }
-        let upper = max(top + 4, Self.smallestTop)
+        let upper = max(top + 4, Self.statusDepth)
         let lower = bottom + Self.smallestBottom
         let height = min(screen.width * 4 / 3, screen.height - upper - lower)
         let spare = screen.height - height
@@ -67,53 +76,11 @@ struct CameraGeometry {
     }
 }
 
-/// Smoked glass behind every control. Diagnostics can swap it for a flat fill, to measure what
-/// sampling the live picture costs during a recording.
-struct InstrumentPanel: ViewModifier {
-    @AppStorage("glassPanels") private var useGlass = true
-
-    func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: Tokens.panelRadius)
-        Group {
-            if useGlass {
-                if #available(iOS 26.0, *) {
-                    content.glassEffect(.regular.tint(.black.opacity(0.45)), in: shape)
-                } else {
-                    content.background(.ultraThinMaterial, in: shape)
-                }
-            } else {
-                content.background(Color.black.opacity(0.62), in: shape)
-            }
-        }
-        .overlay(shape.strokeBorder(Tokens.hairline, lineWidth: 0.5))
-    }
-}
-
 extension View {
-    func instrumentPanel() -> some View { modifier(InstrumentPanel()) }
-
     /// Turns content to the hold without moving it. Sideways, `depth` limits its width to what
     /// the control has room for once turned.
     func upright(_ hold: Hold, depth: CGFloat) -> some View {
         frame(maxWidth: hold.isLandscape ? depth : .infinity)
             .turnedToHold()
-    }
-}
-
-/// Corner brackets on the recorded area.
-struct FrameMarks: Shape {
-    func path(in rect: CGRect) -> Path {
-        let inset = rect.insetBy(dx: 10, dy: 10)
-        let arm: CGFloat = 14
-        var path = Path()
-        for (x, y, dx, dy) in [
-            (inset.minX, inset.minY, arm, arm), (inset.maxX, inset.minY, -arm, arm),
-            (inset.minX, inset.maxY, arm, -arm), (inset.maxX, inset.maxY, -arm, -arm),
-        ] {
-            path.move(to: CGPoint(x: x + dx, y: y))
-            path.addLine(to: CGPoint(x: x, y: y))
-            path.addLine(to: CGPoint(x: x, y: y + dy))
-        }
-        return path
     }
 }

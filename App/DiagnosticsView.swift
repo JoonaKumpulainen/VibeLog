@@ -6,7 +6,6 @@ import VLCore
 struct DiagnosticsView: View {
     @EnvironmentObject private var model: AppModel
     @AppStorage("debugOverlay") private var showDebugOverlay = false
-    @AppStorage("glassPanels") private var useGlass = true
     @State private var showLog = false
     /// Closes Settings, so a running test shows on the camera screen.
     let close: () -> Void
@@ -19,7 +18,6 @@ struct DiagnosticsView: View {
         Form {
             Section {
                 Toggle("Debug overlay", isOn: $showDebugOverlay)
-                Toggle("Glass panels", isOn: $useGlass)
                 Button("Show log") { showLog = true }
                 if let result = model.lastResult {
                     Text(result).font(.caption.monospaced()).textSelection(.enabled)

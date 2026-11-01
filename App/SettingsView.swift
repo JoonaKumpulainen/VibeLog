@@ -15,21 +15,21 @@ struct SettingsView: View {
         NavigationStack {
             List {
                 Section {
-                    row("Recording", "record.circle", .red, "Codec, size and aspect", model.encoderPreset.label) {
+                    row("Recording", "record.circle", "Codec, size and aspect", model.encoderPreset.label) {
                         recording
                     }
-                    row("Image", "camera.aperture", .orange, "Log curve, pipeline and debayer", model.curveLabel) {
+                    row("Image", "camera.aperture", "Log curve, pipeline and debayer", model.curveLabel) {
                         image
                     }
-                    row("Monitor", "display", .blue, "What the viewfinder shows", model.processing.monitor.label) {
+                    row("Monitor", "display", "What the viewfinder shows", model.processing.monitor.label) {
                         monitor
                     }
-                    row("Camera", "slider.horizontal.3", .gray, "Locks, mains and tint", "\(model.mainsHz) Hz") {
+                    row("Camera", "slider.horizontal.3", "Locks and mains", "\(model.mainsHz) Hz") {
                         camera
                     }
                 }
                 Section {
-                    row("About", "info.circle", .gray, "Version and saved settings", Self.version) {
+                    row("About", "info.circle", "Version and saved settings", Self.version) {
                         about
                     }
                 }
@@ -56,9 +56,9 @@ struct SettingsView: View {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-"
     }
 
-    /// A colored icon, a title with a line about it, and the current value.
+    /// An icon, a title with a line about it, and the current value.
     private func row<Page: View>(
-        _ title: String, _ symbol: String, _ color: Color, _ detail: String, _ value: String,
+        _ title: String, _ symbol: String, _ detail: String, _ value: String,
         @ViewBuilder page: () -> Page
     ) -> some View {
         NavigationLink {
@@ -69,9 +69,8 @@ struct SettingsView: View {
             HStack(spacing: 12) {
                 Image(systemName: symbol)
                     .font(.system(size: 16))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Tokens.held)
                     .frame(width: 30, height: 30)
-                    .background(color, in: RoundedRectangle(cornerRadius: 7))
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
@@ -197,11 +196,6 @@ struct SettingsView: View {
             Text("60 Hz").tag(60)
         } label: {
             explained("Mains", "Sets the shutter stops that avoid light flicker.")
-        }
-        VStack(alignment: .leading) {
-            explained("Tint \(Int(model.tint))", "Green to magenta, for locked white balance.")
-            Slider(value: $model.tint, in: -150...150)
-                .accessibilityLabel("Tint")
         }
     }
 

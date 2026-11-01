@@ -7,6 +7,25 @@ import VLCore
 import VLProcessing
 import VLRecording
 
+extension LogCurve {
+    var shortLabel: String {
+        switch self {
+        case .appleLog: return "ALOG"
+        case .sLog3: return "SLOG3"
+        case .logC3: return "LOGC3"
+        }
+    }
+}
+
+extension EncoderPreset {
+    var shortLabel: String {
+        label.replacingOccurrences(of: "ProRes ", with: "")
+            .replacingOccurrences(of: "10-bit ", with: "")
+            .replacingOccurrences(of: ":", with: "")
+            .uppercased()
+    }
+}
+
 /// Why a take ended early or couldn't start. It stays until dismissed, because it's often read
 /// after the fact.
 struct TakeAlert: Equatable {
@@ -210,6 +229,9 @@ final class AppModel: ObservableObject {
 
     var showsFullView: Bool { fullView && widescreen }
 
+    /// The shutter as a share of the frame time.
+    var shutterAngleLabel: String { "\(Int((360 * frameRate / pow(2, shutterStops)).rounded()))°" }
+
     var isoRange: ClosedRange<Double> {
         let range = options?.isoRange ?? 57...12768
         return Double(range.lowerBound)...Double(range.upperBound)
@@ -322,22 +344,9 @@ final class AppModel: ObservableObject {
         return "RAW 14 › \(curveLabel) › \(encoderPreset.label.uppercased())"
     }
 
-    var curveLabel: String {
-        switch processing.curve {
-        case .appleLog: return "ALOG"
-        case .sLog3: return "SLOG3"
-        case .logC3: return "LOGC3"
-        }
-    }
+    var curveLabel: String { processing.curve.shortLabel }
 
-    var codecLabel: String {
-        guard recordEncoded else { return "RAW" }
-        return encoderPreset.label
-            .replacingOccurrences(of: "ProRes ", with: "")
-            .replacingOccurrences(of: "10-bit ", with: "")
-            .replacingOccurrences(of: ":", with: "")
-            .uppercased()
-    }
+    var codecLabel: String { recordEncoded ? encoderPreset.shortLabel : "RAW" }
 
     /// What the monitor shows. A LUT replaces Rec.709, so it takes that label.
     var monitorLabel: String {
@@ -388,12 +397,10 @@ final class AppModel: ObservableObject {
         return String(format: "%d:%02d:%02d", recordElapsed / 3600, minutes, seconds)
     }
 
-    /// Only said when it isn't normal.
-    var showsHeat: Bool { status.thermal != "NOMINAL" && status.thermal != "-" }
-
     var heatLabel: String {
         switch status.thermal {
-        case "NOMINAL": return "OK"
+        case "nominal": return "OK"
+        case "fair": return "FAIR"
         case "SERIOUS": return "HOT"
         case "CRITICAL": return "CRIT"
         default: return status.thermal
