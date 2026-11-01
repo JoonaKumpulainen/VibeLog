@@ -16,6 +16,9 @@ public enum StillExporter {
         var curve: String
         var demosaic: String
         var exposureStops: Double
+        var shutterSeconds: Double
+        var iso: Float
+        var whiteBalanceGains: [Float]
         var width: Int
         var height: Int
         var centerSpot: Spot
@@ -43,7 +46,9 @@ public enum StillExporter {
 
         let summary = Summary(
             curve: curve.label, demosaic: still.settings.demosaic.label,
-            exposureStops: still.settings.exposureStops, width: still.width, height: still.height,
+            exposureStops: still.settings.exposureStops, shutterSeconds: still.exposureSeconds,
+            iso: still.iso, whiteBalanceGains: still.whiteBalanceGains, width: still.width,
+            height: still.height,
             centerSpot: spot)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

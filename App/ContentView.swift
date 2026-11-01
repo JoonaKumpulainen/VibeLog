@@ -74,8 +74,8 @@ struct DebugOverlay: View {
             line(String(format: "fps %.2f now  %.2f sustained  n=%d", stats.rollingFPS, stats.sustainedFPS, stats.frames))
             line(String(format: "gap ms med %.1f p95 %.1f max %.1f", stats.gapMedianMs, stats.gapP95Ms, stats.gapMaxMs))
             line(String(
-                format: "gpu %.1f ms avg %.1f max  done %d drop %d", model.pipelineStats.gpuLastMs,
-                model.pipelineStats.gpuAverageMs, model.pipelineStats.processed, model.pipelineStats.dropped))
+                format: "gpu %.1f ms now %.1f max  done %d drop %d", model.pipelineStats.gpuRecentMs,
+                model.pipelineStats.gpuMaxMs, model.pipelineStats.processed, model.pipelineStats.dropped))
             line("drops cap \(stats.captureDrops) writer \(stats.writerDrops) fail \(stats.captureFailures) missed~\(stats.estimatedMissed)")
             line(frameLine)
             line("thermal \(model.status.thermal)  mem \(model.status.footprintMB) MB  avail \(model.status.availableMB) MB")

@@ -324,9 +324,10 @@ final class AppModel: ObservableObject {
             if ticksSinceReport >= 5 {
                 ticksSinceReport = 0
                 Log.shared.info(String(
-                    format: "Recording: %.2f fps now, n=%d, writer drops %d, gpu %d done %d dropped %.1f avg %.1f max ms, mem %d MB, avail %d MB, thermal %@, free %d GB",
-                    stats.rollingFPS, stats.frames, stats.writerDrops, gpu.processed, gpu.dropped,
-                    gpu.gpuAverageMs, gpu.gpuMaxMs, status.footprintMB, status.availableMB,
+                    format: "Recording: %.2f fps now, n=%d, fail %d, writer drops %d, gpu %d done %d dropped %.1f recent %.1f max ms, mem %d MB, avail %d MB, thermal %@, free %d GB",
+                    stats.rollingFPS, stats.frames, stats.captureFailures, stats.writerDrops,
+                    gpu.processed, gpu.dropped, gpu.gpuRecentMs, gpu.gpuMaxMs,
+                    status.footprintMB, status.availableMB,
                     status.thermal, status.freeDiskGB))
             }
         }

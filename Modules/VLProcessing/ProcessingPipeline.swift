@@ -50,6 +50,7 @@ public struct PipelineStats: Sendable {
     public var dropped = 0
     public var gpuLastMs = 0.0
     public var gpuAverageMs = 0.0
+    public var gpuRecentMs = 0.0
     public var gpuMaxMs = 0.0
 
     public init() {}
@@ -61,6 +62,9 @@ public struct ProcessedStill: Sendable {
     public var width: Int
     public var height: Int
     public var settings: ProcessingSettings
+    public var exposureSeconds: Double
+    public var iso: Float
+    public var whiteBalanceGains: [Float]
 }
 
 // Must match ProcessParams in Shaders.metal.
@@ -85,6 +89,9 @@ private struct MonitorParams {
 
 /// Turns Bayer frames into log Rec.2020 on the GPU and shows the result. When work backs up
 /// it drops frames and counts them rather than stalling capture.
+///
+/// Frames are copied into GPU memory first. Holding capture buffers for the length of a GPU
+/// pass made photo requests fail, so they go back to the camera within a few milliseconds.
 public final class ProcessingPipeline: NSObject {
     public let device: MTLDevice
 
@@ -96,7 +103,6 @@ public final class ProcessingPipeline: NSObject {
     private let processState: MTLComputePipelineState
     private let monitorState: MTLRenderPipelineState
     private let encodeQueue = DispatchQueue(label: "vibelog.process", qos: .userInitiated)
-    private var textureCache: CVMetalTextureCache?
     private weak var view: MTKView?
 
     private let lock = NSLock()
@@ -106,6 +112,8 @@ public final class ProcessingPipeline: NSObject {
     private var clipValue: Float = 14271
     private var cachedMatrix: (gains: [Float], matrix: simd_double3x3)?
     private var inFlight = 0
+    private var inputs: [MTLTexture] = []
+    private var nextInput = 0
     private var outputs: [MTLTexture] = []
     private var nextOutput = 0
     private var latest: MTLTexture?
@@ -141,7 +149,6 @@ public final class ProcessingPipeline: NSObject {
             return nil
         }
         super.init()
-        CVMetalTextureCacheCreate(nil, nil, device, nil, &textureCache)
     }
 
     public func attach(to view: MTKView) {
@@ -205,31 +212,69 @@ public final class ProcessingPipeline: NSObject {
         }
         inFlight += 1
         lock.unlock()
-        encodeQueue.async { [self] in process(frame, cfa: cfa) }
+        encodeQueue.async { [self] in
+            guard let input = copyToInput(frame) else {
+                logOnce("Cannot copy the RAW buffer to the GPU")
+                finishFrame(nil)
+                return
+            }
+            let capture = (frame.exposureSeconds, frame.iso, frame.whiteBalanceGains)
+            // A separate step, so the capture buffer is released before any slow setup.
+            encodeQueue.async { [self] in process(input, cfa: cfa, capture: capture) }
+        }
     }
 
-    private func process(_ frame: RawFrame, cfa: CFAPattern) {
-        guard let cache = textureCache, let output = takeOutput(width: frame.width, height: frame.height),
-            let commands = queue.makeCommandBuffer()
+    private func copyToInput(_ frame: RawFrame) -> MTLTexture? {
+        guard let input = takeInput(width: frame.width, height: frame.height),
+            let target = input.buffer?.contents(),
+            CVPixelBufferLockBaseAddress(frame.buffer, .readOnly) == kCVReturnSuccess
+        else { return nil }
+        defer { CVPixelBufferUnlockBaseAddress(frame.buffer, .readOnly) }
+        guard !CVPixelBufferIsPlanar(frame.buffer), let source = CVPixelBufferGetBaseAddress(frame.buffer) else {
+            return nil
+        }
+        let sourceStride = CVPixelBufferGetBytesPerRow(frame.buffer)
+        let rowBytes = min(sourceStride, input.bufferBytesPerRow)
+        if sourceStride == input.bufferBytesPerRow {
+            memcpy(target, source, rowBytes * frame.height)
+        } else {
+            for row in 0..<frame.height {
+                memcpy(target + row * input.bufferBytesPerRow, source + row * sourceStride, rowBytes)
+            }
+        }
+        return input
+    }
+
+    private func takeInput(width: Int, height: Int) -> MTLTexture? {
+        lock.lock()
+        defer { lock.unlock() }
+        if inputs.first?.width != width || inputs.first?.height != height {
+            let alignment = device.minimumLinearTextureAlignment(for: .r16Uint)
+            let stride = (width * 2 + alignment - 1) / alignment * alignment
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: .r16Uint, width: width, height: height, mipmapped: false)
+            descriptor.usage = .shaderRead
+            descriptor.storageMode = .shared
+            inputs = (0..<Self.outputCount).compactMap { _ in
+                device.makeBuffer(length: stride * height, options: .storageModeShared)?
+                    .makeTexture(descriptor: descriptor, offset: 0, bytesPerRow: stride)
+            }
+        }
+        guard inputs.count == Self.outputCount else { return nil }
+        nextInput = (nextInput + 1) % Self.outputCount
+        return inputs[nextInput]
+    }
+
+    private func process(_ input: MTLTexture, cfa: CFAPattern, capture: (Double, Float, [Float])) {
+        guard let output = takeOutput(width: input.width, height: input.height),
+            let commands = queue.makeCommandBuffer(),
+            encode(into: commands, input: input, output: output, cfa: cfa, gains: capture.2)
         else {
             finishFrame(nil)
             return
         }
-        var wrapped: CVMetalTexture?
-        let status = CVMetalTextureCacheCreateTextureFromImage(
-            nil, cache, frame.buffer, nil, .r16Uint, frame.width, frame.height, 0, &wrapped)
-        guard status == kCVReturnSuccess, let wrapped, let input = CVMetalTextureGetTexture(wrapped) else {
-            logOnce("Cannot wrap the RAW buffer as a texture (status \(status))")
-            finishFrame(nil)
-            return
-        }
-        guard encode(into: commands, input: input, output: output, cfa: cfa, gains: frame.whiteBalanceGains) else {
-            finishFrame(nil)
-            return
-        }
-        let still = encodeStillReadback(commands, output: output)
+        let still = encodeStillReadback(commands, output: output, capture: capture)
         commands.addCompletedHandler { [self] finished in
-            withExtendedLifetime((wrapped, frame)) {}
             let milliseconds = (finished.gpuEndTime - finished.gpuStartTime) * 1000
             finishFrame(finished.status == .completed ? output : nil, gpuMs: milliseconds)
             still?()
@@ -309,7 +354,9 @@ public final class ProcessingPipeline: NSObject {
         return descriptor
     }
 
-    private func encodeStillReadback(_ commands: MTLCommandBuffer, output: MTLTexture) -> (() -> Void)? {
+    private func encodeStillReadback(
+        _ commands: MTLCommandBuffer, output: MTLTexture, capture: (Double, Float, [Float])
+    ) -> (() -> Void)? {
         lock.lock()
         let request = stillRequest
         stillRequest = nil
@@ -334,7 +381,9 @@ public final class ProcessingPipeline: NSObject {
         let height = output.height
         return {
             let pixels = Data(bytes: buffer.contents(), count: buffer.length)
-            request(ProcessedStill(pixels: pixels, width: width, height: height, settings: current))
+            request(ProcessedStill(
+                pixels: pixels, width: width, height: height, settings: current,
+                exposureSeconds: capture.0, iso: capture.1, whiteBalanceGains: capture.2))
         }
     }
 
@@ -348,6 +397,7 @@ public final class ProcessingPipeline: NSObject {
             stats.gpuLastMs = gpuMs
             gpuTotalMs += gpuMs
             stats.gpuAverageMs = gpuTotalMs / Double(stats.processed)
+            stats.gpuRecentMs = stats.processed == 1 ? gpuMs : stats.gpuRecentMs * 0.95 + gpuMs * 0.05
             stats.gpuMaxMs = max(stats.gpuMaxMs, gpuMs)
             schedule = !drawScheduled && settings.monitor != .isp
             if schedule { drawScheduled = true }
