@@ -83,8 +83,8 @@ public enum StillExporter {
         let height = still.height / 2
         var output = Data(count: width * height * 4)
         let curve = still.settings.curve
-        still.pixels.withUnsafeBytes { bytes in
-            output.withUnsafeMutableBytes { target in
+        still.pixels.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) in
+            output.withUnsafeMutableBytes { (target: UnsafeMutableRawBufferPointer) in
                 for y in 0..<height {
                     for x in 0..<width {
                         let color = MonitorTransform.display(
