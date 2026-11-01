@@ -102,6 +102,7 @@ The rule for this phase: anything that adds to real-time GPU load must prove it 
 ## Phase 7: shooting tools
 
 - Focus peaking and a focus punch-in: done.
+- Focus peaking sensitivity: a low and high switch in Settings, so it's there but out of the way. Not built.
 - RAW histogram, waveform and vectorscope.
 - Horizon indicator, using the Phase 6 motion data.
 - Frame guides, a 3x3 grid and anamorphic desqueeze.
