@@ -7,7 +7,8 @@ import VLCore
 /// photo into a RawFrame.
 final class PhotoRawDriver: NSObject {
     var onFrame: ((RawFrame) -> Void)?
-    var onFailure: ((String) -> Void)?
+    /// The flag says whether this failure should be logged.
+    var onFailure: ((String, Bool) -> Void)?
     var onReference: ((Data?, [String: Any]) -> Void)?
 
     private let output: AVCapturePhotoOutput
@@ -18,11 +19,16 @@ final class PhotoRawDriver: NSObject {
     private let bracketCount: Int
     private let queue = DispatchQueue(label: "vibelog.photo-loop", qos: .userInitiated)
     private let maxInFlight = 4
+    /// Keeps requests from outrunning the 30 fps sensor when several events trigger one.
+    private let minimumRequestInterval = 0.030
 
     private var running = false
     private var inFlight = 0
     private var wantReference = false
     private var lastEvent = Date()
+    private var lastRequest = Date.distantPast
+    private var retryScheduled = false
+    private var failureCounts: [Int: Int] = [:]
     private var watchdog: DispatchSourceTimer?
     private var coordinator: AVCapturePhotoOutputReadinessCoordinator?
 
@@ -43,6 +49,7 @@ final class PhotoRawDriver: NSObject {
             running = true
             inFlight = 0
             lastEvent = Date()
+            failureCounts = [:]
             if method == .photoReadiness {
                 let coordinator = AVCapturePhotoOutputReadinessCoordinator(photoOutput: output)
                 coordinator.delegate = self
@@ -124,10 +131,28 @@ final class PhotoRawDriver: NSObject {
         }
         if let exception {
             running = false
-            onFailure?("capturePhoto raised \(exception.name.rawValue): \(exception.reason ?? "")")
+            onFailure?("capturePhoto raised \(exception.name.rawValue): \(exception.reason ?? "")", true)
             return
         }
         inFlight += 1
+        lastRequest = Date()
+    }
+
+    /// Runs on `queue`. Readiness callbacks arrive on the main thread, so capture events
+    /// also trigger requests and UI work cannot delay the next frame.
+    private func requestWhenReady() {
+        guard running, inFlight < maxInFlight else { return }
+        let wait = minimumRequestInterval - Date().timeIntervalSince(lastRequest)
+        if wait > 0 {
+            guard !retryScheduled else { return }
+            retryScheduled = true
+            queue.asyncAfter(deadline: .now() + wait) { [self] in
+                retryScheduled = false
+                requestWhenReady()
+            }
+        } else if output.captureReadiness == .ready {
+            fire()
+        }
     }
 
     private func finishedRequest() {
@@ -135,10 +160,21 @@ final class PhotoRawDriver: NSObject {
             inFlight = max(0, inFlight - 1)
             lastEvent = Date()
             if method == .photoReadiness {
-                if output.captureReadiness == .ready { fire() }
+                requestWhenReady()
             } else {
                 fire()
             }
+        }
+    }
+
+    /// Reports the first failure of each code and then every 50th, to keep the log readable.
+    private func reportFailure(_ error: NSError) {
+        queue.async { [self] in
+            let count = (failureCounts[error.code] ?? 0) + 1
+            failureCounts[error.code] = count
+            let underlying = (error.userInfo[NSUnderlyingErrorKey] as? NSError)?.code ?? 0
+            let message = "Photo failed: \(error.domain) \(error.code), underlying \(underlying), count \(count)"
+            onFailure?(message, count == 1 || count % 50 == 0)
         }
     }
 }
@@ -150,6 +186,9 @@ extension PhotoRawDriver: AVCapturePhotoCaptureDelegate {
     ) {
         // Removes the shutter sound on iOS 17, where suppression has no public API.
         AudioServicesDisposeSystemSoundID(1108)
+        if method == .photoReadiness {
+            queue.async { [self] in requestWhenReady() }
+        }
     }
 
     func photoOutput(
@@ -157,12 +196,11 @@ extension PhotoRawDriver: AVCapturePhotoCaptureDelegate {
         error: Error?
     ) {
         if let error {
-            let details = error as NSError
-            onFailure?("Photo failed: \(details.domain) \(details.code) \(details.localizedDescription) \(details.userInfo)")
+            reportFailure(error as NSError)
             return
         }
         guard let buffer = photo.pixelBuffer else {
-            onFailure?("Photo has no pixelBuffer (isRawPhoto=\(photo.isRawPhoto))")
+            onFailure?("Photo has no pixelBuffer (isRawPhoto=\(photo.isRawPhoto))", true)
             return
         }
         let gains = device.deviceWhiteBalanceGains
@@ -196,7 +234,7 @@ extension PhotoRawDriver: AVCapturePhotoOutputReadinessCoordinatorDelegate {
         guard captureReadiness == .ready else { return }
         queue.async { [self] in
             lastEvent = Date()
-            fire()
+            requestWhenReady()
         }
     }
 }

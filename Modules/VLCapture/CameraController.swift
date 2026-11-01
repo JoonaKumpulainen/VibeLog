@@ -356,8 +356,8 @@ public final class CameraController: NSObject {
             output: output, device: device, method: options.config.method, rawFormat: raw,
             size: size, bracketCount: options.config.bracketCount)
         driver.onFrame = { [weak self] in self?.onFrame?($0) }
-        driver.onFailure = { [weak self] message in
-            Log.shared.error(message)
+        driver.onFailure = { [weak self] message, shouldLog in
+            if shouldLog { Log.shared.error(message) }
             self?.onCaptureFailure?(message)
         }
         driver.onReference = { [weak self] data, metadata in self?.onReference?(data, metadata) }

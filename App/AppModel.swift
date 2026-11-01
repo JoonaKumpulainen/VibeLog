@@ -62,6 +62,7 @@ final class AppModel: ObservableObject {
     private var recordDeadline: Date?
     private var started = false
     private var ticksSinceReport = 0
+    private let statsQueue = DispatchQueue(label: "vibelog.stats", qos: .utility)
 
     func onAppear() {
         guard !started else { return }
@@ -81,7 +82,7 @@ final class AppModel: ObservableObject {
         ) { _ in
             Log.shared.warn("Thermal state changed to \(SystemStatus.thermalName)")
         }
-        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             self?.tick()
         }
 
@@ -270,16 +271,25 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Measures off the main thread, which capture readiness callbacks depend on.
     private func tick() {
-        stats = router.stats.snapshot()
-        status = SystemLine(
-            thermal: SystemStatus.thermalName,
-            footprintMB: SystemStatus.footprint / 1_000_000,
-            availableMB: SystemStatus.availableMemory / 1_000_000,
-            freeDiskGB: Int(SystemStatus.freeDisk / 1_000_000_000))
+        statsQueue.async { [self] in
+            let snapshot = router.stats.snapshot()
+            let line = SystemLine(
+                thermal: SystemStatus.thermalName,
+                footprintMB: SystemStatus.footprint / 1_000_000,
+                availableMB: SystemStatus.availableMemory / 1_000_000,
+                freeDiskGB: Int(SystemStatus.freeDisk / 1_000_000_000))
+            DispatchQueue.main.async { [self] in show(snapshot, line) }
+        }
+    }
+
+    private func show(_ snapshot: FrameStats.Snapshot, _ line: SystemLine) {
+        stats = snapshot
+        status = line
         if isRecording {
             ticksSinceReport += 1
-            if ticksSinceReport >= 10 {
+            if ticksSinceReport >= 5 {
                 ticksSinceReport = 0
                 Log.shared.info(String(
                     format: "Recording: %.2f fps now, n=%d, writer drops %d, mem %d MB, avail %d MB, thermal %@, free %d GB",
