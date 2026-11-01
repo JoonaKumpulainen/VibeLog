@@ -103,6 +103,7 @@ For vignette correction, also ask for a short RAW clip's `reference.dng` and `re
 - **Needs samples first:** vignette correction needs a real `reference.dng` to find the `FixVignetteRadial` values, and highlight reconstruction needs clips with clipped highlights. Color accuracy needs a chart. Any real-time GPU work then needs a frame-cost test.
 - **Needs the phone:** lens tests, the stabilization check and focus while recording.
 - **Requested, not built:** a low and high focus peaking switch in Settings, kept out of the way on purpose rather than on the **PEAK** button. Today's threshold is the fixed 0.1 in `monitorFragment`, so it needs a `MonitorParams` field. Only the threshold changes, so it adds no GPU work.
+- **Requested, not built:** pause the viewfinder stream while Settings is open, to save heat and battery. `openLastTake` and `closeLastTake` already stop and resume the stream this way. Diagnostics opens from Settings and its tools use the stream, so they must keep working.
 - **Not started:** shutter priority, which needs an ISO loop during capture and its own frame-cost test, auto exposure with an EV slider, external microphones and file tagging options.
 
 ### How the camera screen works
