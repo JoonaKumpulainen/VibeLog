@@ -169,7 +169,7 @@ struct Dial: View {
     let label: String
     let valueText: String
 
-    private let spacing = 8.0
+    private let spacing: CGFloat = 8
 
     init(
         value: Binding<Double>, range: ClosedRange<Double>, step: Double, label: String,
@@ -189,7 +189,7 @@ struct Dial: View {
             for offset in -halfCount...halfCount {
                 let tick = center + Double(offset)
                 guard range.contains(tick * step) else { continue }
-                let x = size.width / 2 + (tick - value / step) * spacing
+                let x = size.width / 2 + CGFloat(tick - value / step) * spacing
                 let major = Int(tick) % 6 == 0
                 let height = major ? size.height * 0.55 : size.height * 0.3
                 var path = Path()
@@ -207,7 +207,7 @@ struct Dial: View {
                 .onChanged { drag in
                     let start = dragStart ?? value
                     dragStart = start
-                    let moved = start - Double(drag.translation.width) / spacing * step
+                    let moved = start - Double(drag.translation.width / spacing) * step
                     value = min(max(moved, range.lowerBound), range.upperBound)
                 }
                 .onEnded { _ in dragStart = nil }
