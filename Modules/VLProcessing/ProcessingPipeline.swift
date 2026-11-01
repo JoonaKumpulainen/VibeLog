@@ -1,3 +1,4 @@
+import CoreMedia
 import CoreVideo
 import Metal
 import MetalKit
