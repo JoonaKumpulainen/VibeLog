@@ -50,6 +50,12 @@ final class AppModel: ObservableObject {
     @Published var recordElapsed = 0
     /// Megabytes per second written so far in this recording.
     @Published var dataRate = 0.0
+    @Published var showTelemetry = true
+    @Published var mainsHz = 50
+    @Published var toolbar: [Tool] = []
+    @Published private(set) var activeTools: Set<Tool> = [] {
+        didSet { hold.tracksLevel = activeTools.contains(.level) }
+    }
 
     /// Zero records until stopped.
     @Published var recordSeconds = 0.0
@@ -71,8 +77,8 @@ final class AppModel: ObservableObject {
 
     var shutterLabel: String { "1/\(Int(pow(2, shutterStops).rounded()))" }
 
-    /// Slowest shutter that keeps 30 fps, as log2 of the denominator.
-    static let slowestShutterStops = 4.91
+    /// The capture rate. Only 30 fps is proven so far.
+    let frameRate = 30.0
 
     private enum Control { case exposure, bias, whiteBalance, focus }
 
@@ -96,6 +102,7 @@ final class AppModel: ObservableObject {
     private var hasReference = false
     private var pendingControls: Set<Control> = []
     private var recordingFile: URL?
+    private var savedConfig: AppConfig?
     private var ticksSinceReport = 0
     private var recordStart = Date()
     private var recordStarting = false
@@ -107,6 +114,7 @@ final class AppModel: ObservableObject {
         router.pipeline = pipeline
         SystemStatus.enableBatteryMonitoring()
         refreshLUTs()
+        loadConfig()
         router.onRecordingElapsed = { [weak self] in
             DispatchQueue.main.async { self?.stopRecording() }
         }
@@ -172,6 +180,118 @@ final class AppModel: ObservableObject {
     }
 
     var outputLabel: String { outputSize.label }
+
+    var isoRange: ClosedRange<Double> {
+        let range = options?.isoRange ?? 57...12768
+        return Double(range.lowerBound)...Double(range.upperBound)
+    }
+
+    var isHot: Bool { status.thermal == "SERIOUS" || status.thermal == "CRITICAL" }
+
+    var currentLensLabel: String {
+        lenses.first { $0.id == lensID }?.zoomLabel ?? "1x"
+    }
+
+    /// Lens changes rebuild the capture session, which would end a recording.
+    func nextLens() {
+        guard !isRecording, lenses.count > 1 else { return }
+        let ordered = lenses.sorted { $0.zoom < $1.zoom }
+        let index = ordered.firstIndex { $0.id == lensID } ?? 0
+        lensID = ordered[(index + 1) % ordered.count].id
+    }
+
+    func isOn(_ tool: Tool) -> Bool {
+        switch tool {
+        case .zebras: return processing.overlay == .zebras
+        case .falseColor: return processing.overlay == .falseColor
+        default: return activeTools.contains(tool)
+        }
+    }
+
+    func toggle(_ tool: Tool) {
+        switch tool {
+        case .zebras: processing.overlay = processing.overlay == .zebras ? .none : .zebras
+        case .falseColor: processing.overlay = processing.overlay == .falseColor ? .none : .falseColor
+        default:
+            if activeTools.contains(tool) { activeTools.remove(tool) } else { activeTools.insert(tool) }
+        }
+    }
+
+    func setTool(_ tool: Tool, inToolbar: Bool) {
+        if inToolbar {
+            toolbar = Tool.allCases.filter { toolbar.contains($0) || $0 == tool }
+        } else {
+            toolbar.removeAll { $0 == tool }
+        }
+    }
+
+    private var config: AppConfig {
+        var config = AppConfig()
+        config.codec = encoderPreset.id
+        config.size = encoderSize.label
+        config.widescreen = widescreen
+        config.stopAfterSeconds = recordSeconds
+        config.logCurve = processing.curve.label
+        config.pipeline = processing.pipeline.rawValue
+        config.debayer = processing.demosaic.label
+        config.exposureOffset = processing.exposureStops
+        config.reduceLoadWhenHot = processing.reduceLoadWhenHot
+        config.monitor = processing.monitor.rawValue
+        config.monitorLUT = selectedLUT
+        config.lutExpectsRec709 = processing.lutExpectsRec709
+        config.monitorOffWhileRecording = processing.pauseMonitorWhileRecording
+        config.telemetry = showTelemetry
+        config.mainsHz = mainsHz
+        config.toolbar = toolbar.map(\.rawValue)
+        config.activeTools = activeTools.map(\.rawValue).sorted()
+        return config
+    }
+
+    /// A file that can't be read is kept beside the new one, so hand edits aren't lost.
+    private func loadConfig() {
+        var loaded = AppConfig()
+        if FileManager.default.fileExists(atPath: Storage.config.path) {
+            do {
+                loaded = try AppConfig.load(from: Storage.config)
+            } catch {
+                Log.shared.error("Cannot read VibeLog.config.json: \(error)")
+                try? FileManager.default.moveItem(
+                    at: Storage.config, to: Storage.config.appendingPathExtension("invalid"))
+            }
+        }
+        encoderPreset = EncoderPreset.all.first { $0.id == loaded.codec } ?? encoderPreset
+        encoderSize = EncoderSize.all.first { $0.label == loaded.size } ?? encoderSize
+        widescreen = loaded.widescreen
+        recordSeconds = loaded.stopAfterSeconds
+        processing.curve = LogCurve.allCases.first { $0.label == loaded.logCurve } ?? processing.curve
+        processing.pipeline = PipelineMode(rawValue: loaded.pipeline) ?? processing.pipeline
+        processing.demosaic = DemosaicMethod.allCases.first { $0.label == loaded.debayer } ?? processing.demosaic
+        processing.exposureStops = loaded.exposureOffset
+        processing.reduceLoadWhenHot = loaded.reduceLoadWhenHot
+        processing.monitor = MonitorMode(rawValue: loaded.monitor) ?? processing.monitor
+        if lutNames.contains(loaded.monitorLUT) { selectedLUT = loaded.monitorLUT }
+        processing.lutExpectsRec709 = loaded.lutExpectsRec709
+        processing.pauseMonitorWhileRecording = loaded.monitorOffWhileRecording
+        showTelemetry = loaded.telemetry
+        mainsHz = loaded.mainsHz
+        toolbar = loaded.toolbar.compactMap(Tool.init(rawValue:))
+        activeTools = Set(loaded.activeTools.compactMap(Tool.init(rawValue:)))
+        savedConfig = config
+    }
+
+    /// Writes only after a change, and never during a take.
+    private func saveConfigIfChanged() {
+        let current = config
+        guard !isRecording, current != savedConfig else { return }
+        savedConfig = current
+        statsQueue.async {
+            do {
+                try current.save(to: Storage.config)
+            } catch {
+                Log.shared.error("Cannot save VibeLog.config.json: \(error)")
+            }
+        }
+    }
 
     /// The real chain, from sensor to file.
     var signalPath: String {
@@ -289,7 +409,7 @@ final class AppModel: ObservableObject {
         if !exposureLocked {
             iso = live.iso
             if live.seconds > 0 {
-                shutterStops = min(max(log2(1 / live.seconds), Self.slowestShutterStops), 13)
+                shutterStops = min(max(log2(1 / live.seconds), log2(frameRate)), 13)
             }
         }
         if !whiteBalanceLocked {
@@ -602,6 +722,7 @@ final class AppModel: ObservableObject {
 
     /// Measures off the main thread, which capture readiness callbacks depend on.
     private func tick() {
+        saveConfigIfChanged()
         let battery = SystemStatus.batteryText
         let file = recordingFile
         let seconds = Date().timeIntervalSince(recordStart)

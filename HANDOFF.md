@@ -65,31 +65,34 @@ Modules are dynamic frameworks. Swift is in Swift 5 mode.
 
 ## Now: Phase 5
 
-The owner approved a redesign called the precision instrument: a large centered picture, small smoked glass panels, monospaced values and a live signal path. The stages are: glass shell and orientation, snapping dials, format panel and searchable settings, 24 and 25 fps, then warnings, library, accessibility and a 10-minute test. Gyro logging to a Gyroflow `.gcsv` follows as its own change once that test passes. Stage 1 is confirmed on the phone. `VLCapture` gained focus and exposure points, exposure compensation and live values for direct control. Other module code is unchanged.
+The owner approved a redesign called the precision instrument: the picture sits under the Dynamic Island and every control lives on black beneath it, with nothing overlapping. Icons, monospaced values and even spacing. Glass was dropped: it added no clarity, and flat black can't cost frames. Done so far: layout, orientation tagging, snapping dials with a fine mode, and a saved config. Still to do: format panel and searchable settings, 24 and 25 fps, warnings, library, accessibility and a 10-minute test. Gyro logging to a Gyroflow `.gcsv` follows as its own change once that test passes. Stage 1 is confirmed on the phone. `VLCapture` gained focus and exposure points, exposure compensation and live values for direct control. Other module code is unchanged.
 
 Diagnostics opens with a long press on **Version** in Settings.
 
 ## Adjusting the camera while recording
 
-From one 46-second control test at ProRes 422 HQ, 30 fps, indoors. Each change got a 4-second window, which should hold 120 frames.
+From two 46-second control tests at 30 fps. The first ran at nominal heat, the second at serious heat and 16:9, so they aren't direct comparisons. Windows should hold 30 frames per second.
 
-| Change during the take | Frames in the window | Result |
-|---|---|---|
-| Lens position jump to 0.2, then 0.9 | 119, 120 | Clean, at most 1 frame lost |
-| Switch to continuous autofocus | 112 | **Lost 8 frames, a 267 ms gap, with no photo failure.** The owner saw stutter |
-| Exposure 1/60 ISO 200, then 1/120 ISO 400, then auto | 120, 120, 120 | Clean |
-| White balance 3200 K, then 6500 K, then auto | 120, 120, 120 | Clean |
+| Change during the take | Frames | Expected | Result |
+|---|---|---|---|
+| Lens position jump | 119, 120 | 120 | Clean |
+| Tap focus, center and corner | 116, 113 | 120 | Lost 4 and 7, with a 233 ms gap |
+| Focus rack at dial speed, 10 changes a second | 32 | 61 | **Lost 29 frames** |
+| Switch to continuous autofocus | 112 | 120 | Lost 8, with a 267 ms gap |
+| ISO ramp at dial speed, 200 to 400 | 61 | 61 | Clean |
+| Exposure steps and return to auto | 120, 120, 120, 60, 119 | 120, 120, 120, 60, 120 | Clean |
+| White balance steps and return to auto | 120, 120, 120 | 120 | Clean |
 
-Encoder drops were 0. The test holds one run of each, and a second control test measures tap focus, a dial-speed focus rack and ISO ramp, exposure bias, and metering.
-
-- **While recording, allowed:** ISO, shutter and white balance dials, the focus dial, Monitor and Exposure tool.
-- **While recording, blocked:** switching on continuous autofocus. Tap focus and exposure drag stay off until the second test.
-- **Must stay locked:** lens and capture settings, because any change rebuilds the session and ends the take. Curve, exposure offset, debayer, crop and pipeline, because they're baked in and the clip's metadata is written at the start.
-- **Shutter:** dials stop at 1/30 s, which is the slowest that keeps 30 fps. Auto exposure in low light hasn't been tested for this.
-- **Not settled:** continuous autofocus that's already on when recording starts showed no hole in 8 seconds, but it wasn't hunting. Per-frame ISO, shutter and white balance values are read from the device when a photo arrives, so they can lag the frame. White balance gains are baked into the debayer, so auto drift is recorded for good. The RAW frames have no correction for focus breathing.
-- **Streaming before a recording:** 19 failed photos and a 575 ms gap appeared while Settings and Diagnostics were open, with none of that in the takes. Check whether sheets cost frames.
+- **Allowed during a take:** ISO, shutter and white balance dials, and monitor tools.
+- **Blocked during a take:** every focus change, and exposure drag, because bias was cut short by the writer failure.
+- **Must stay locked:** lens and capture settings, because any change rebuilds the session. Curve, exposure offset, debayer, crop and pipeline, because they're baked in and the clip's metadata is written at the start.
+- **Not settled:** continuous autofocus already on when recording starts, which may stutter when it refocuses. Per-frame ISO, shutter and white balance values are read when a photo arrives, so they can lag the frame. White balance gains are baked into the debayer. The RAW frames have no focus breathing correction.
 
 The ISP monitor removes the Metal view, so it stays in Settings. Keep SwiftUI updates to about once a second while recording, and avoid continuous animations, because main-thread load has cost frames before.
+
+## Encoder failures
+
+Two takes ended with `-11800`, underlying `-16364`, after 92 and 820 frames, both at serious heat. It appeared after the move to Xcode 26 and is unconfirmed. Community reports link `-16364` to timestamps that don't advance. The encoder now drops any frame that doesn't advance and logs it, and a failure logs timestamps, rotation, heat and free space. If it returns with no out-of-order frames logged, timestamps are ruled out.
 
 ## Known simulator limits
 

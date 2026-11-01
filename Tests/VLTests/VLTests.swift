@@ -793,3 +793,68 @@ final class RawRecorderTests: XCTestCase {
         wait(for: [done], timeout: 10)
     }
 }
+
+final class ExposureScalesTests: XCTestCase {
+    func testShutterFloorFollowsFrameRate() {
+        XCTAssertEqual(ExposureScales.shutterStops(fps: 24, mains: 50).first?.value, 24)
+        XCTAssertEqual(ExposureScales.shutterStops(fps: 25, mains: 50).first?.value, 25)
+        XCTAssertEqual(ExposureScales.shutterStops(fps: 30, mains: 50).first?.value, 30)
+    }
+
+    func testShutterHasNoStopBelowFrameRateAndHasHalfAngle() {
+        let values = ExposureScales.shutterStops(fps: 30, mains: 50).map(\.value)
+        XCTAssertTrue(values.allSatisfy { $0 >= 30 })
+        XCTAssertTrue(values.contains(60))
+        XCTAssertEqual(values, values.sorted())
+    }
+
+    func testFlickerSafeStopsFollowMains() {
+        let europe = ExposureScales.shutterStops(fps: 30, mains: 50).filter(\.isMajor).map(\.value)
+        let america = ExposureScales.shutterStops(fps: 30, mains: 60).filter(\.isMajor).map(\.value)
+        XCTAssertEqual(europe, [50, 100])
+        XCTAssertEqual(america, [60, 120])
+    }
+
+    func testIsoStopsStayInsideLensRange() {
+        let stops = ExposureScales.isoStops(range: 57...12768)
+        XCTAssertEqual(stops.first?.label, "BASE")
+        XCTAssertEqual(stops.first?.value, 57)
+        XCTAssertEqual(stops.last?.value, 12768)
+        XCTAssertEqual(ExposureScales.isoStops(range: 21...2688).first?.value, 21)
+    }
+
+    func testPositionInterpolatesAndClamps() {
+        let stops = ExposureScales.whiteBalanceStops()
+        XCTAssertEqual(ExposureScales.position(of: 2500, in: stops), 0)
+        XCTAssertEqual(ExposureScales.position(of: 1000, in: stops), 0)
+        XCTAssertEqual(ExposureScales.position(of: 9000, in: stops), Double(stops.count - 1))
+        XCTAssertEqual(ExposureScales.position(of: 3000, in: stops), 1.5, accuracy: 0.001)
+    }
+
+    func testFineStopsReachBothEnds() {
+        let stops = ExposureScales.fineStops(geometric: 30...8000, perStop: 6)
+        XCTAssertEqual(stops.first?.value, 30)
+        XCTAssertEqual(stops.last?.value ?? 0, 8000, accuracy: 100)
+    }
+}
+
+final class AppConfigTests: XCTestCase {
+    func testRoundTrip() throws {
+        var config = AppConfig()
+        config.codec = "prores4444"
+        config.toolbar = ["grid"]
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: url) }
+        try config.save(to: url)
+        XCTAssertEqual(try AppConfig.load(from: url), config)
+    }
+
+    func testMissingAndMistypedKeysKeepDefaults() throws {
+        let json = #"{"codec": "hevc420", "mainsHz": "sixty"}"#
+        let config = try JSONDecoder().decode(AppConfig.self, from: Data(json.utf8))
+        XCTAssertEqual(config.codec, "hevc420")
+        XCTAssertEqual(config.mainsHz, 50)
+        XCTAssertEqual(config.telemetry, true)
+    }
+}
+

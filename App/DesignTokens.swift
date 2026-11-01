@@ -5,56 +5,33 @@ enum Tokens {
     static let held = Color(red: 1, green: 0.71, blue: 0.28)
     /// Used only for recording.
     static let record = Color(red: 0.91, green: 0.21, blue: 0.17)
-    static let label = Color.white.opacity(0.62)
+    static let label = Color.white.opacity(0.55)
     static let value = Color(white: 0.95)
-    static let hairline = Color.white.opacity(0.22)
-    static let panelRadius: CGFloat = 7
+    static let hairline = Color.white.opacity(0.18)
 
     static let labelFont = Font.system(size: 10, weight: .medium, design: .monospaced)
-    static let valueFont = Font.system(size: 14, weight: .medium, design: .monospaced)
-    static let lineFont = Font.system(size: 11, weight: .medium, design: .monospaced)
+    static let valueFont = Font.system(size: 15, weight: .regular, design: .monospaced)
+    static let lineFont = Font.system(size: 11, weight: .regular, design: .monospaced)
+    static let icon = Font.system(size: 19, weight: .regular)
 }
 
-/// Smoked glass behind every control. Diagnostics can swap it for a flat fill, to measure what
-/// sampling the live picture costs during a recording.
-struct InstrumentPanel: ViewModifier {
-    @AppStorage("glassPanels") private var useGlass = true
+/// Where the picture and the controls sit, in portrait screen coordinates. Nothing overlaps: the
+/// picture takes the largest fit that leaves room for the controls beneath it.
+struct CameraGeometry {
+    let picture: CGRect
+    let band: CGRect
+    /// The band is too short for the toolbar and status line.
+    let isCompact: Bool
 
-    func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: Tokens.panelRadius)
-        Group {
-            if useGlass {
-                if #available(iOS 26.0, *) {
-                    content.glassEffect(.regular.tint(.black.opacity(0.45)), in: shape)
-                } else {
-                    content.background(.ultraThinMaterial, in: shape)
-                }
-            } else {
-                content.background(Color.black.opacity(0.62), in: shape)
-            }
-        }
-        .overlay(shape.strokeBorder(Tokens.hairline, lineWidth: 0.5))
-    }
-}
+    private static let smallestBand: CGFloat = 132
 
-extension View {
-    func instrumentPanel() -> some View { modifier(InstrumentPanel()) }
-}
-
-/// Corner brackets on the recorded area.
-struct FrameMarks: Shape {
-    func path(in rect: CGRect) -> Path {
-        let inset = rect.insetBy(dx: 10, dy: 10)
-        let arm: CGFloat = 14
-        var path = Path()
-        for (x, y, dx, dy) in [
-            (inset.minX, inset.minY, arm, arm), (inset.maxX, inset.minY, -arm, arm),
-            (inset.minX, inset.maxY, arm, -arm), (inset.maxX, inset.maxY, -arm, -arm),
-        ] {
-            path.move(to: CGPoint(x: x + dx, y: y))
-            path.addLine(to: CGPoint(x: x, y: y))
-            path.addLine(to: CGPoint(x: x, y: y + dy))
-        }
-        return path
+    init(screen: CGSize, top: CGFloat, bottom: CGFloat, widescreen: Bool) {
+        let aspect: CGFloat = widescreen ? 16.0 / 9 : 4.0 / 3
+        let room = screen.height - top - bottom - Self.smallestBand
+        let height = min(screen.width * aspect, room)
+        let width = height / aspect
+        picture = CGRect(x: (screen.width - width) / 2, y: top, width: width, height: height)
+        band = CGRect(x: 0, y: top + height, width: screen.width, height: screen.height - top - height)
+        isCompact = band.height - bottom < 210
     }
 }

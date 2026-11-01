@@ -9,7 +9,6 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var importingLUT = false
     @State private var showDiagnostics = false
-    @AppStorage("telemetry") private var showTelemetry = true
 
     var body: some View {
         NavigationStack {
@@ -17,6 +16,7 @@ struct SettingsView: View {
                 recording
                 image
                 monitor
+                tools
                 whiteBalance
                 Section {
                     LabeledContent("Version", value: Self.version)
@@ -112,7 +112,28 @@ struct SettingsView: View {
                 ForEach(ExposureOverlay.allCases) { Text($0.label).tag($0) }
             }
             Toggle("Monitor off while recording", isOn: $model.processing.pauseMonitorWhileRecording)
-            Toggle("Telemetry while recording", isOn: $showTelemetry)
+            Toggle("Telemetry while recording", isOn: $model.showTelemetry)
+            Picker("Mains", selection: $model.mainsHz) {
+                Text("50 Hz").tag(50)
+                Text("60 Hz").tag(60)
+            }
+        }
+    }
+
+    private var tools: some View {
+        Section {
+            ForEach(Tool.allCases) { tool in
+                Toggle(isOn: Binding(
+                    get: { model.toolbar.contains(tool) },
+                    set: { model.setTool(tool, inToolbar: $0) })
+                ) {
+                    Label(tool.title, systemImage: tool.symbol)
+                }
+            }
+        } header: {
+            Text("Toolbar")
+        } footer: {
+            Text("All choices save to VibeLog.config.json in the VibeLog folder. Edit it in the Files app, then reopen VibeLog.")
         }
     }
 

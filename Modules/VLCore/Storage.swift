@@ -12,6 +12,7 @@ public enum Storage {
     public static var stills: URL { folder("stills") }
     public static var videos: URL { folder("videos") }
     public static var luts: URL { folder("luts") }
+    public static var config: URL { documents.appendingPathComponent("VibeLog.config.json") }
     public static var benchmarks: URL { documents.appendingPathComponent("benchmarks.csv") }
 
     public static func timestamp(_ date: Date = Date()) -> String {

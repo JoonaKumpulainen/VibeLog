@@ -69,12 +69,14 @@ public final class VideoEncoder: VideoFrameSink {
     private var finished = false
     private var firstTime: CMTime?
     private var lastTime: CMTime?
+    private var lastAudioTime: CMTime?
     private var framesWritten = 0
     private var framesDropped = 0
     private var audioSamples = 0
     private var failureReported = false
     private var droppedNoBuffer = 0
     private var droppedNotReady = 0
+    private var droppedOutOfOrder = 0
     private var lastWrite = Date()
     /// Real-time input should never refuse frames for this long unless the encoder has stalled.
     private let stallSeconds = 3.0
@@ -165,6 +167,17 @@ public final class VideoEncoder: VideoFrameSink {
                 sessionStarted = true
                 firstTime = time
             }
+            // GPU completions can arrive out of order under load, and the writer fails for good
+            // on a timestamp that doesn't advance.
+            if let lastTime, time <= lastTime {
+                framesDropped += 1
+                droppedOutOfOrder += 1
+                if droppedOutOfOrder == 1 || droppedOutOfOrder % 50 == 0 {
+                    let behind = CMTimeGetSeconds(lastTime - time) * 1000
+                    Log.shared.warn("Dropped a frame \(behind) ms behind the last one, count \(droppedOutOfOrder)")
+                }
+                return
+            }
             if !config.realTime {
                 while !videoInput.isReadyForMoreMediaData, writer.status == .writing {
                     usleep(500)
@@ -189,7 +202,10 @@ public final class VideoEncoder: VideoFrameSink {
                 CMSampleBufferGetPresentationTimeStamp(sample) >= firstTime,
                 audioInput.isReadyForMoreMediaData
             else { return }
-            if audioInput.append(sample) { audioSamples += 1 }
+            if audioInput.append(sample) {
+                audioSamples += 1
+                lastAudioTime = CMSampleBufferGetPresentationTimeStamp(sample)
+            }
         }
     }
 
@@ -234,7 +250,12 @@ public final class VideoEncoder: VideoFrameSink {
     private func reportFailure() {
         guard !failureReported, writer.status == .failed else { return }
         failureReported = true
-        let message = writer.error.map { describe($0) } ?? "Writer failed"
+        let last = lastTime.map { CMTimeGetSeconds($0) } ?? 0
+        let audio = lastAudioTime.map { CMTimeGetSeconds($0) } ?? 0
+        let message = (writer.error.map { describe($0) } ?? "Writer failed")
+            + " after \(framesWritten) frames, last video \(last), last audio \(audio), "
+            + "\(droppedOutOfOrder) out of order, rotation \(config.rotationDegrees), "
+            + "thermal \(SystemStatus.thermalName), free \(SystemStatus.freeDisk / 1_000_000_000) GB"
         DispatchQueue.main.async { [self] in onFailure?(message) }
     }
 

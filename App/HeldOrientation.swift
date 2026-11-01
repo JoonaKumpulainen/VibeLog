@@ -31,6 +31,16 @@ enum Hold: Equatable {
         }
     }
 
+    /// Direction of gravity across the screen for this hold, level.
+    var gravityDegrees: Double {
+        switch self {
+        case .portrait: return 0
+        case .landscapeLeft: return -90
+        case .landscapeRight: return 90
+        case .upsideDown: return 180
+        }
+    }
+
     /// Clockwise turn for playback. The sensor's upright hold is landscape left.
     var clipRotation: Int {
         switch self {
@@ -54,6 +64,10 @@ enum Hold: Equatable {
 /// Reads gravity directly, because device orientation stops changing under the rotation lock.
 final class HoldTracker: ObservableObject {
     @Published private(set) var hold = Hold.portrait
+    /// Tilt from level as the phone is held. Rounded, so it only updates when it visibly moves.
+    @Published private(set) var levelDegrees = 0.0
+    /// Off unless the level is showing, so tilt can't redraw the screen during a take.
+    var tracksLevel = false
 
     private let motion = CMMotionManager()
     private let queue = OperationQueue()
@@ -62,13 +76,20 @@ final class HoldTracker: ObservableObject {
     init() {
         queue.qualityOfService = .utility
         queue.maxConcurrentOperationCount = 1
-        motion.accelerometerUpdateInterval = 0.2
+        motion.accelerometerUpdateInterval = 0.1
         motion.startAccelerometerUpdates(to: queue) { [weak self] data, _ in
             guard let self, let gravity = data?.acceleration,
-                let next = Hold(x: gravity.x, y: gravity.y, z: gravity.z), next != self.last
+                let next = Hold(x: gravity.x, y: gravity.y, z: gravity.z) ?? Optional(self.last)
             else { return }
+            let tilt = atan2(gravity.x, -gravity.y) * 180 / .pi - next.gravityDegrees
+            let wrapped = (tilt + 540).truncatingRemainder(dividingBy: 360) - 180
+            let level = (wrapped * 2).rounded() / 2
+            let changed = next != self.last
             self.last = next
-            DispatchQueue.main.async { self.hold = next }
+            DispatchQueue.main.async {
+                if changed { self.hold = next }
+                if self.tracksLevel, level != self.levelDegrees { self.levelDegrees = level }
+            }
         }
     }
 

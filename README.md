@@ -20,15 +20,18 @@ A free Apple ID signature lasts 7 days, so repeat step 3 when the app stops open
 
 Turn the ring/silent switch to silent first. On iOS 17 the shutter sound is only removed with a workaround.
 
-The camera opens live, and the controls turn to match how you hold the phone, even with the rotation lock on. The top line shows the signal path, time left and battery. **SHT**, **ISO**, **WB** and **FOC** open dials, and the lock next to a dial holds its value. Yellow values are held, not automatic. Tap the picture to focus and meter there, then drag to set exposure. Pinch or use the lens panel to switch camera. **MON** sets the monitor and exposure tool, and **FMT** opens Settings. Recordings carry the hold they started in, so they play upright.
+The camera opens live, and the controls turn to match how you hold the phone, even with the rotation lock on. Recordings carry the hold they started in, so they play upright.
 
-During a recording you can change the monitor, exposure tool and all four dials. Tap focus, exposure drag and returning to autofocus are off, because switching autofocus on lost frames in testing. Everything else is locked until recording stops.
+Beneath the picture are the toolbar, the read-outs and the record row. **SHT**, **ISO**, **WB** and **FOC** open a dial that snaps to common values. The scope icon on a dial switches to fine steps, and the lock holds the value. Yellow values are held, not automatic. Tap the picture to focus and meter there, then drag to set exposure. Pinch or tap the lens value to switch camera.
+
+Settings and toolbar choices save to `VibeLog.config.json` in the VibeLog folder. You can edit it in the Files app, and missing keys take their defaults.
+
+During a recording you can change ISO, shutter, white balance and the monitor tools. Focus and exposure drag are off, because focus changes lost frames in testing. Everything else is locked until recording stops.
 
 Long-press **Version** in Settings to open **Diagnostics**:
 
 | Tool | What it does |
 |---|---|
-| **Glass panels** | Off swaps the glass behind controls for a flat fill, to compare what glass costs. |
 | **Debug overlay** | Shows frame rate, GPU, drops, memory, heat and storage on the viewfinder. |
 | **Show log** | Shows the log. **Copy** puts it on the clipboard, **Previous** opens the last session's log, which holds crash details. |
 | **Run control test** | Records 46 seconds and changes focus and exposure on a schedule. Each change is logged with frame and failure counts. |

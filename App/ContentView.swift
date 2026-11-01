@@ -17,9 +17,9 @@ struct ContentView: View {
 
 struct CameraScreen: View {
     @EnvironmentObject private var model: AppModel
+    @AppStorage("debugOverlay") private var showDebugOverlay = false
     @ObservedObject var hold: HoldTracker
     @State private var showSettings = false
-    @State private var selectedDial: ControlDial?
     @State private var focusMark: CGPoint?
     @State private var hideFocusMark: Task<Void, Never>?
     @State private var biasAtDragStart: Float?
@@ -30,18 +30,25 @@ struct CameraScreen: View {
             let screen = CGSize(
                 width: geometry.size.width + insets.leading + insets.trailing,
                 height: geometry.size.height + insets.top + insets.bottom)
-            ZStack {
+            let layout = CameraGeometry(
+                screen: screen, top: insets.top, bottom: insets.bottom, widescreen: model.widescreen)
+            ZStack(alignment: .topLeading) {
                 Color.black
-                viewfinder(screen)
-                HeldLayout(hold: hold.hold, screen: screen, insets: insets) { heldInsets in
-                    CameraHUD(
-                        selectedDial: $selectedDial, isLandscape: hold.hold.isLandscape,
-                        insets: heldInsets, openSettings: { showSettings = true })
+                viewfinder(layout.picture.size)
+                    .offset(x: layout.picture.minX, y: layout.picture.minY)
+                HeldLayout(
+                    hold: hold.hold, screen: layout.band.size,
+                    insets: EdgeInsets(top: 0, leading: 0, bottom: insets.bottom, trailing: 0)
+                ) { heldInsets in
+                    ControlBand(
+                        hold: hold.hold, isCompact: layout.isCompact, insets: heldInsets,
+                        openSettings: { showSettings = true })
                 }
                 .id(hold.hold.label)
                 .transition(.opacity)
+                .offset(y: layout.band.minY)
             }
-            .animation(.easeOut(duration: 0.2), value: hold.hold)
+            .animation(.easeOut(duration: 0.15), value: hold.hold)
             .frame(width: screen.width, height: screen.height)
             .ignoresSafeArea()
         }
@@ -55,29 +62,55 @@ struct CameraScreen: View {
     }
 
     /// The sensor stays fixed to the phone, so the picture is upright in every hold. 16:9 keeps
-    /// three quarters of the sensor height, which is the screen's width, so it scales up to fill it.
-    private func viewfinder(_ screen: CGSize) -> some View {
-        let portraitHeight = screen.width * 4 / 3
-        let zoom = model.widescreen ? min(4.0 / 3, screen.height / portraitHeight) : 1
-        let imageWidth = screen.width * zoom
-        let imageHeight = portraitHeight * zoom
-        let shownWidth = model.widescreen ? imageWidth * 0.75 : imageWidth
+    /// three quarters of the sensor height, which is the screen's width.
+    private func viewfinder(_ size: CGSize) -> some View {
+        let imageWidth = model.widescreen ? size.width / 0.75 : size.width
         return ZStack {
-            SessionPreview(session: model.camera.session)
-            if let pipeline = model.pipeline, model.method.isPhoto,
-                model.processing.enabled, model.processing.monitor != .isp {
-                ProcessedMonitor(pipeline: pipeline)
+            ZStack {
+                SessionPreview(session: model.camera.session)
+                if let pipeline = model.pipeline, model.method.isPhoto,
+                    model.processing.enabled, model.processing.monitor != .isp {
+                    ProcessedMonitor(pipeline: pipeline)
+                }
+                touchLayer
             }
-            touchLayer
-        }
-        .frame(width: imageWidth, height: imageHeight)
-        .frame(width: shownWidth, height: imageHeight)
-        .clipped()
-        .overlay {
-            FrameMarks()
-                .stroke(.white.opacity(0.7), lineWidth: 1)
+            .frame(width: imageWidth, height: size.height)
+            .scaleEffect(model.isOn(.punchIn) ? 3 : 1)
+            FrameGuides(
+                grid: model.isOn(.grid), center: model.isOn(.center),
+                levelDegrees: model.isOn(.level) ? hold.levelDegrees : nil,
+                gravityDegrees: hold.hold.gravityDegrees)
+            HeldLayout(
+                hold: hold.hold, screen: size, insets: EdgeInsets()
+            ) { _ in
+                VStack(spacing: 8) {
+                    if showDebugOverlay {
+                        DebugOverlay()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if let notice = model.notice {
+                        Text(notice)
+                            .font(Tokens.lineFont)
+                            .foregroundStyle(Tokens.value)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 4))
+                    }
+                    if let busy = model.isBusy {
+                        ProgressView(busy)
+                            .font(Tokens.lineFont)
+                            .padding(10)
+                            .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 4))
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(8)
                 .allowsHitTesting(false)
+            }
         }
+        .frame(width: size.width, height: size.height)
+        .clipped()
     }
 
     private var touchLayer: some View {
@@ -144,222 +177,6 @@ struct CameraScreen: View {
     }
 }
 
-/// Everything that floats on the picture, laid out for how the phone is held.
-struct CameraHUD: View {
-    @EnvironmentObject private var model: AppModel
-    @AppStorage("debugOverlay") private var showDebugOverlay = false
-    @AppStorage("telemetry") private var showTelemetry = true
-    @Binding var selectedDial: ControlDial?
-    let isLandscape: Bool
-    let insets: EdgeInsets
-    let openSettings: () -> Void
-
-    var body: some View {
-        Group {
-            if isLandscape {
-                HStack(spacing: 12) {
-                    VStack(spacing: 8) {
-                        header
-                        Spacer(minLength: 0)
-                        lensRow
-                        ControlPanels(selected: $selectedDial)
-                    }
-                    VStack {
-                        formatButton
-                        Spacer()
-                        recordButton
-                        Spacer()
-                        monitorMenu
-                    }
-                }
-            } else {
-                VStack(spacing: 8) {
-                    header
-                    Spacer(minLength: 0)
-                    lensRow
-                    ControlPanels(selected: $selectedDial)
-                    HStack {
-                        monitorMenu
-                        Spacer()
-                        recordButton
-                        Spacer()
-                        formatButton
-                    }
-                    .padding(.horizontal, 8)
-                }
-            }
-        }
-        .padding(.top, max(insets.top, 10))
-        .padding(.bottom, max(insets.bottom, 10))
-        .padding(.leading, max(insets.leading, 12))
-        .padding(.trailing, max(insets.trailing, 12))
-    }
-
-    private var header: some View {
-        VStack(spacing: 8) {
-            if model.isRecording {
-                recordingLine
-            } else {
-                signalPath
-            }
-            if showDebugOverlay {
-                DebugOverlay()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if let notice = model.notice {
-                Text(notice)
-                    .font(Tokens.lineFont)
-                    .foregroundStyle(Tokens.value)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .instrumentPanel()
-            }
-            if let busy = model.isBusy {
-                ProgressView(busy)
-                    .font(Tokens.lineFont)
-                    .padding(10)
-                    .instrumentPanel()
-            }
-        }
-    }
-
-    private var signalPath: some View {
-        Button(action: openSettings) {
-            VStack(spacing: 2) {
-                HStack {
-                    Text(model.signalPath).foregroundStyle(Tokens.value)
-                    Spacer(minLength: 8)
-                }
-                HStack {
-                    Text(model.outputLabel)
-                    Spacer(minLength: 8)
-                    Text(model.timeLeftLabel)
-                    Text(model.batteryLabel)
-                }
-                .foregroundStyle(Tokens.label)
-            }
-            .font(Tokens.lineFont)
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
-        }
-        .buttonStyle(.plain)
-        .disabled(model.isBusy != nil)
-        .accessibilityLabel("Format, \(model.signalPath), \(model.timeLeftLabel) left")
-    }
-
-    private var recordingLine: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 6) {
-                Circle().fill(Tokens.record).frame(width: 7, height: 7)
-                Text(timecode).font(Tokens.valueFont)
-            }
-            .foregroundStyle(Tokens.value)
-            .padding(.horizontal, 8)
-            .frame(height: 28)
-            .instrumentPanel()
-            .accessibilityLabel("Recording, \(model.recordElapsed) seconds")
-            Spacer(minLength: 0)
-            if showTelemetry {
-                Text(telemetry)
-                    .font(Tokens.lineFont)
-                    .foregroundStyle(Tokens.value)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                    .padding(.horizontal, 8)
-                    .frame(height: 28)
-                    .instrumentPanel()
-            }
-        }
-    }
-
-    private var timecode: String {
-        let elapsed = model.recordElapsed
-        return String(format: "%02d:%02d:%02d", elapsed / 3600, elapsed / 60 % 60, elapsed % 60)
-    }
-
-    private var telemetry: String {
-        String(
-            format: "%.2f FPS  %.0f MB/S  GPU %.0f  %@", model.stats.rollingFPS, model.dataRate,
-            model.pipelineStats.gpuRecentMs, model.status.thermal.uppercased())
-    }
-
-    @ViewBuilder
-    private var lensRow: some View {
-        if model.lenses.count > 1 {
-            HStack {
-                Spacer()
-                HStack(spacing: 0) {
-                    ForEach(model.lenses.sorted { $0.zoom < $1.zoom }) { lens in
-                        let selected = lens.id == model.lensID
-                        Button {
-                            model.lensID = lens.id
-                        } label: {
-                            Text(lens.zoomLabel)
-                                .font(Tokens.lineFont)
-                                .foregroundStyle(selected ? Tokens.held : Tokens.value)
-                                .frame(width: 40, height: 30)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(lens.name)
-                        .accessibilityAddTraits(selected ? .isSelected : [])
-                    }
-                }
-                .instrumentPanel()
-                // Changing lens rebuilds the capture session, which would end a recording.
-                .disabled(model.isRecording || model.isBusy != nil)
-                .opacity(model.isRecording ? 0.4 : 1)
-            }
-        }
-    }
-
-    private var recordButton: some View {
-        RecordButton(isRecording: model.isRecording) { model.toggleRecord() }
-            .disabled(model.isBusy != nil)
-    }
-
-    private var formatButton: some View {
-        Button(action: openSettings) {
-            Text("FMT")
-                .font(Tokens.lineFont)
-                .foregroundStyle(Tokens.value)
-                .frame(width: 48, height: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .instrumentPanel()
-        .disabled(model.isRecording || model.isBusy != nil)
-        .opacity(model.isRecording ? 0.4 : 1)
-        .accessibilityLabel("Format and settings")
-    }
-
-    /// Only changes what the monitor draws, so it stays available while recording.
-    @ViewBuilder
-    private var monitorMenu: some View {
-        if model.processing.monitor != .isp {
-            Menu {
-                Picker("Monitor", selection: $model.processing.monitor) {
-                    ForEach([MonitorMode.rec709, .log]) { Text($0.label).tag($0) }
-                }
-                Picker("Exposure tool", selection: $model.processing.overlay) {
-                    ForEach(ExposureOverlay.allCases) { Text($0.label).tag($0) }
-                }
-            } label: {
-                Text("MON")
-                    .font(Tokens.lineFont)
-                    .foregroundStyle(model.processing.overlay == .none ? Tokens.value : Tokens.held)
-                    .frame(width: 48, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .instrumentPanel()
-            .accessibilityLabel("Monitor and exposure tools")
-        } else {
-            Color.clear.frame(width: 48, height: 44)
-        }
-    }
-}
-
 struct FocusMark: View {
     let bias: Float
     let showsBias: Bool
@@ -376,28 +193,6 @@ struct FocusMark: View {
                         .offset(x: 22, y: CGFloat(-bias) * 18)
                 }
             }
-    }
-}
-
-struct RecordButton: View {
-    let isRecording: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            ZStack {
-                Circle()
-                    .strokeBorder(Tokens.value, lineWidth: 2)
-                RoundedRectangle(cornerRadius: isRecording ? 4 : 28)
-                    .fill(Tokens.record)
-                    .frame(width: isRecording ? 26 : 56, height: isRecording ? 26 : 56)
-            }
-            .frame(width: 68, height: 68)
-            .contentShape(Circle())
-            .animation(.easeOut(duration: 0.15), value: isRecording)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(isRecording ? "Stop recording" : "Record")
     }
 }
 
