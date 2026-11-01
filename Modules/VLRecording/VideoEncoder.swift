@@ -59,6 +59,8 @@ public final class VideoEncoder: VideoFrameSink {
 
     /// Runs on the main queue once if the writer fails mid-recording.
     public var onFailure: ((String) -> Void)?
+    /// Runs on the encoder queue with the first frame's time, in seconds.
+    public var onFirstFrame: ((Double) -> Void)?
 
     private let config: Config
     private let writer: AVAssetWriter
@@ -170,6 +172,7 @@ public final class VideoEncoder: VideoFrameSink {
                 writer.startSession(atSourceTime: time)
                 sessionStarted = true
                 firstTime = time
+                onFirstFrame?(CMTimeGetSeconds(time))
             }
             // GPU completions can arrive out of order under load, and the writer fails for good
             // on a timestamp that doesn't advance.

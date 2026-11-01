@@ -87,10 +87,10 @@ The screen design should leave room for the tools in Phases 6 and 7.
 
 The rule for this phase: anything that adds to real-time GPU load must prove it doesn't cost frames or shorten recording.
 
-- **24 and 25 fps:** added to the format panel, not yet proven on the phone under the Photo preset. RAW Cam offers 18, 24, 25 and 30 fps.
+- **Frame rates:** 24 and 25 fps recorded with no dropped frames on the phone. 23.98 and 29.97 are added and untested. RAW Cam also offers 18 fps.
 - **Highlight reconstruction:** rebuild clipped green from red and blue, which still hold data above the point where green saturates. This could recover some highlight range that is currently clipped.
 - **Vignette correction:** apply the `FixVignetteRadial` values already found in the photo metadata.
-- **Gyro logging:** record CoreMotion data at high rate and save a Gyroflow `.gcsv` next to each clip. This costs little and can land early.
+- **Gyro logging:** added: CoreMotion data at 200 Hz in a Gyroflow `.gcsv` next to each clip. Its cost and axes still need checking on the phone and in Gyroflow.
 - **Stabilization check:** find out whether optical stabilization is active during RAW capture, and how it affects gyro stabilization.
 - **Exposure modes:** 180-degree shutter, shutter priority and auto exposure with an EV slider. Lock at start, or auto during a take, is a setting.
 - **Focus while recording:** test whether focus can change during capture.
@@ -101,7 +101,7 @@ The rule for this phase: anything that adds to real-time GPU load must prove it 
 
 ## Phase 7: shooting tools
 
-- Focus peaking and a focus punch-in: done, except a tested peaking threshold.
+- Focus peaking and a focus punch-in: done.
 - RAW histogram, waveform and vectorscope.
 - Horizon indicator, using the Phase 6 motion data.
 - Frame guides, a 3x3 grid and anamorphic desqueeze.

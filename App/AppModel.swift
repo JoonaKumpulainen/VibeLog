@@ -129,21 +129,29 @@ final class AppModel: ObservableObject {
     /// Freezes exposure and white balance as a take starts. Off, auto keeps running during the
     /// take. Focus always holds.
     @Published var lockAtRoll = true
+    /// Saves a Gyroflow file beside each take.
+    @Published var saveGyroLog = true
     @Published var presets: [FormatPreset] = []
 
     var shutterLabel: String { "1/\(Int(pow(2, shutterStops).rounded()))" }
 
-    static let frameRates = [24.0, 25.0, 30.0]
-
-    /// The capture rate. Only 30 fps is proven so far. A slower shutter than one frame can't last
-    /// past a change.
+    /// The capture rate. A slower shutter than one frame can't last past a change. Sliding the
+    /// format column passes through other rates, so only the one it settles on rebuilds the session.
     @Published var frameRate = 30.0 {
         didSet {
-            guard frameRate != oldValue else { return }
+            guard frameRate != oldValue, !applyingOptions else { return }
             shutterStops = max(shutterStops, log2(frameRate))
-            reconfigure()
+            pendingRateChange?.cancel()
+            let change = DispatchWorkItem { [weak self] in
+                self?.pendingRateChange = nil
+                self?.reconfigure()
+            }
+            pendingRateChange = change
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: change)
         }
     }
+
+    var frameRateLabel: String { FrameRates.label(frameRate) }
 
     private enum Control { case exposure, bias, whiteBalance, focus }
 
@@ -248,7 +256,7 @@ final class AppModel: ObservableObject {
 
     var outputLabel: String { outputSize.label }
 
-    var aspectLabel: String { widescreen ? "16:9" : "4:3" }
+    var aspectLabel: String { widescreen ? "16:9" : "OPEN GATE" }
 
     var showsFullView: Bool { fullView && widescreen }
 
@@ -346,6 +354,7 @@ final class AppModel: ObservableObject {
         config.monitorOffWhileRecording = processing.pauseMonitorWhileRecording
         config.telemetry = showTelemetry
         config.lockAtRoll = lockAtRoll
+        config.saveGyroLog = saveGyroLog
         config.mainsHz = mainsHz
         config.toolbar = toolbar.map(\.rawValue)
         config.activeTools = activeTools.map(\.rawValue).sorted()
@@ -368,7 +377,10 @@ final class AppModel: ObservableObject {
         encoderPreset = EncoderPreset.all.first { $0.id == loaded.codec } ?? encoderPreset
         encoderSize = EncoderSize.all.first { $0.label == loaded.size } ?? encoderSize
         widescreen = loaded.widescreen
-        frameRate = Self.frameRates.contains(loaded.frameRate) ? loaded.frameRate : frameRate
+        // The first configuration comes after this and uses it.
+        applyingOptions = true
+        frameRate = FrameRates.all.contains(loaded.frameRate) ? loaded.frameRate : frameRate
+        applyingOptions = false
         recordSeconds = loaded.stopAfterSeconds
         processing.curve = LogCurve.allCases.first { $0.label == loaded.logCurve } ?? processing.curve
         processing.pipeline = PipelineMode(rawValue: loaded.pipeline) ?? processing.pipeline
@@ -381,6 +393,7 @@ final class AppModel: ObservableObject {
         processing.pauseMonitorWhileRecording = loaded.monitorOffWhileRecording
         showTelemetry = loaded.telemetry
         lockAtRoll = loaded.lockAtRoll
+        saveGyroLog = loaded.saveGyroLog
         mainsHz = loaded.mainsHz
         toolbar = loaded.toolbar.compactMap(Tool.init(rawValue:))
         activeTools = Set(loaded.activeTools.compactMap(Tool.init(rawValue:)))
@@ -415,7 +428,7 @@ final class AppModel: ObservableObject {
         encoderPreset = EncoderPreset.all.first { $0.id == saved.codec } ?? encoderPreset
         encoderSize = EncoderSize.all.first { $0.label == saved.size } ?? encoderSize
         widescreen = saved.widescreen
-        if Self.frameRates.contains(saved.frameRate) { frameRate = saved.frameRate }
+        if FrameRates.all.contains(saved.frameRate) { frameRate = saved.frameRate }
         processing.curve = LogCurve.allCases.first { $0.label == saved.logCurve } ?? processing.curve
         processing.pipeline = PipelineMode(rawValue: saved.pipeline) ?? processing.pipeline
         processing.demosaic = DemosaicMethod.allCases.first { $0.label == saved.debayer } ?? processing.demosaic
@@ -681,14 +694,17 @@ final class AppModel: ObservableObject {
         if !isStreaming { toggleStream() }
     }
 
-    func delete(_ take: Take) {
-        do {
-            try TakeLibrary.delete(take)
-            Log.shared.info("Deleted \(take.url.lastPathComponent)")
-        } catch {
-            Log.shared.error("Cannot delete \(take.url.lastPathComponent): \(error)")
+    /// Removes each video and its sidecar, then finds the newest that's left.
+    func delete(_ takes: [Take]) {
+        for take in takes {
+            do {
+                try TakeLibrary.delete(take)
+                Log.shared.info("Deleted \(take.url.lastPathComponent)")
+            } catch {
+                Log.shared.error("Cannot delete \(take.url.lastPathComponent): \(error)")
+            }
         }
-        guard lastTake?.url == take.url else { return }
+        guard takes.contains(where: { $0.url == lastTake?.url }) else { return }
         lastTake = nil
         loadLastTake()
     }
@@ -812,7 +828,7 @@ final class AppModel: ObservableObject {
         bracketCount = options.config.bracketCount
         iso = min(max(iso, options.isoRange.lowerBound), options.isoRange.upperBound)
         if options.frameRateUnavailable, options.config.frameRate != frameRate {
-            showNotice("\(Int(frameRate)) fps isn't available on this lens", seconds: 4)
+            showNotice("\(frameRateLabel) fps isn't available on this lens", seconds: 4)
             frameRate = options.config.frameRate
         }
         applyingOptions = false
@@ -872,7 +888,7 @@ final class AppModel: ObservableObject {
     }
 
     private func startRecording() {
-        guard !isRecording, !recordStarting else { return }
+        guard !isRecording, !recordStarting, pendingRateChange == nil else { return }
         notice = nil
         takeAlert = nil
         if let takeWarning { showNotice(takeWarning, seconds: 4) }
@@ -933,7 +949,7 @@ final class AppModel: ObservableObject {
             "curve": processing.curve.label, "gamut": "Rec.2020",
             "matrix": "Rec.2020 non-constant luminance, video range",
             "exposureStops": String(processing.exposureStops),
-            "frameRate": String(Int(frameRate)),
+            "frameRate": frameRateLabel,
             "exposureDuringTake": exposureLocked ? "manual" : lockAtRoll ? "frozen at start" : "auto",
             "whiteBalanceDuringTake": whiteBalanceLocked ? "manual" : lockAtRoll ? "frozen at start" : "auto",
             "aspect": widescreen ? "16:9 center crop" : "4:3 open gate",
@@ -961,6 +977,11 @@ final class AppModel: ObservableObject {
                     self?.showNotice("No mic: recording silent", seconds: 4)
                 }
             }
+            if saveGyroLog {
+                let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-"
+                motion.start(url: TakeLibrary.gyroLog(for: url), videoName: url.lastPathComponent, version: version)
+                encoder.onFirstFrame = { [motion] seconds in motion.setFirstFrame(seconds: seconds) }
+            }
             activeEncoder = encoder
             holdForTake()
             router.stats.reset()
@@ -971,7 +992,7 @@ final class AppModel: ObservableObject {
             recordingFile = url
             isRecording = true
             let seconds = recordSeconds
-            Log.shared.info("Encoding \(name): \(encoderPreset.label) \(outputSize.label) at \(Int(frameRate)) fps, exposure \(metadata["exposureDuringTake"] ?? "?"), white balance \(metadata["whiteBalanceDuringTake"] ?? "?"), \(processing.curve.label), \(processing.pipeline.label) pipeline, \(seconds > 0 ? "\(seconds)s" : "until stopped"), battery \(SystemStatus.batteryText), thermal \(SystemStatus.thermalName), free \(SystemStatus.freeDisk / 1_000_000_000) GB")
+            Log.shared.info("Encoding \(name): \(encoderPreset.label) \(outputSize.label) at \(frameRateLabel) fps, exposure \(metadata["exposureDuringTake"] ?? "?"), white balance \(metadata["whiteBalanceDuringTake"] ?? "?"), \(processing.curve.label), \(processing.pipeline.label) pipeline, \(seconds > 0 ? "\(seconds)s" : "until stopped"), battery \(SystemStatus.batteryText), thermal \(SystemStatus.thermalName), free \(SystemStatus.freeDisk / 1_000_000_000) GB")
             guard seconds > 0 else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self, weak encoder] in
                 guard let self, let encoder, self.activeEncoder === encoder else { return }
@@ -990,16 +1011,18 @@ final class AppModel: ObservableObject {
         isRecording = false
         pipeline?.setSink(nil)
         audio.stop()
+        if saveGyroLog { motion.stop() }
         resumeAfterTake()
         let capture = router.stats.snapshot()
         let gpu = pipeline?.currentStats() ?? PipelineStats()
         encoder.finish { [self] result in
             let summary = String(
-                format: "%@ %dx%d: %.2f fps written, %d frames, %d dropped (%d no buffer, %d not ready), %.1f MB/s, audio %d, capture %.2f fps fail %d, gpu %.1f recent %.1f max ms drop %d",
+                format: "%@ %dx%d: %.2f fps written, %d frames, %d dropped (%d no buffer, %d not ready), %.1f MB/s, audio %d, capture %.2f fps fail %d missed %d gap %.0f ms, gpu %.1f recent %.1f max ms drop %d",
                 result.preset, result.width, result.height, result.fps, result.framesWritten,
                 result.framesDropped, result.droppedNoBuffer, result.droppedNotReady,
                 result.megabytesPerSecond, result.audioSamplesWritten,
-                capture.sustainedFPS, capture.captureFailures, gpu.gpuRecentMs, gpu.gpuMaxMs, gpu.dropped)
+                capture.sustainedFPS, capture.captureFailures, capture.estimatedMissed, capture.gapMaxMs,
+                gpu.gpuRecentMs, gpu.gpuMaxMs, gpu.dropped)
             if let failure = result.failure {
                 Log.shared.error("VIDEO FAILED \(result.file): \(failure)")
             }
@@ -1035,11 +1058,13 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private var pendingRateChange: DispatchWorkItem?
     private var loadReduced = false
     private var resumeAfterPlayback = false
     private var thumbnailGenerator: AVAssetImageGenerator?
     private var pendingReferences: [RawRecorder] = []
     private let audio = AudioCapture()
+    private let motion = MotionLogger()
     private var activeEncoder: VideoEncoder?
 
     /// Runs off the main thread with a DNG from the capture driver.

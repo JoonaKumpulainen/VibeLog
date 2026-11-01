@@ -1,5 +1,6 @@
 import SwiftUI
 import VLCapture
+import VLCore
 import VLProcessing
 import VLRecording
 
@@ -274,7 +275,9 @@ struct CameraHUD: View {
                     .accessibilityHidden(true)
                 VStack(spacing: 0) {
                     Spacer(minLength: 0)
-                    FormatPanel(hold: hold, bottomInset: max(insets.bottom, 10))
+                    FormatPanel(
+                        hold: hold, bottomInset: max(insets.bottom, 10),
+                        depth: stripDepth - CameraGeometry.formatGap)
                         .accessibilityAction(.escape) { setFormat(false) }
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -644,7 +647,7 @@ struct StatusBlocks: View {
             block(.left) { alignment in
                 VStack(alignment: alignment, spacing: CameraGeometry.statusLineGap) {
                     StatusLine(text: model.codecLabel)
-                    StatusLine(text: "\(model.curveLabel) \(Int(model.frameRate))P")
+                    StatusLine(text: "\(model.curveLabel) \(model.frameRateLabel)P")
                     StatusLine(text: model.outputLabel)
                 }
             }
@@ -803,29 +806,35 @@ struct FormatWheel<Value: Hashable>: View {
     @Binding var selection: Value
     let label: (Value) -> String
     let hold: Hold
+    let rowDepth: CGFloat
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var centered: Value?
 
+    static var titleGap: CGFloat { 4 }
+
+    static func titleDepth(_ hold: Hold) -> CGFloat { hold.isLandscape ? 40 : 16 }
+
     init(
-        title: String, options: [Value], selection: Binding<Value>, hold: Hold,
+        title: String, options: [Value], selection: Binding<Value>, hold: Hold, rowDepth: CGFloat,
         label: @escaping (Value) -> String
     ) {
         self.title = title
         self.options = options
         _selection = selection
         self.hold = hold
+        self.rowDepth = rowDepth
         self.label = label
         _centered = State(initialValue: selection.wrappedValue)
     }
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: Self.titleGap) {
             Text(title)
                 .font(Tokens.labelFont)
                 .foregroundStyle(Tokens.label)
                 .fixedSize()
                 .turnedToHold()
-                .frame(height: hold.isLandscape ? 40 : 16)
+                .frame(height: Self.titleDepth(hold))
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 0) {
                     ForEach(options, id: \.self) { option in
@@ -834,10 +843,10 @@ struct FormatWheel<Value: Hashable>: View {
                 }
                 .scrollTargetLayout()
             }
-            .contentMargins(.vertical, FormatPanel.rowDepth, for: .scrollContent)
+            .contentMargins(.vertical, rowDepth, for: .scrollContent)
             .scrollTargetBehavior(.viewAligned)
             .scrollPosition(id: $centered, anchor: .center)
-            .frame(height: FormatPanel.rowDepth * 3)
+            .frame(height: rowDepth * 3)
         }
         .frame(maxWidth: .infinity)
         .sensoryFeedback(.selection, trigger: centered)
@@ -859,9 +868,9 @@ struct FormatWheel<Value: Hashable>: View {
                 .foregroundStyle(isOn ? Tokens.held : Tokens.value)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
-                .upright(hold, depth: FormatPanel.rowDepth - 2)
+                .upright(hold, depth: rowDepth - 2)
                 .frame(maxWidth: .infinity)
-                .frame(height: FormatPanel.rowDepth)
+                .frame(height: rowDepth)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -881,8 +890,17 @@ struct FormatPanel: View {
     @EnvironmentObject private var model: AppModel
     let hold: Hold
     let bottomInset: CGFloat
+    /// From the screen's edge to just short of the picture.
+    let depth: CGFloat
 
-    static let rowDepth: CGFloat = 44
+    private static let topPadding: CGFloat = 6
+
+    /// Three rows share what's left under the titles.
+    private var rowDepth: CGFloat {
+        let spare = depth - FormatWheel<Bool>.titleDepth(hold) - FormatWheel<Bool>.titleGap
+            - Self.topPadding - bottomInset
+        return max(spare / 3, 44)
+    }
 
     private static func isHEVC(_ preset: EncoderPreset) -> Bool { preset.id.hasPrefix("hevc") }
 
@@ -898,39 +916,39 @@ struct FormatPanel: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 0) {
-            FormatWheel(title: "CODEC", options: ["PRORES", "HEVC"], selection: family, hold: hold) { $0 }
+            FormatWheel(title: "CODEC", options: ["PRORES", "HEVC"], selection: family, hold: hold, rowDepth: rowDepth) { $0 }
             FormatWheel(
                 title: "CHROMA", options: chromaChoices, selection: $model.encoderPreset, hold: hold,
-                label: Self.chromaLabel
+                rowDepth: rowDepth, label: Self.chromaLabel
             )
             // Each codec has its own list.
             .id(Self.isHEVC(model.encoderPreset))
-            FormatWheel(title: "SIZE", options: EncoderSize.all, selection: $model.encoderSize, hold: hold) {
-                "\($0.width)"
+            FormatWheel(title: "SIZE", options: EncoderSize.all, selection: $model.encoderSize, hold: hold, rowDepth: rowDepth) {
+                (model.widescreen ? $0.widescreen : $0).label
             }
             FormatWheel(
-                title: "LOG", options: LogCurve.allCases, selection: $model.processing.curve, hold: hold
+                title: "LOG", options: LogCurve.allCases, selection: $model.processing.curve, hold: hold,
+                rowDepth: rowDepth
             ) { $0.shortLabel }
-            FormatWheel(title: "ASPECT", options: [false, true], selection: $model.widescreen, hold: hold) {
-                $0 ? "16:9" : "4:3"
+            FormatWheel(title: "ASPECT", options: [false, true], selection: $model.widescreen, hold: hold, rowDepth: rowDepth) {
+                $0 ? "16:9" : "OPEN GATE"
             }
-            FormatWheel(title: "FPS", options: AppModel.frameRates, selection: $model.frameRate, hold: hold) {
-                "\(Int($0))"
-            }
+            FormatWheel(title: "FPS", options: FrameRates.all, selection: $model.frameRate, hold: hold,
+                rowDepth: rowDepth, label: FrameRates.label
+            )
         }
         .background(alignment: .bottom) {
             // The band every column's choice sits in.
-            RoundedRectangle(cornerRadius: Tokens.panelRadius)
+            Rectangle()
                 .fill(Tokens.surface)
-                .frame(height: Self.rowDepth)
-                .padding(.bottom, Self.rowDepth)
+                .frame(height: rowDepth)
+                .padding(.bottom, rowDepth)
         }
         .padding(.horizontal, 12)
-        .padding(.top, 6)
+        .padding(.top, Self.topPadding)
         .padding(.bottom, bottomInset)
-        .background(
-            Tokens.opaquePanel,
-            in: UnevenRoundedRectangle(topLeadingRadius: 14, topTrailingRadius: 14))
+        .frame(height: depth, alignment: .bottom)
+        .background(Tokens.opaquePanel)
     }
 
     private var chromaChoices: [EncoderPreset] {

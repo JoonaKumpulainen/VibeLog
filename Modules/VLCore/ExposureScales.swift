@@ -1,5 +1,24 @@
 import Foundation
 
+/// The capture rates on offer. The decimal ones are the broadcast rates of 24 and 30, slowed by
+/// 1000/1001.
+public enum FrameRates {
+    public static let all = [24000.0 / 1001, 24, 25, 30000.0 / 1001, 30]
+
+    private static func isDecimal(_ fps: Double) -> Bool { fps != fps.rounded() }
+
+    /// Rounded the way cameras name them, as in 23.98 and 29.97.
+    public static func label(_ fps: Double) -> String {
+        isDecimal(fps) ? String(format: "%.2f", fps) : String(Int(fps))
+    }
+
+    /// One frame as an exact fraction of a second, so a decimal rate doesn't drift.
+    public static func frameTime(_ fps: Double) -> (value: Int64, timescale: Int32) {
+        let whole = Int32(fps.rounded())
+        return isDecimal(fps) ? (1001, whole * 1000) : (1, whole)
+    }
+}
+
 /// The values dials snap to. A stop's label is empty when it only needs a tick.
 public enum ExposureScales {
     public struct Stop: Equatable, Sendable {
@@ -37,9 +56,12 @@ public enum ExposureScales {
     public static func shutterStops(fps: Double, mains: Int) -> [Stop] {
         let common: [Double] = [50, 60, 100, 120, 200, 250, 500, 1000, 2000, 4000, 8000]
         let safe = mains == 60 ? [60.0, 120.0] : [50.0, 100.0]
-        let values = Set(common + [fps, fps * 2]).filter { $0 >= fps }
+        // At 29.97 the half angle is about 1/60, which is the stop to keep because it's flicker-safe.
+        let halfAngle = fps * 2
+        let hasHalfAngle = common.contains { abs($0 / halfAngle - 1) < 0.01 }
+        let values = Set(common + [fps] + (hasHalfAngle ? [] : [halfAngle])).filter { $0 >= fps }
         return values.sorted().map {
-            Stop(value: $0, label: "1/\(Int($0))", isMajor: safe.contains($0))
+            Stop(value: $0, label: "1/\(Int($0.rounded()))", isMajor: safe.contains($0))
         }
     }
 

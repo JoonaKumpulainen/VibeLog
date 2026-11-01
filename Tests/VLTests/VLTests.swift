@@ -808,6 +808,25 @@ final class ExposureScalesTests: XCTestCase {
         XCTAssertEqual(ExposureScales.shutterStops(fps: 30, mains: 50).first?.value, 30)
     }
 
+    func testDecimalRatesAreExactAndNamedLikeCameras() {
+        XCTAssertEqual(FrameRates.all.map(FrameRates.label), ["23.98", "24", "25", "29.97", "30"])
+        XCTAssertTrue(FrameRates.frameTime(24000.0 / 1001) == (1001, 24000))
+        XCTAssertTrue(FrameRates.frameTime(30000.0 / 1001) == (1001, 30000))
+        XCTAssertTrue(FrameRates.frameTime(25) == (1, 25))
+    }
+
+    func testDecimalRatesKeepShutterLabelsUnique() {
+        for fps in FrameRates.all {
+            let stops = ExposureScales.shutterStops(fps: fps, mains: 60)
+            XCTAssertEqual(stops.first?.value, fps)
+            XCTAssertEqual(Set(stops.map(\.label)).count, stops.count)
+            XCTAssertTrue(stops.allSatisfy { !$0.label.isEmpty })
+        }
+        let ntsc = ExposureScales.shutterStops(fps: 30000.0 / 1001, mains: 60)
+        XCTAssertEqual(ntsc.first?.label, "1/30")
+        XCTAssertTrue(ntsc.contains { $0.value == 60 && $0.isMajor })
+    }
+
     func testShutterFollowsSlowerFrameRates() {
         let cinema = ExposureScales.shutterStops(fps: 24, mains: 50).map(\.value)
         XCTAssertEqual(cinema.first, 24)
@@ -890,6 +909,25 @@ final class AppConfigTests: XCTestCase {
     }
 }
 
+final class GyroLogTests: XCTestCase {
+    func testHeaderMatchesTheFormat() {
+        let lines = GyroLog.header(
+            videoName: "video_1.mov", startedAt: Date(timeIntervalSince1970: 1000), version: "0.1.0"
+        ).split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        XCTAssertEqual(Array(lines.prefix(4)), ["GYROFLOW IMU LOG", "version,1.3", "id,vibelog", "orientation,yXZ"])
+        XCTAssertTrue(lines.contains("timestamp,1000"))
+        XCTAssertTrue(lines.contains("videofilename,video_1.mov"))
+        XCTAssertTrue(lines.contains("tscale,0.000001"))
+        XCTAssertEqual(lines.suffix(2), ["t,gx,gy,gz,ax,ay,az", ""])
+    }
+
+    func testLineScalesFromTheFirstFrame() {
+        let sample = MotionSample(
+            seconds: 100.25, rotation: SIMD3(0.5, -0.25, 0), acceleration: SIMD3(0, 0.1, 1))
+        XCTAssertEqual(GyroLog.line(sample, firstFrame: 100), "250000,50000,-25000,0,0,1000,10000\n")
+    }
+}
+
 final class TakeLibraryTests: XCTestCase {
     private var folder: URL!
 
@@ -929,6 +967,25 @@ final class TakeLibraryTests: XCTestCase {
         let url = try makeTake("video_20260102_100000.mov", sidecar: true)
         try TakeLibrary.delete(TakeLibrary.take(at: url))
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path), [])
+    }
+
+    func testGyroLogSharesAndDeletesWithItsTake() throws {
+        let url = try makeTake("video_20260102_100000.mov", sidecar: true)
+        let gyro = TakeLibrary.gyroLog(for: url)
+        XCTAssertEqual(gyro.lastPathComponent, "video_20260102_100000.gcsv")
+        try Data(count: 4).write(to: gyro)
+        let take = TakeLibrary.take(at: url)
+        XCTAssertEqual(take.files, [url, gyro])
+        try TakeLibrary.delete(take)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path), [])
+    }
+
+    func testDeleteLeavesOtherTakesAlone() throws {
+        let first = try makeTake("video_20260101_100000.mov", sidecar: true)
+        let second = try makeTake("video_20260102_100000.mov", sidecar: true)
+        try TakeLibrary.delete(TakeLibrary.take(at: first))
+        XCTAssertEqual(TakeLibrary.takes(in: folder).map(\.url.lastPathComponent), [second.lastPathComponent])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: TakeLibrary.sidecar(for: second).path))
     }
 }
 

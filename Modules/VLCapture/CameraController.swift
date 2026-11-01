@@ -393,11 +393,12 @@ public final class CameraController: NSObject {
         }
         let fps = isOffered ? wanted : 30
         if !isOffered {
-            Log.shared.warn("\(wanted) fps is not offered by this format")
+            Log.shared.warn("\(FrameRates.label(wanted)) fps is not offered by this format")
             options.frameRateUnavailable = true
         }
         options.config.frameRate = fps
-        let frameTime = CMTime(value: 1000, timescale: CMTimeScale(fps * 1000))
+        let timing = FrameRates.frameTime(fps)
+        let frameTime = CMTime(value: timing.value, timescale: timing.timescale)
         do {
             try device.lockForConfiguration()
             // The longest duration goes first, because the shortest can't pass it.
@@ -410,7 +411,7 @@ public final class CameraController: NSObject {
             }
             device.unlockForConfiguration()
             if let exception {
-                Log.shared.error("Frame rate \(fps) rejected: \(exception.reason ?? exception.name.rawValue)")
+                Log.shared.error("Frame rate \(FrameRates.label(fps)) rejected: \(exception.reason ?? exception.name.rawValue)")
             }
         } catch {
             Log.shared.error("Frame rate setup failed: \(error.localizedDescription)")

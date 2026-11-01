@@ -65,13 +65,14 @@ struct SettingsView: View {
         }
     }
 
-    private static let formatTerms = "format codec size resolution frame rate fps log curve aspect chroma"
+    private static let formatTerms = "format codec size resolution frame rate fps log curve aspect open gate chroma"
     private static let presetTerms = "preset save saved recall format"
     private static let stopTerms = "stop after limit duration time timer"
     private static let autoTerms = "auto exposure shutter iso white balance during take recording freeze lock start roll"
     private static let heatTerms = "hot heat thermal cool long takes debayer"
+    private static let gyroTerms = "gyro gyroflow stabilization motion gcsv log"
     private static let mainsTerms = "flicker mains lights hz power frequency shutter"
-    private static let recordingTerms = [stopTerms, autoTerms, heatTerms, mainsTerms].joined(separator: " ")
+    private static let recordingTerms = [stopTerms, autoTerms, gyroTerms, heatTerms, mainsTerms].joined(separator: " ")
     private static let lookTerms = "look monitor rec.709 log preview isp viewfinder"
     private static let lutTerms = "lut cube import look monitor input"
     private static let pauseTerms = "pause viewfinder monitor off gpu recording"
@@ -115,7 +116,7 @@ struct SettingsView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Change format")
-                        Text("\(model.codecLabel) · \(model.curveLabel) · \(model.outputLabel) · \(Int(model.frameRate)) fps")
+                        Text("\(model.codecLabel) · \(model.curveLabel) · \(model.outputLabel) · \(model.frameRateLabel) fps")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -180,6 +181,11 @@ struct SettingsView: View {
                     explained(
                         "Auto exposure and white balance during a take",
                         "Shutter, ISO and white balance keep following the scene. Off freezes them at the start. Values you set stay, and focus always holds.")
+                }
+            }
+            if matches(Self.gyroTerms) {
+                Toggle(isOn: $model.saveGyroLog) {
+                    explained("Save gyro data", "Saves a .gcsv file beside each take for stabilizing in Gyroflow.")
                 }
             }
             if matches(Self.heatTerms) {

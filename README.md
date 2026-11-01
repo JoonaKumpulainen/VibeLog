@@ -22,7 +22,7 @@ Turn the ring/silent switch to silent first. On iOS 17 the shutter sound is only
 
 The camera opens live, and the controls turn to match how you hold the phone, even with the rotation lock on. Recordings carry the hold they started in, so they play upright.
 
-Status sits in the corners beside the Dynamic Island. Beneath the picture are the tray, the four values and the record row. **ISO**, **SHUTTER**, **WB** and **FOCUS** open a dial that snaps to common values. On a dial, **FINE** switches to fine steps and **AUTO** hands the value back to the camera. The **WB** dial also sets tint, and the **FOCUS** dial has punch-in, which opens on the last focus point and moves with a drag, and **PEAK**, which marks sharp detail in cyan. **FORMAT** opens slidable columns for codec, chroma, size, log curve, aspect and frame rate. Only 30 fps is proven so far. Amber values were set by you, **A** means automatic and a lock means frozen for the take. **EV** shows any exposure offset, and tapping it resets the offset. **MON** swaps the tool row for the monitor look and tools. The thumbnail plays the last take, and back from there are all your takes, each with its details, **Share** and **Delete**. At 16:9, the expand button in the tool row gives a larger picture with only record, the clock and status. Tap the picture to focus and meter there, then drag to set exposure. Pinch or tap the lens value to switch camera.
+Status sits in the corners beside the Dynamic Island. Beneath the picture are the tray, the four values and the record row. **ISO**, **SHUTTER**, **WB** and **FOCUS** open a dial that snaps to common values. On a dial, **FINE** switches to fine steps and **AUTO** hands the value back to the camera. The **WB** dial also sets tint, and the **FOCUS** dial has punch-in, which opens on the last focus point and moves with a drag, and **PEAK**, which marks sharp detail in cyan. **FORMAT** opens slidable columns for codec, chroma, size, log curve, aspect and frame rate, including 23.98 and 29.97. Amber values were set by you, **A** means automatic and a lock means frozen for the take. **EV** shows any exposure offset, and tapping it resets the offset. **MON** swaps the tool row for the monitor look and tools. The thumbnail plays the last take, and back from there are all your takes, each with its details, **Share** and **Delete**. **Select** or a long press deletes takes from the grid, along with their details. At 16:9, the expand button in the tool row gives a larger picture with only record, the clock and status. Tap the picture to focus and meter there, then drag to set exposure. Pinch or tap the lens value to switch camera.
 
 **Presets** in Settings save and recall the format, pipeline, debayer and exposure offset. Settings and toolbar choices save to `VibeLog.config.json` in the VibeLog folder. You can edit it in the Files app, and missing keys take their defaults.
 
@@ -64,11 +64,11 @@ The file is tagged Rec.2020, but its transfer tag is nominal. Apply the log curv
 
 ## Long recordings and monitoring
 
-**Stop after** defaults to **Never** and goes up to 30 minutes. Recording stops safely if the thermal state turns critical or less than 10 GB is free, because writes slow down on a nearly full phone. Files are written in 10-second fragments, so a killed app should lose only the last few seconds. **Freeze viewfinder during a take** freezes the preview to save power and heat. **Keep recording when hot** switches to the bilinear debayer and a slower monitor once the thermal state is serious.
+**Stop after** defaults to **Never** and goes up to 30 minutes. Recording stops safely if the thermal state turns critical or less than 10 GB is free, because writes slow down on a nearly full phone. Files are written in 10-second fragments, so a killed app should lose only the last few seconds. **Freeze viewfinder during a take** freezes the preview to save power and heat. **Save gyro data** writes a `.gcsv` beside each take, which Gyroflow finds by itself when you open the video. **Keep recording when hot** switches to the bilinear debayer and a slower monitor once the thermal state is serious.
 
 On an iPhone 14 Pro, ProRes 422 HQ at full size with reduced load held 30 fps for over 8 minutes at serious thermal state. Without it, heat cut GPU speed and frames began to drop at 5 minutes. Recording near an empty battery can stall the encoder, so start with a good charge.
 
-**Aspect** records 4:3 open gate or a 16:9 center crop, and the monitor dims the area outside it. **Exposure tool** adds zebras where the sensor clips, or false color: blue is four stops under middle gray, green is middle gray, pink is about one stop over, yellow is well above that, and red is clipped. These show exposure of the signal, not of the graded image.
+**Aspect** records open gate, the sensor's full 4:3 frame, or a 16:9 center crop, and the monitor dims the area outside it. **Exposure tool** adds zebras where the sensor clips, or false color: blue is four stops under middle gray, green is middle gray, pink is about one stop over, yellow is well above that, and red is clipped. These show exposure of the signal, not of the graded image.
 
 **Import .cube LUT** replaces the Rec.709 monitor LUT, for monitoring only: it isn't baked into recordings. Set **LUT made for** to Log for conversion LUTs, which take log Rec.2020 in the chosen curve, or to Rec.709 for look LUTs, which are applied after the built-in Rec.709 conversion. 3D LUTs up to size 129 work; 1D LUTs do not.
 
@@ -78,7 +78,7 @@ On an iPhone 14 Pro, ProRes 422 HQ at full size with reduced load held 30 fps fo
 benchmarks.csv              one row per recording
 logs/session_*.log
 probes/probe_*.txt
-videos/video_*.mov          encoded log video with audio, plus .json
+videos/video_*.mov          encoded log video with audio, plus .json and .gcsv
 luts/                       imported .cube files
 stills/still_*/             log_rec2020.png (16-bit), rec709_half.png, still.json
 clips/clip_*/

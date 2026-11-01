@@ -49,6 +49,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var monitorOffWhileRecording = false
     public var telemetry = true
     public var lockAtRoll = true
+    public var saveGyroLog = true
     public var mainsHz = 50
     /// Tool identifiers, in toolbar order.
     public var toolbar = ["zebras", "falseColor", "grid", "center", "level", "punchIn"]
@@ -81,6 +82,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         monitorOffWhileRecording = read(.monitorOffWhileRecording, defaults.monitorOffWhileRecording)
         telemetry = read(.telemetry, defaults.telemetry)
         lockAtRoll = read(.lockAtRoll, defaults.lockAtRoll)
+        saveGyroLog = read(.saveGyroLog, defaults.saveGyroLog)
         mainsHz = read(.mainsHz, defaults.mainsHz)
         toolbar = read(.toolbar, defaults.toolbar)
         activeTools = read(.activeTools, defaults.activeTools)

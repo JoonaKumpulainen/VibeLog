@@ -26,6 +26,10 @@ struct TakeCover: View {
 struct LibraryView: View {
     @EnvironmentObject private var model: AppModel
     @State private var takes: [Take] = []
+    @State private var isSelecting = false
+    @State private var selected: Set<URL> = []
+    @State private var toDelete: [Take] = []
+    @State private var confirmsDelete = false
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
@@ -37,6 +41,10 @@ struct LibraryView: View {
                         TakeCell(take: take)
                     }
                     .buttonStyle(.plain)
+                    .overlay { if isSelecting { selectionButton(take) } }
+                    .contextMenu {
+                        Button("Delete", systemImage: "trash", role: .destructive) { confirmDelete([take]) }
+                    }
                 }
             }
             .padding(12)
@@ -46,13 +54,44 @@ struct LibraryView: View {
                 ContentUnavailableView("No takes", systemImage: "film")
             }
         }
+        .safeAreaInset(edge: .bottom) {
+            if isSelecting {
+                Button("Delete \(selected.count)", systemImage: "trash", role: .destructive) {
+                    confirmDelete(takes.filter { selected.contains($0.url) })
+                }
+                .disabled(selected.isEmpty)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(Tokens.opaquePanel)
+            }
+        }
         .background(Color.black)
-        .navigationTitle("Takes")
+        .navigationTitle(isSelecting ? "\(selected.count) selected" : "Takes")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                if !takes.isEmpty {
+                    Button(isSelecting ? "Cancel" : "Select") {
+                        isSelecting.toggle()
+                        selected = []
+                    }
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Done") { model.closeLastTake() }
             }
+        }
+        .confirmationDialog(
+            toDelete.count == 1 ? "Delete this take?" : "Delete \(toDelete.count) takes?",
+            isPresented: $confirmsDelete, titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                model.delete(toDelete)
+                takes.removeAll { take in toDelete.contains { $0.url == take.url } }
+                isSelecting = false
+                selected = []
+            }
+        } message: {
+            Text("The video and its details can't be recovered.")
         }
         // This also runs on return from a take that was deleted.
         .onAppear {
@@ -61,6 +100,31 @@ struct LibraryView: View {
                 DispatchQueue.main.async { takes = found }
             }
         }
+    }
+
+    private func confirmDelete(_ takes: [Take]) {
+        toDelete = takes
+        confirmsDelete = true
+    }
+
+    /// Lies over a take, so its cell and thumbnail stay as they are.
+    private func selectionButton(_ take: Take) -> some View {
+        let isOn = selected.contains(take.url)
+        return Button {
+            if isOn { selected.remove(take.url) } else { selected.insert(take.url) }
+        } label: {
+            Color.clear
+                .contentShape(Rectangle())
+                .overlay(alignment: .topLeading) {
+                    Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                        .font(.title2)
+                        .foregroundStyle(isOn ? Tokens.held : Tokens.value)
+                        .padding(8)
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(take.dateLabel)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 }
 
@@ -146,7 +210,7 @@ struct TakePlayer: View {
             VideoPlayer(player: player)
             HStack(spacing: 0) {
                 Button { showsInfo = true } label: { action("Details", symbol: "info.circle") }
-                ShareLink(item: take.url) { action("Share", symbol: "square.and.arrow.up") }
+                ShareLink(items: take.files) { action("Share", symbol: "square.and.arrow.up") }
                 Button(role: .destructive) {
                     confirmsDelete = true
                 } label: {
@@ -170,11 +234,11 @@ struct TakePlayer: View {
         ) {
             Button("Delete", role: .destructive) {
                 player.replaceCurrentItem(with: nil)
-                model.delete(take)
+                model.delete([take])
                 dismiss()
             }
         } message: {
-            Text("This can't be undone.")
+            Text("The video and its details can't be recovered.")
         }
         .onAppear { player.play() }
         .onDisappear { player.pause() }
@@ -227,6 +291,7 @@ private struct TakeInfoView: View {
                     LabeledContent("Date", value: take.dateLabel)
                     LabeledContent("File size", value: take.sizeLabel)
                     LabeledContent("File", value: take.url.lastPathComponent)
+                    LabeledContent("Gyro log", value: take.files.count > 1 ? "Saved" : "None")
                 }
                 if !recording.isEmpty {
                     Section("Recording") { rows(recording) }

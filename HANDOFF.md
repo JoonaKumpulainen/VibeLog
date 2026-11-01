@@ -25,12 +25,12 @@ An iPhone camera app that records full-sensor RAW frames, processes them on the 
 | Path | Role |
 |---|---|
 | `App/` | SwiftUI UI, `AppModel`, `FrameRouter`, camera screen, format panel, library, Settings, Diagnostics, `DesignTokens` |
-| `Modules/VLCore` | Frames, stats, DNG reader, RAW levels, logging, storage, device status, `VideoFrameSink` |
-| `Modules/VLCapture` | Session, photo RAW driver, video driver, manual controls, audio, probe |
+| `Modules/VLCore` | Frames, stats, DNG reader, RAW levels, logging, storage, device status, `VideoFrameSink`, `GyroLog` |
+| `Modules/VLCapture` | Session, photo RAW driver, video driver, manual controls, audio, `MotionLogger`, probe |
 | `Modules/VLProcessing` | Log curves, color math, monitor LUT, `.cube` parser, Metal pipeline, still export, `Shaders.metal` |
 | `Modules/VLRecording` | RAW dump writer, `VideoEncoder`, encoder presets, encoder benchmark, `TakeLibrary` |
 | `Modules/ObjCGuard` | Catches Objective-C exceptions from AVFoundation, runtime scan |
-| `Tests/VLTests` | 61 tests, including real GPU tests on the simulator |
+| `Tests/VLTests` | 67 tests, including real GPU tests on the simulator |
 | `tools/inspect_clip.py` | Summarizes a RAW clip and exports a frame |
 
 Modules are dynamic frameworks. Swift is in Swift 5 mode.
@@ -52,6 +52,10 @@ Modules are dynamic frameworks. Swift is in Swift 5 mode.
 - **Features confirmed:** synced audio, 16:9 crop, zebras, false color and `.cube` import with **LUT made for**.
 - **Redesign:** the owner approved the camera screen after phone testing, apart from the fixes listed under Phase 5. Switching **Full view** five times during a take dropped no frames, and a recording with focus peaking on dropped none.
 - **Mic meter:** the bar reacts to sound, and a take with it showing dropped no frames.
+- **Frame rates:** no dropped frames at 24, 25 and 30 fps. One take each at 24 and 25 wrote 23.90 fps over 10 seconds and 24.97 fps over 42 seconds. 23.98 and 29.97 are newer and untested.
+- **Auto during a take:** the owner reported that auto exposure and white balance work. It hasn't been in a logged test, so its cost isn't measured.
+- **Long run in Efficient:** 10:12 of ProRes 422 HQ at full size with 0 `DROP`, 18338 frames and 172 MB/s, in a dark scene at 1/31 s and ISO 8710. Heat reached serious at 5 minutes, with **Keep recording when hot** on and no failure. The file wrote 29.97 fps, about 16 frames fewer than 30 fps gives, and the rolling rate dipped to 29.49 in 8 of 122 samples. `DROP` doesn't count frames the camera never delivered, so result lines now log `missed` and `gap`.
+- **Library and peaking:** the owner reported both working.
 
 ## Not verified
 
@@ -61,7 +65,7 @@ Modules are dynamic frameworks. Swift is in Swift 5 mode.
 - Whether the exposure default holds across scenes.
 - Recording on the ultra wide and tele.
 - Crash recovery from the 10-second file fragments.
-- What `-12686` and `-16800` mean.
+- What `-12686` and `-16800` mean. In one session, nearly every one was the single failure right after a session rebuild, and none came mid-take after the first seconds.
 - False color ranges, which are my own choice.
 - S-Log3 and LogC3 use Rec.2020, not their native gamuts.
 
@@ -73,13 +77,12 @@ New additions follow the design rules in [ROADMAP.md](ROADMAP.md). `CameraGeomet
 
 None of this has run on a phone, so its first build needs these answers:
 
-- **Frame rates:** does a 2-minute take at 24 and at 25 write that rate with no `DROP`? The `Frame timing:` log line shows what the sensor accepted, and the take's **Details** shows the measured rate. Frame timing below 30 is the first use of `activeVideoMinFrameDuration` under the Photo preset, so check that zero shutter lag and RAW still work there. Also confirm 30 still holds, because auto exposure now has a limit of one frame time at every rate.
-- **Auto during a take:** with the setting on, record 2 minutes while moving between bright and dark. Does `DROP` stay at 0, does the shutter stay at or above the frame rate, and do the file's exposure and color follow the scene smoothly? `Recording:` log lines carry shutter, ISO and gains. Gains are read as each photo arrives, so color may lag exposure by a frame or more.
-- **Library:** browse, play, share and delete. Thumbnails of ProRes at full size may be slow.
+- **Decimal frame rates:** does a 2-minute take at 23.98 and at 29.97 show no `DROP`? The `Frame timing:` log line shows what the sensor accepted, and the take's **Details** shows the measured rate. Files use each frame's real capture time, not a fixed grid, so check what an editor reports for them.
+- **Library delete:** **Select**, a long press on a take, and the player's **Delete**. Each removes the video and its sidecar.
+- **Format panel:** check it stops just short of the picture in all four holds.
 - **Presets:** save, apply, overwrite and swipe to delete, then reopen the app to check they persist.
-- **Accessibility:** a pass with VoiceOver, Increase Contrast and Reduce Motion on.
-- **10-minute test:** 10 minutes in Maximum quality at 30 fps, hands-off. Send the session log and sidecar. It's the last gate before gyro logging.
-- **Peaking:** still unanswered: is it as sensitive punched in as at full view, and does noise make it flicker at high ISO? Its threshold of 0.1 on log luma is my own choice.
+- **Gyro log:** does a `.gcsv` appear beside each take, and does a 2-minute take with it on show the same `DROP` as one with it off? The `Gyro log:` log line shows the real sample rate, requested at 200 Hz. Load a handheld clip in Gyroflow and check that the picture steadies instead of shaking more. The orientation `yXZ` is derived from the sensor's layout, because Gyroflow's docs only define it in a figure, and my reading of its axes is from memory. If it shakes more, Gyroflow's IMU Orientation field tries others without a new build; tell me which works.
+- **10-minute test:** the run so far used Efficient. Repeat it in Maximum quality at 30 fps, hands-off, and send the session log and sidecar. Check `missed` and `gap` on the result line.
 
 ### How the camera screen works
 
@@ -88,21 +91,22 @@ None of this has run on a phone, so its first build needs these answers:
 - **Control bar:** ISO, shutter, white balance and focus. Amber means set by the user, an A badge means auto and a lock means frozen for the take.
 - **Tray:** above the control bar, it shows the tools and lenses, a dial or the **MON** tools, so the control bar always stays. During a take the mic meter replaces the lenses.
 - **Dials:** they have **AUTO** and **FINE**. The white balance dial also sets tint, and the focus dial has **PUNCH** and **PEAK**. Shutter angle shows while the shutter dial is open.
-- **Format:** **FORMAT** opens slidable columns for codec, chroma, size, log curve, aspect and frame rate. ProRes has no 4:2:0. Changing frame rate rebuilds the session, unlike the other columns.
+- **Format:** **FORMAT** opens slidable columns for codec, chroma, size, log curve, aspect and frame rate. **ASPECT** calls 4:3 **OPEN GATE**, and **SIZE** shows the full recorded size for the chosen aspect. It's square-cornered and reaches from the screen's edge to `CameraGeometry.formatGap` short of the picture, with its rows sharing the depth. ProRes has no 4:2:0. Changing frame rate rebuilds the session 0.3 seconds after the column settles, unlike the other columns, and record waits for it.
 - **Clock:** with the drop count, it takes the two columns right of record in every hold. It shows only the digits in use, at the largest size that fits.
 - **Notices:** short notices cover the tray and control bar for a few seconds, and a tap clears them. A take that ends early leaves an orange card until dismissed.
 - **EV:** an offset stays visible in the tool row, and a tap resets it.
 - **Last take:** the thumbnail left of record plays the newest video and stops the stream until the screen closes. Sound follows the silent switch, because audio session settings were left alone to protect recording.
-- **Library:** back from that player is every take in `videos/`, newest first, with drops marked. Each has **Details** from its sidecar, **Share** and **Delete**, which also removes the sidecar. RAW dumps stay in the Files app.
+- **Library:** back from that player is every take in `videos/`, newest first, with drops marked. Each has **Details** from its sidecar, **Share** and **Delete**, which also removes the sidecar. **Select** or a long press deletes from the grid. RAW dumps stay in the Files app.
 - **Full view:** at 16:9 the tool row offers a 699x393 picture that leaves the 4:3 frame with only a strip beneath it. A take that stops early leaves it.
 - **Punch-in:** it moves where the existing monitor draw samples, so it adds no GPU work. It shows a third of the picture, close to one sensor pixel per drawable pixel in Maximum quality and half that in Efficient. It opens on the last focus point and drags, including during a take.
 - **Focus peaking:** a `Tool` that marks fine detail in cyan on the monitor, with four extra texture reads per drawable pixel while it's on. Its neighbors are fixed at about three sensor pixels, so punching in doesn't weaken it.
 - **Mic meter:** the bar moves about twelve times a second by writing to Core Animation layers from the audio queue, so it skips the main thread. Its dB number updates once a second. Green runs to -12 dB, yellow to -3 dB, then red.
+- **Gyro log:** with **Save gyro data** on, the default, each encoded take gets a `.gcsv` of the same name in `videos/`, from `CMDeviceMotion` on its own utility queue. Time zero is the first frame, on the same clock as frame timestamps, and the file is flushed once a second. Rotation is CoreMotion's bias-corrected rate. RAW dumps get none. Share sends it with the video, and delete removes it.
 - **Settings:** one searchable page ordered by use, shown as a sheet. Format changes link to the panel. Presets save every format column plus pipeline, debayer and exposure offset, inside `VibeLog.config.json`. The volume buttons toggle recording on iOS 18 and later.
 
 ### Still to do
 
-Only the phone tests above. Gyro logging to a Gyroflow `.gcsv` follows as its own change once the 10-minute test passes.
+Only the phone tests above, then Phase 6.
 
 `VLCapture` gained focus and exposure points, exposure compensation, live values and audio peak measurement. `VLProcessing` gained the monitor view and peaking. Other module code is unchanged.
 
