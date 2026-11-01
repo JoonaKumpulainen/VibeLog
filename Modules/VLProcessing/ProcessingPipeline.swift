@@ -105,8 +105,9 @@ public final class ProcessingPipeline: NSObject {
     public let device: MTLDevice
 
     private static let lutSize = 33
-    private static let maxInFlight = 2
-    private static let outputCount = 3
+    /// Three frames absorb the 69 ms GPU spikes seen while encoding.
+    private static let maxInFlight = 3
+    private static let outputCount = 4
 
     private let queue: MTLCommandQueue
     private let processState: MTLComputePipelineState

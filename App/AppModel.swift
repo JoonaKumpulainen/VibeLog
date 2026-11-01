@@ -37,7 +37,8 @@ final class AppModel: ObservableObject {
     @Published var pipelineStats = PipelineStats()
 
     @Published var recordEncoded = true
-    @Published var encoderPreset = EncoderPreset.all[0]
+    /// The best preset proven at full size on an iPhone 14 Pro at 30 fps.
+    @Published var encoderPreset = EncoderPreset.all.first { $0.id == "prores422hq" } ?? EncoderPreset.all[0]
     @Published var encoderSize = EncoderSize.all[0]
 
     @Published var recordSeconds = 5.0
@@ -97,6 +98,7 @@ final class AppModel: ObservableObject {
             DispatchQueue.main.async { [self] in
                 if granted {
                     loadLenses()
+                    AVCaptureDevice.requestAccess(for: .audio) { _ in }
                 } else {
                     permissionDenied = true
                     Log.shared.error("Camera permission denied")
@@ -333,6 +335,7 @@ final class AppModel: ObservableObject {
             }
             Log.shared.info("VIDEO RESULT \(result.file): \(summary)")
             lastResult = summary
+            guard result.framesWritten > 0 else { return }
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let sidecar = Storage.videos.appendingPathComponent(result.file + ".json")

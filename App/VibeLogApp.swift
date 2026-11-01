@@ -24,7 +24,8 @@ struct VibeLogApp: App {
                 }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { model.enteredBackground() }
+            // Permission prompts make the app inactive for a moment, so only background counts.
+            if phase == .background { model.enteredBackground() }
         }
     }
 }
