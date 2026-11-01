@@ -15,9 +15,7 @@
 
 ## Phase 4: what's left
 
-- Find the cause of the encoder stall seen at 1% battery.
-- Measure how long recording lasts before heat costs frames, in both pipelines.
-- Check that **Reduce load when hot** helps.
+- Measure how long recording lasts past 8 minutes, in both pipelines.
 - Check **LUT input** with a look LUT.
 
 ## Pipelines

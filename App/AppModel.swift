@@ -497,8 +497,9 @@ final class AppModel: ObservableObject {
             if line.thermal == "CRITICAL" {
                 Log.shared.warn("Stopping at \(recordElapsed)s: thermal state is critical")
                 stopRecording()
-            } else if line.freeDiskGB < 2 {
-                Log.shared.warn("Stopping at \(recordElapsed)s: less than 2 GB free")
+            } else if line.freeDiskGB < 10 {
+                // Encoder drops began at about 8 GB free in a 10-minute test.
+                Log.shared.warn("Stopping at \(recordElapsed)s: less than 10 GB free")
                 stopRecording()
             }
         }
