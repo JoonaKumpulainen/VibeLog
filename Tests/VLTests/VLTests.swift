@@ -382,6 +382,134 @@ final class PipelineGPUTests: XCTestCase {
         XCTAssertEqual(chromaValue[1] >> 6, 512)
     }
 
+    /// Noisy Bayer data through both pipelines must give the same planes to within rounding.
+    private func comparePipelines(
+        lumaHeight: Int, chromaWidth: Int, chromaHeight: Int, demosaic: DemosaicMethod, curve: LogCurve
+    ) throws {
+        let pipeline = try makePipeline()
+        var settings = ProcessingSettings()
+        settings.demosaic = demosaic
+        settings.curve = curve
+        pipeline.update(settings)
+        let device = pipeline.device
+        let size = 32
+
+        var noise: UInt32 = 12345
+        var samples = [UInt16]()
+        for _ in 0..<(size * size) {
+            noise = noise &* 1_664_525 &+ 1_013_904_223
+            samples.append(UInt16(2112 + (noise >> 16) % 12160))
+        }
+        let inputDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .r16Uint, width: size, height: size, mipmapped: false)
+        inputDescriptor.usage = .shaderRead
+        let input = try XCTUnwrap(device.makeTexture(descriptor: inputDescriptor))
+        samples.withUnsafeBytes {
+            input.replace(region: MTLRegionMake2D(0, 0, size, size), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: size * 2)
+        }
+        func plane(_ format: MTLPixelFormat, _ width: Int, _ height: Int) throws -> MTLTexture {
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: format, width: width, height: height, mipmapped: false)
+            descriptor.usage = .shaderWrite
+            return try XCTUnwrap(device.makeTexture(descriptor: descriptor))
+        }
+        let fullLuma = try plane(.r16Unorm, size, lumaHeight)
+        let fullChroma = try plane(.rg16Unorm, chromaWidth, chromaHeight)
+        let directLuma = try plane(.r16Unorm, size, lumaHeight)
+        let directChroma = try plane(.rg16Unorm, chromaWidth, chromaHeight)
+        let image = try XCTUnwrap(device.makeTexture(
+            descriptor: ProcessingPipeline.outputDescriptor(width: size, height: size)))
+
+        let queue = try XCTUnwrap(device.makeCommandQueue())
+        let commands = try XCTUnwrap(queue.makeCommandBuffer())
+        let gains: [Float] = [2.5, 1, 1.7]
+        XCTAssertTrue(pipeline.encode(into: commands, input: input, output: image, cfa: .bggr, gains: gains))
+        XCTAssertTrue(pipeline.encodeYCbCr(into: commands, image: image, luma: fullLuma, chroma: fullChroma))
+        XCTAssertTrue(pipeline.encodeDirect(
+            into: commands, input: input, luma: directLuma, chroma: directChroma, cfa: .bggr, gains: gains))
+        commands.commit()
+        commands.waitUntilCompleted()
+        XCTAssertEqual(commands.status, .completed)
+
+        func values(_ texture: MTLTexture, channels: Int) -> [UInt16] {
+            var data = [UInt16](repeating: 0, count: texture.width * texture.height * channels)
+            texture.getBytes(
+                &data, bytesPerRow: texture.width * channels * 2,
+                from: MTLRegionMake2D(0, 0, texture.width, texture.height), mipmapLevel: 0)
+            return data
+        }
+        func worstDifference(_ first: [UInt16], _ second: [UInt16]) -> Int {
+            zip(first, second).map { abs(Int($0 >> 6) - Int($1 >> 6)) }.max() ?? 0
+        }
+        let label = "\(demosaic) \(curve) \(lumaHeight) \(chromaWidth)x\(chromaHeight)"
+        XCTAssertLessThanOrEqual(worstDifference(values(fullLuma, channels: 1), values(directLuma, channels: 1)), 1, label)
+        XCTAssertLessThanOrEqual(worstDifference(values(fullChroma, channels: 2), values(directChroma, channels: 2)), 1, label)
+    }
+
+    func testEfficientPipelineMatchesAt422() throws {
+        for curve in LogCurve.allCases {
+            for demosaic in DemosaicMethod.allCases {
+                try comparePipelines(lumaHeight: 32, chromaWidth: 16, chromaHeight: 32, demosaic: demosaic, curve: curve)
+            }
+        }
+    }
+
+    func testEfficientPipelineMatchesAt420And444() throws {
+        try comparePipelines(lumaHeight: 32, chromaWidth: 16, chromaHeight: 16, demosaic: .malvar, curve: .appleLog)
+        try comparePipelines(lumaHeight: 32, chromaWidth: 32, chromaHeight: 32, demosaic: .malvar, curve: .appleLog)
+    }
+
+    func testEfficientPipelineMatchesCenterCrop() throws {
+        try comparePipelines(lumaHeight: 16, chromaWidth: 16, chromaHeight: 16, demosaic: .malvar, curve: .appleLog)
+    }
+
+    /// A flat scene must read the same on the small monitor path as on the full path.
+    func testMonitorPathMatchesFlatScene() throws {
+        let pipeline = try makePipeline()
+        var settings = ProcessingSettings()
+        settings.exposureStops = 0
+        pipeline.update(settings)
+        let device = pipeline.device
+        let gains: [Float] = [2.5, 1, 1.7]
+        let cfa = CFAPattern.bggr
+        var samples = [UInt16]()
+        for y in 0..<16 {
+            for x in 0..<16 {
+                var gain = gains[1]
+                if UInt32(x & 1) == cfa.redOffset.x, UInt32(y & 1) == cfa.redOffset.y { gain = gains[0] }
+                if UInt32(x & 1) == cfa.blueOffset.x, UInt32(y & 1) == cfa.blueOffset.y { gain = gains[2] }
+                samples.append(UInt16((0.18 / gain * 12159 + 2112).rounded()))
+            }
+        }
+        let inputDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .r16Uint, width: 16, height: 16, mipmapped: false)
+        inputDescriptor.usage = .shaderRead
+        let input = try XCTUnwrap(device.makeTexture(descriptor: inputDescriptor))
+        samples.withUnsafeBytes {
+            input.replace(region: MTLRegionMake2D(0, 0, 16, 16), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: 32)
+        }
+        let output = try XCTUnwrap(device.makeTexture(
+            descriptor: ProcessingPipeline.outputDescriptor(width: 8, height: 8)))
+        let queue = try XCTUnwrap(device.makeCommandQueue())
+        let commands = try XCTUnwrap(queue.makeCommandBuffer())
+        XCTAssertTrue(pipeline.encodeMonitor(into: commands, input: input, output: output, cfa: cfa, gains: gains))
+        let readback = try XCTUnwrap(device.makeBuffer(length: 8 * 8 * 8, options: .storageModeShared))
+        let blit = try XCTUnwrap(commands.makeBlitCommandEncoder())
+        blit.copy(
+            from: output, sourceSlice: 0, sourceLevel: 0, sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+            sourceSize: MTLSize(width: 8, height: 8, depth: 1), to: readback, destinationOffset: 0,
+            destinationBytesPerRow: 64, destinationBytesPerImage: readback.length)
+        blit.endEncoding()
+        commands.commit()
+        commands.waitUntilCompleted()
+        let pixels = readback.contents().bindMemory(to: UInt16.self, capacity: 8 * 8 * 4)
+        let offset = (4 * 8 + 4) * 4
+        let expected = LogCurve.appleLog.encode(0.18)
+        for channel in 0..<3 {
+            XCTAssertEqual(Double(pixels[offset + channel]) / 65535, expected, accuracy: 0.002)
+        }
+    }
+
     /// A vertical ramp, cropped to half its height, must start a quarter of the way down.
     func testYCbCrCropsToCenter() throws {
         let pipeline = try makePipeline()

@@ -35,6 +35,9 @@ struct ControlPanel: View {
             if model.method.isPhoto {
                 Section("Processing") {
                     Toggle("GPU pipeline", isOn: $model.processing.enabled)
+                    Picker("Pipeline", selection: $model.processing.pipeline) {
+                        ForEach(PipelineMode.allCases) { Text($0.label).tag($0) }
+                    }
                     Picker("Monitor", selection: $model.processing.monitor) {
                         ForEach(MonitorMode.allCases) { Text($0.label).tag($0) }
                     }

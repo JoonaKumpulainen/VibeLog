@@ -32,6 +32,11 @@ struct CropParams {
     float2 uvScale;
 };
 
+struct DirectParams {
+    int2 sourceOrigin;
+    uint2 chromaStep;
+};
+
 static inline int mirrored(int value, int size) {
     if (value < 0) return -value;
     if (value >= size) return 2 * size - 2 - value;
@@ -72,16 +77,20 @@ static inline float encodeLog(float x, uint curve) {
     }
 }
 
+// White-balanced camera RGB to log Rec.2020.
+static inline float3 cameraToLog(float3 rgb, constant ProcessParams &u) {
+    float3 linear = float3(dot(u.matrixRow0.xyz, rgb), dot(u.matrixRow1.xyz, rgb),
+                           dot(u.matrixRow2.xyz, rgb)) * u.exposure;
+    return float3(encodeLog(linear.r, u.curve), encodeLog(linear.g, u.curve),
+                  encodeLog(linear.b, u.curve));
+}
+
 // Debayers with Malvar-He-Cutler (demosaic 0) or bilinear (demosaic 1), converts to linear
 // Rec.2020, applies exposure and encodes log.
-kernel void processRaw(texture2d<ushort, access::read> raw [[texture(0)]],
-                       texture2d<float, access::write> output [[texture(1)]],
-                       constant ProcessParams &u [[buffer(0)]],
-                       uint2 gid [[thread_position_in_grid]]) {
-    int2 size = int2(raw.get_width(), raw.get_height());
-    int2 p = int2(gid);
-    bool redRow = (gid.y & 1) == u.redOffset.y;
-    bool redColumn = (gid.x & 1) == u.redOffset.x;
+static inline float3 logPixel(texture2d<ushort, access::read> raw, int2 p, int2 size,
+                              constant ProcessParams &u) {
+    bool redRow = (uint(p.y) & 1) == u.redOffset.y;
+    bool redColumn = (uint(p.x) & 1) == u.redOffset.x;
 
 #define S(dx, dy) balancedSample(raw, p + int2(dx, dy), size, u)
     float center = S(0, 0);
@@ -122,13 +131,31 @@ kernel void processRaw(texture2d<ushort, access::read> raw [[texture(0)]],
     } else {
         rgb = float3(inColumn, center, inRow);
     }
-    rgb = min(rgb, float3(u.clip));
+    return cameraToLog(min(rgb, float3(u.clip)), u);
+}
 
-    float3 linear = float3(dot(u.matrixRow0.xyz, rgb), dot(u.matrixRow1.xyz, rgb),
-                           dot(u.matrixRow2.xyz, rgb)) * u.exposure;
-    float3 encoded = float3(encodeLog(linear.r, u.curve), encodeLog(linear.g, u.curve),
-                            encodeLog(linear.b, u.curve));
-    output.write(float4(encoded, 1.0), gid);
+kernel void processRaw(texture2d<ushort, access::read> raw [[texture(0)]],
+                       texture2d<float, access::write> output [[texture(1)]],
+                       constant ProcessParams &u [[buffer(0)]],
+                       uint2 gid [[thread_position_in_grid]]) {
+    int2 size = int2(raw.get_width(), raw.get_height());
+    output.write(float4(logPixel(raw, int2(gid), size, u), 1.0), gid);
+}
+
+// Half-size monitor image built from whole 2x2 Bayer blocks, with no debayer.
+kernel void processMonitor(texture2d<ushort, access::read> raw [[texture(0)]],
+                           texture2d<float, access::write> output [[texture(1)]],
+                           constant ProcessParams &u [[buffer(0)]],
+                           uint2 gid [[thread_position_in_grid]]) {
+    int2 size = int2(raw.get_width(), raw.get_height());
+    int2 block = int2(gid) * 2;
+    int2 redAt = block + int2(u.redOffset);
+    int2 blueAt = block + (int2(1) - int2(u.redOffset));
+    float red = balancedSample(raw, redAt, size, u);
+    float blue = balancedSample(raw, blueAt, size, u);
+    float green = (balancedSample(raw, int2(redAt.x, blueAt.y), size, u) +
+                   balancedSample(raw, int2(blueAt.x, redAt.y), size, u)) * 0.5;
+    output.write(float4(cameraToLog(float3(red, green, blue), u), 1.0), gid);
 }
 
 // Rec.2020 non-constant luminance, 10-bit video range, MSB-aligned in 16 bits. Sampling on
@@ -161,6 +188,31 @@ kernel void encodeChroma(texture2d<float, access::sample> image [[texture(0)]],
                          uint2 gid [[thread_position_in_grid]]) {
     float2 uv = crop.uvOffset + crop.uvScale * (float2(gid) + 0.5) / float2(chroma.get_width(), chroma.get_height());
     float3 rgb = saturate(logSample(image, uv));
+    float y = rec2020Luma(rgb);
+    float cb = (rgb.b - y) / 1.8814;
+    float cr = (rgb.r - y) / 1.4746;
+    chroma.write(float4(msbAligned(512.0 + 896.0 * cb), msbAligned(512.0 + 896.0 * cr), 0.0, 0.0), gid);
+}
+
+// Writes the encoder's planes straight from the Bayer data, with the same math per pixel as
+// processRaw followed by encodeLuma and encodeChroma. Each thread covers one chroma sample.
+kernel void processDirect(texture2d<ushort, access::read> raw [[texture(0)]],
+                          texture2d<float, access::write> luma [[texture(1)]],
+                          texture2d<float, access::write> chroma [[texture(2)]],
+                          constant ProcessParams &u [[buffer(0)]],
+                          constant DirectParams &d [[buffer(1)]],
+                          uint2 gid [[thread_position_in_grid]]) {
+    int2 size = int2(raw.get_width(), raw.get_height());
+    float3 total = float3(0.0);
+    for (uint y = 0; y < d.chromaStep.y; y++) {
+        for (uint x = 0; x < d.chromaStep.x; x++) {
+            uint2 target = gid * d.chromaStep + uint2(x, y);
+            float3 rgb = saturate(logPixel(raw, int2(target) + d.sourceOrigin, size, u));
+            total += rgb;
+            luma.write(float4(msbAligned(64.0 + 876.0 * rec2020Luma(rgb))), target);
+        }
+    }
+    float3 rgb = total / float(d.chromaStep.x * d.chromaStep.y);
     float y = rec2020Luma(rgb);
     float cb = (rgb.b - y) / 1.8814;
     float cr = (rgb.r - y) / 1.4746;

@@ -1,5 +1,7 @@
 # VibeLog
 
+See [ROADMAP.md](ROADMAP.md) for the plan.
+
 iPhone 14 Pro camera app, working towards RAW Bayer capture processed on the GPU and recorded as log video. **Phase 1 only answers one question: can we get a continuous RAW stream, and how fast?**
 
 ## Install on the phone
@@ -36,7 +38,7 @@ Methods:
 
 ## Processing
 
-Photo methods feed a GPU pipeline: black level, white balance, debayer, camera RAW to linear Rec.2020 using the DNG's color matrices, exposure, then a log curve. **Monitor** shows the result through a Rec.709 LUT, as plain log, or switches back to the ISP preview. **Still** saves the next processed frame to `stills/`. The overlay's `gpu` line shows the time per frame and any frames the pipeline dropped.
+Photo methods feed a GPU pipeline: black level, white balance, debayer, camera RAW to linear Rec.2020 using the DNG's color matrices, exposure, then a log curve. **Pipeline** is **Maximum quality** by default; **Efficient** does the same math with less GPU work, as described in the roadmap. **Monitor** shows the result through a Rec.709 LUT, as plain log, or switches back to the ISP preview. **Still** saves the next processed frame to `stills/`. The overlay's `gpu` line shows the time per frame and any frames the pipeline dropped.
 
 The log image is Rec.2020 with the chosen curve for all three curves, so S-Log3 and LogC3 here use their transfer functions but not S-Gamut3 or ARRI Wide Gamut. Curve constants match colour-science's implementations of the vendor formulas.
 

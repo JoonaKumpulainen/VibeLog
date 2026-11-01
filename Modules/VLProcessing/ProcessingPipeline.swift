@@ -51,8 +51,23 @@ public enum ExposureOverlay: UInt32, CaseIterable, Identifiable, Sendable {
     }
 }
 
+public enum PipelineMode: String, CaseIterable, Identifiable, Sendable {
+    case maximum
+    case efficient
+
+    public var id: String { rawValue }
+
+    public var label: String {
+        switch self {
+        case .maximum: return "Maximum quality"
+        case .efficient: return "Efficient"
+        }
+    }
+}
+
 public struct ProcessingSettings: Equatable, Sendable {
     public var enabled = true
+    public var pipeline = PipelineMode.maximum
     public var overlay = ExposureOverlay.none
     /// Share of the sensor height kept by the recording crop, dimmed outside on the monitor.
     public var cropFraction = 1.0
@@ -131,6 +146,22 @@ private struct CropParams {
     var uvScale: SIMD2<Float>
 }
 
+private struct DirectParams {
+    var sourceOrigin: SIMD2<Int32>
+    var chromaStep: SIMD2<UInt32>
+}
+
+/// The encoder buffer for one frame, wrapped as textures the GPU can write.
+private struct SinkFrame {
+    var sink: VideoFrameSink
+    var buffer: CVPixelBuffer
+    var wrappedLuma: CVMetalTexture
+    var wrappedChroma: CVMetalTexture
+    var luma: MTLTexture
+    var chroma: MTLTexture
+    var time: CMTime
+}
+
 private struct CustomLUT {
     var texture: MTLTexture
     var lut: CubeLUT
@@ -151,6 +182,8 @@ public final class ProcessingPipeline: NSObject {
 
     private let queue: MTLCommandQueue
     private let processState: MTLComputePipelineState
+    private let directState: MTLComputePipelineState
+    private let monitorKernelState: MTLComputePipelineState
     private let lumaState: MTLComputePipelineState
     private let chromaState: MTLComputePipelineState
     private let monitorState: MTLRenderPipelineState
@@ -169,6 +202,9 @@ public final class ProcessingPipeline: NSObject {
     private var nextInput = 0
     private var outputs: [MTLTexture] = []
     private var nextOutput = 0
+    private var monitorOutputs: [MTLTexture] = []
+    private var nextMonitorOutput = 0
+    private var efficientFrames = 0
     private var latest: MTLTexture?
     private var drawScheduled = false
     private var lut: MTLTexture?
@@ -192,6 +228,8 @@ public final class ProcessingPipeline: NSObject {
         do {
             let library = try device.makeDefaultLibrary(bundle: Bundle(for: ProcessingPipeline.self))
             guard let kernel = library.makeFunction(name: "processRaw"),
+                let directKernel = library.makeFunction(name: "processDirect"),
+                let monitorKernel = library.makeFunction(name: "processMonitor"),
                 let lumaKernel = library.makeFunction(name: "encodeLuma"),
                 let chromaKernel = library.makeFunction(name: "encodeChroma")
             else {
@@ -199,6 +237,8 @@ public final class ProcessingPipeline: NSObject {
                 return nil
             }
             processState = try device.makeComputePipelineState(function: kernel)
+            directState = try device.makeComputePipelineState(function: directKernel)
+            monitorKernelState = try device.makeComputePipelineState(function: monitorKernel)
             lumaState = try device.makeComputePipelineState(function: lumaKernel)
             chromaState = try device.makeComputePipelineState(function: chromaKernel)
             let descriptor = MTLRenderPipelineDescriptor()
@@ -321,7 +361,7 @@ public final class ProcessingPipeline: NSObject {
         encodeQueue.async { [self] in
             guard let input = copyToInput(frame) else {
                 logOnce("Cannot copy the RAW buffer to the GPU")
-                finishFrame(nil)
+                finishFrame(success: false)
                 return
             }
             let capture = FrameCapture(
@@ -374,20 +414,61 @@ public final class ProcessingPipeline: NSObject {
     }
 
     private func process(_ input: MTLTexture, cfa: CFAPattern, capture: FrameCapture) {
-        guard let output = takeOutput(width: input.width, height: input.height),
-            let commands = queue.makeCommandBuffer(),
-            encode(into: commands, input: input, output: output, cfa: cfa, gains: capture.whiteBalanceGains)
-        else {
-            finishFrame(nil)
+        guard let commands = queue.makeCommandBuffer() else {
+            finishFrame(success: false)
             return
         }
-        let still = encodeStillReadback(commands, output: output, capture: capture)
-        let delivery = encodeForSink(commands, image: output, pts: capture.pts)
+        let sinkFrame = prepareSinkFrame(pts: capture.pts)
+        lock.lock()
+        let efficient = settings.pipeline == .efficient && stillRequest == nil
+        lock.unlock()
+
+        // Stills and resized recordings need the full image.
+        let direct = efficient && (sinkFrame == nil || sinkFrame?.luma.width == input.width)
+        var image: MTLTexture?
+        var still: (() -> Void)?
+        var encoded: Bool
+        if direct {
+            encoded = sinkFrame.map {
+                encodeDirect(into: commands, input: input, luma: $0.luma, chroma: $0.chroma, cfa: cfa,
+                             gains: capture.whiteBalanceGains)
+            } ?? true
+            // Every other frame is enough for the monitor while recording.
+            efficientFrames += 1
+            if sinkFrame == nil || efficientFrames % 2 == 0,
+                let monitor = takeMonitorOutput(width: input.width / 2, height: input.height / 2) {
+                encoded = encoded && encodeMonitor(
+                    into: commands, input: input, output: monitor, cfa: cfa,
+                    gains: capture.whiteBalanceGains)
+                image = monitor
+            }
+        } else {
+            guard let output = takeOutput(width: input.width, height: input.height) else {
+                finishFrame(success: false)
+                return
+            }
+            encoded = encode(into: commands, input: input, output: output, cfa: cfa, gains: capture.whiteBalanceGains)
+            if encoded, let sinkFrame {
+                encoded = encodeYCbCr(into: commands, image: output, luma: sinkFrame.luma, chroma: sinkFrame.chroma)
+            }
+            still = encoded ? encodeStillReadback(commands, output: output, capture: capture) : nil
+            image = output
+        }
+        guard encoded else {
+            finishFrame(success: false)
+            return
+        }
+        let finalImage = image
+        let finalStill = still
         commands.addCompletedHandler { [self] finished in
-            if finished.status == .completed { delivery?() }
+            let success = finished.status == .completed
+            if success, let sinkFrame {
+                withExtendedLifetime((sinkFrame.wrappedLuma, sinkFrame.wrappedChroma)) {}
+                sinkFrame.sink.append(sinkFrame.buffer, at: sinkFrame.time)
+            }
             let milliseconds = (finished.gpuEndTime - finished.gpuStartTime) * 1000
-            finishFrame(finished.status == .completed ? output : nil, gpuMs: milliseconds)
-            still?()
+            finishFrame(success: success, image: finalImage, gpuMs: milliseconds)
+            finalStill?()
         }
         commands.commit()
     }
@@ -413,9 +494,8 @@ public final class ProcessingPipeline: NSObject {
         return true
     }
 
-    /// Renders the log image into the encoder's next buffer. Returns the step that hands the
-    /// buffer over once the GPU is done, or nil when no frame goes to the encoder.
-    private func encodeForSink(_ commands: MTLCommandBuffer, image: MTLTexture, pts: Double) -> (() -> Void)? {
+    /// Gets the encoder's next buffer as textures, or nil when no frame goes to the encoder.
+    private func prepareSinkFrame(pts: Double) -> SinkFrame? {
         lock.lock()
         let target = sink
         lock.unlock()
@@ -436,12 +516,56 @@ public final class ProcessingPipeline: NSObject {
             logOnce("Cannot wrap the encoder's pixel buffer as textures")
             return nil
         }
-        guard encodeYCbCr(into: commands, image: image, luma: luma, chroma: chroma) else { return nil }
-        let time = CMTime(seconds: pts, preferredTimescale: 1_000_000_000)
-        return {
-            withExtendedLifetime((wrappedLuma, wrappedChroma)) {}
-            target.append(buffer, at: time)
-        }
+        return SinkFrame(
+            sink: target, buffer: buffer, wrappedLuma: wrappedLuma, wrappedChroma: wrappedChroma,
+            luma: luma, chroma: chroma, time: CMTime(seconds: pts, preferredTimescale: 1_000_000_000))
+    }
+
+    /// The efficient path: writes the encoder's planes directly from the Bayer data, center
+    /// cropping when the planes are shorter than the sensor.
+    @discardableResult
+    func encodeDirect(
+        into commands: MTLCommandBuffer, input: MTLTexture, luma: MTLTexture, chroma: MTLTexture,
+        cfa: CFAPattern, gains: [Float]
+    ) -> Bool {
+        guard let encoder = commands.makeComputeCommandEncoder() else { return false }
+        var parameters = makeParameters(cfa: cfa, gains: gains)
+        var direct = DirectParams(
+            sourceOrigin: SIMD2(Int32((input.width - luma.width) / 2), Int32((input.height - luma.height) / 2)),
+            chromaStep: SIMD2(UInt32(luma.width / chroma.width), UInt32(luma.height / chroma.height)))
+        encoder.setComputePipelineState(directState)
+        encoder.setTexture(input, index: 0)
+        encoder.setTexture(luma, index: 1)
+        encoder.setTexture(chroma, index: 2)
+        encoder.setBytes(&parameters, length: MemoryLayout<ProcessParams>.stride, index: 0)
+        encoder.setBytes(&direct, length: MemoryLayout<DirectParams>.stride, index: 1)
+        let width = directState.threadExecutionWidth
+        let height = max(directState.maxTotalThreadsPerThreadgroup / width, 1)
+        encoder.dispatchThreads(
+            MTLSize(width: chroma.width, height: chroma.height, depth: 1),
+            threadsPerThreadgroup: MTLSize(width: width, height: height, depth: 1))
+        encoder.endEncoding()
+        return true
+    }
+
+    @discardableResult
+    func encodeMonitor(
+        into commands: MTLCommandBuffer, input: MTLTexture, output: MTLTexture, cfa: CFAPattern,
+        gains: [Float]
+    ) -> Bool {
+        guard let encoder = commands.makeComputeCommandEncoder() else { return false }
+        var parameters = makeParameters(cfa: cfa, gains: gains)
+        encoder.setComputePipelineState(monitorKernelState)
+        encoder.setTexture(input, index: 0)
+        encoder.setTexture(output, index: 1)
+        encoder.setBytes(&parameters, length: MemoryLayout<ProcessParams>.stride, index: 0)
+        let width = monitorKernelState.threadExecutionWidth
+        let height = max(monitorKernelState.maxTotalThreadsPerThreadgroup / width, 1)
+        encoder.dispatchThreads(
+            MTLSize(width: output.width, height: output.height, depth: 1),
+            threadsPerThreadgroup: MTLSize(width: width, height: height, depth: 1))
+        encoder.endEncoding()
+        return true
     }
 
     /// Converts a log image to biplanar 10-bit YCbCr. Separate so tests can use plain textures.
@@ -517,6 +641,18 @@ public final class ProcessingPipeline: NSObject {
         return outputs[nextOutput]
     }
 
+    private func takeMonitorOutput(width: Int, height: Int) -> MTLTexture? {
+        lock.lock()
+        defer { lock.unlock() }
+        if monitorOutputs.first?.width != width || monitorOutputs.first?.height != height {
+            let descriptor = Self.outputDescriptor(width: width, height: height)
+            monitorOutputs = (0..<Self.outputCount).compactMap { _ in device.makeTexture(descriptor: descriptor) }
+        }
+        guard monitorOutputs.count == Self.outputCount else { return nil }
+        nextMonitorOutput = (nextMonitorOutput + 1) % Self.outputCount
+        return monitorOutputs[nextMonitorOutput]
+    }
+
     static func outputDescriptor(width: Int, height: Int) -> MTLTextureDescriptor {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .rgba16Unorm, width: width, height: height, mipmapped: false)
@@ -559,12 +695,12 @@ public final class ProcessingPipeline: NSObject {
         }
     }
 
-    private func finishFrame(_ output: MTLTexture?, gpuMs: Double = 0) {
+    private func finishFrame(success: Bool, image: MTLTexture? = nil, gpuMs: Double = 0) {
         lock.lock()
         inFlight -= 1
         var schedule = false
-        if let output {
-            latest = output
+        if success {
+            if let image { latest = image }
             stats.processed += 1
             stats.gpuLastMs = gpuMs
             gpuTotalMs += gpuMs
@@ -574,7 +710,7 @@ public final class ProcessingPipeline: NSObject {
             let paused = settings.pauseMonitorWhileRecording && sink != nil
             drawCounter += 1
             let slowed = hot && settings.reduceLoadWhenHot && drawCounter % 3 != 0
-            schedule = !drawScheduled && settings.monitor != .isp && !paused && !slowed
+            schedule = image != nil && !drawScheduled && settings.monitor != .isp && !paused && !slowed
             if schedule { drawScheduled = true }
         } else {
             stats.dropped += 1
