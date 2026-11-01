@@ -100,3 +100,11 @@ python3 tools/inspect_clip.py path/to/clip_x --png frame.png
 ## Limits
 
 CI proves the code compiles and the file, stats and DNG parsing logic works. Nothing touching the camera has run until it runs on a phone.
+
+## License
+
+Copyright (C) 2026 JoonaKumpulainen
+
+VibeLog is free software under the [GNU General Public License v3.0](LICENSE). You can use, change and share it, and anyone who distributes a modified version must share its source under the same license.
+
+Apple Log, ProRes, S-Log3 and LogC3 are trademarks of their owners. VibeLog is an independent project and is not affiliated with or endorsed by them.
