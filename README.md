@@ -53,7 +53,7 @@ Summarize a clip and export a frame on a computer:
 python3 tools/inspect_clip.py path/to/clip_x --png frame.png
 ```
 
-`clip.json` holds `blackLevel` and `whiteLevel` for `frames.raw`. The `dng` block holds the tags of `reference.dng`, which use a different scale. A recording needs about 730 MB/s, or 44 GB per minute, at 12 MP and 30 fps.
+`clip.json` holds `blackLevel` and `whiteLevel` for `frames.raw`. The `dng` block holds the tags of `reference.dng`, which use a different scale. A recording needs about 730 MB/s, or 44 GB per minute, at 12 MP and 30 fps. An iPhone 14 Pro wrote that for about 8 GB and then fell to about 420 MB/s, so longer RAW dumps save only some frames. `frames` lists every captured frame; one with no `fileOffset` was not saved.
 
 ## Project layout
 

@@ -1,7 +1,7 @@
 import CoreVideo
 import XCTest
 import VLCore
-import VLRecording
+@testable import VLRecording
 
 final class FrameStatsTests: XCTestCase {
     func testSteadyStream() {
@@ -214,6 +214,35 @@ final class RawRecorderTests: XCTestCase {
         let sidecar = try XCTUnwrap(JSONSerialization.jsonObject(with: json) as? [String: Any])
         XCTAssertEqual(sidecar["blackLevel"] as? [Double], [2112])
         XCTAssertEqual(sidecar["whiteLevel"] as? [Double], [16383])
+    }
+
+    func testDroppedFramesKeepTimingWithoutFileOffsets() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let size = FrameLayout(buffer: makeBuffer(fill: 0)).bytesPerFrame
+        let recorder = try RawRecorder(config: .init(
+            directory: folder, writeFrames: true, memoryBudget: size * 2,
+            context: ClipContext(method: "test", lens: "test", format: "test", requestedSeconds: 1)))
+        recorder.suspendWriterForTesting()
+        let results = (0..<4).map { recorder.append(frame($0)) }
+        recorder.resumeWriterForTesting()
+        XCTAssertEqual(results, [true, true, false, false])
+        let done = expectation(description: "finished")
+        var snapshot: FrameStats.Snapshot?
+        recorder.finish { result in
+            snapshot = result.stats
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 10)
+        XCTAssertEqual(snapshot?.frames, 4)
+        XCTAssertEqual(snapshot?.writerDrops, 2)
+        XCTAssertEqual(snapshot?.sustainedFPS ?? 0, 10, accuracy: 0.001)
+        let json = try Data(contentsOf: folder.appendingPathComponent("clip.json"))
+        let sidecar = try XCTUnwrap(JSONSerialization.jsonObject(with: json) as? [String: Any])
+        let frames = try XCTUnwrap(sidecar["frames"] as? [[String: Any]])
+        XCTAssertEqual(frames.map { $0["fileOffset"] as? Int }, [0, size, nil, nil])
+        let raw = try Data(contentsOf: folder.appendingPathComponent("frames.raw"))
+        XCTAssertEqual(raw.count, size * 2)
     }
 
     func testMeasureOnlyModeWritesNoFrames() throws {

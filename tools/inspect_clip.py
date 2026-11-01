@@ -21,7 +21,9 @@ BLOCKS = {
 
 def summarize(clip):
     frames = clip["frames"]
-    print(f"device {clip['device']}  method {clip['context']['method']}  frames {len(frames)}")
+    saved = sum(1 for f in frames if f.get("fileOffset") is not None)
+    print(f"device {clip['device']}  method {clip['context']['method']}  "
+          f"frames {len(frames)}  saved {saved}")
     layout = clip.get("layout")
     if layout:
         print(f"format {layout['pixelFormat']} {layout['width']}x{layout['height']} "
@@ -56,7 +58,7 @@ def export_frame(folder, clip, index, output):
         sys.exit(f"cannot debayer pattern {pattern}")
     record = clip["frames"][index]
     if record.get("fileOffset") is None:
-        sys.exit("this clip was recorded without frames")
+        sys.exit("this frame was not saved")
     width, height = layout["width"], layout["height"]
     stride = layout["planes"][0]["bytesPerRow"]
     black = (clip.get("blackLevel") or [0])[0]

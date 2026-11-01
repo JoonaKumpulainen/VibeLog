@@ -35,6 +35,7 @@ public final class RawRecorder {
     private var peakBlocks = 0
     private var blockLimit = 0
     private var records: [FrameRecord] = []
+    private var savedFrames = 0
     private var bytesWritten = 0
     private var writeSeconds = 0.0
     private var writeFailed = false
@@ -50,7 +51,9 @@ public final class RawRecorder {
         try FileManager.default.createDirectory(at: config.directory, withIntermediateDirectories: true)
     }
 
-    /// Takes one frame on the capture thread. Returns false if it was dropped.
+    /// Takes one frame on the capture thread. Frames the writer cannot take are still
+    /// recorded with no file offset, so clip timing always describes capture. Returns
+    /// false if the frame was not saved.
     @discardableResult
     public func append(_ frame: RawFrame) -> Bool {
         lock.lock()
@@ -66,32 +69,35 @@ public final class RawRecorder {
             return false
         }
 
-        let index = records.count
         var record = FrameRecord(
-            index: index, fileOffset: nil, pts: frame.pts, exposureSeconds: frame.exposureSeconds,
+            index: records.count, fileOffset: nil, pts: frame.pts, exposureSeconds: frame.exposureSeconds,
             iso: frame.iso, whiteBalanceGains: frame.whiteBalanceGains,
             sample: frame.cfa == nil ? nil : FrameSampler.sample(frame.buffer))
         updateFrameCheck(record.sample)
 
-        if config.writeFrames {
-            guard let block = takeBlock(size: layout.bytesPerFrame) else {
-                stats.recordWriterDrop()
-                return false
-            }
-            guard copy(frame.buffer, layout: layout, to: block) else {
-                freeBlocks.append(block)
-                blocksInUse -= 1
-                stats.recordWriterDrop()
-                return false
-            }
-            record.fileOffset = index * layout.bytesPerFrame
-            let size = layout.bytesPerFrame
-            writer.async { [self] in write(block, size: size) }
-        }
+        let saved = !config.writeFrames || enqueue(frame, layout: layout, record: &record)
         records.append(record)
         stats.recordFrame(pts: frame.pts)
+        if !saved { stats.recordWriterDrop() }
+        return saved
+    }
+
+    private func enqueue(_ frame: RawFrame, layout: FrameLayout, record: inout FrameRecord) -> Bool {
+        guard let block = takeBlock(size: layout.bytesPerFrame) else { return false }
+        guard copy(frame.buffer, layout: layout, to: block) else {
+            freeBlocks.append(block)
+            blocksInUse -= 1
+            return false
+        }
+        record.fileOffset = savedFrames * layout.bytesPerFrame
+        savedFrames += 1
+        let size = layout.bytesPerFrame
+        writer.async { [self] in write(block, size: size) }
         return true
     }
+
+    func suspendWriterForTesting() { writer.suspend() }
+    func resumeWriterForTesting() { writer.resume() }
 
     public func recordCaptureDrop() { stats.recordCaptureDrop() }
     public func recordCaptureFailure() { stats.recordCaptureFailure() }
@@ -257,6 +263,7 @@ public final class RawRecorder {
         let levels = self.levels
         let check = frameCheck
         let frames = records
+        let saved = savedFrames
         let layout = self.layout
         let cfa = self.cfa
         let peak = peakBlocks
@@ -285,7 +292,8 @@ public final class RawRecorder {
             Log.shared.error("clip.json failed: \(error)")
         }
 
-        let summary = Self.summary(context: config.context, layout: layout, stats: snapshot, throughput: throughput)
+        let summary = Self.summary(
+            context: config.context, layout: layout, stats: snapshot, saved: saved, throughput: throughput)
         Log.shared.info("CLIP RESULT \(config.directory.lastPathComponent): \(summary)")
         Log.shared.info("Frame check: \(check.sampledFrames) sampled, \(check.repeatedFrames) repeated, "
             + "values \(check.minValue.map(String.init) ?? "-") to \(check.maxValue.map(String.init) ?? "-"), "
@@ -295,13 +303,14 @@ public final class RawRecorder {
     }
 
     private static func summary(
-        context: ClipContext, layout: FrameLayout?, stats: FrameStats.Snapshot, throughput: Double
+        context: ClipContext, layout: FrameLayout?, stats: FrameStats.Snapshot, saved: Int,
+        throughput: Double
     ) -> String {
         let format = layout.map { "\($0.pixelFormat) \($0.width)x\($0.height)" } ?? "no frames"
         return String(
-            format: "%@ %@: %.2f fps sustained, %d frames in %.1fs, gaps ms med %.1f p95 %.1f max %.1f sd %.1f, "
+            format: "%@ %@: %.2f fps captured, %d frames in %.1fs, %d saved, gaps ms med %.1f p95 %.1f max %.1f sd %.1f, "
                 + "missed~%d capDrop %d fail %d writerDrop %d, disk %.0f MB/s",
-            context.method, format, stats.sustainedFPS, stats.frames, stats.durationSeconds,
+            context.method, format, stats.sustainedFPS, stats.frames, stats.durationSeconds, saved,
             stats.gapMedianMs, stats.gapP95Ms, stats.gapMaxMs, stats.gapStdDevMs,
             stats.estimatedMissed, stats.captureDrops, stats.captureFailures, stats.writerDrops,
             throughput)
