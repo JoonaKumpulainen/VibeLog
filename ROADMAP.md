@@ -13,6 +13,50 @@
 | 7 | Shooting tools | Planned |
 | 8 | On-phone finishing | Planned |
 
+## Design rules for new additions
+
+Everything added from here on follows these rules, so the app stays one instrument instead of a pile of features. If an addition can't fit, change the rules here first, on purpose.
+
+### Rules that never bend
+
+- **Nothing covers the picture.** Controls and messages stay in the space around it. Monitoring marks that help judge the image, such as zebras or peaking, are the only things drawn on it, and they never reach the file.
+- **Controls don't move.** Every control keeps its portrait position in every hold, and only its contents turn in place. Record never moves.
+- **A take comes first.** A new control must say whether it's allowed during a take, and it stays off until a control test shows it costs no frames. See "Adjusting the camera while recording" in the handoff.
+- **Keep the main thread quiet.** Interface values update about once a second during a take, and nothing animates continuously. Short animations only follow a tap.
+
+### Where a new thing goes
+
+| It is | It goes |
+|---|---|
+| A setting changed between shots | The format panel, as a list entry or a new column |
+| A setting changed rarely | Settings, in the section it belongs to, with search terms |
+| A value changed while shooting | The control bar. It holds four values, so a fifth needs one to leave |
+| A way to adjust a control bar value | That value's dial, as a tray button |
+| A monitoring aid | `Tool`, which adds it to the MON tray and the tool row. Add a dial button if it serves one control |
+| A live reading | The tray during a take, or a status line if it's worth a permanent line |
+| Something that could spoil a take | A warning chip while it's a risk, and a notice card when it happens |
+| A test or measurement | Diagnostics, never the camera screen |
+
+Only one thing occupies the tray at a time. Status keeps three lines on each side of the Dynamic Island, so a new line has to replace one.
+
+Each setting has one home. Settings can link to the format panel, but never repeats it.
+
+### How it should look
+
+- **Color has fixed meanings.** Amber is set by the user. Orange fill is a warning. Red is recording only. Cyan is peaking. A new meaning needs a new shape, because color can't be the only signal.
+- **Use `Tokens` and `CameraGeometry`,** never new sizes or colors in a view. Text sizes follow the hold, not a per-view shrink.
+- **Labels are plain.** Use a whole word where it fits, and an industry term where one exists. Icons need a text label beside them or an accessibility label.
+- **No boxes.** Group with alignment and spacing. A flat `Tokens.surface` fill marks what's selected, and `Tokens.opaquePanel` is for a panel that sits above the controls.
+- **Touch targets are at least 44 points,** in both axes where a control turns.
+
+### Before it's done
+
+- Check it in all four holds, in 4:3, 16:9 and Full view, and during a take.
+- Give it an accessibility label and value.
+- Respect Reduce Motion for any animation.
+- Say what it costs. Anything adding real-time GPU work follows the Phase 6 rule below and gets a test on the phone.
+- Update this file, the handoff and the README in the same change.
+
 ## Pipelines
 
 Both pipelines use the same debayer, color and log math at every pixel.
@@ -57,7 +101,7 @@ The rule for this phase: anything that adds to real-time GPU load must prove it 
 
 ## Phase 7: shooting tools
 
-- Focus peaking and a focus punch-in.
+- Focus peaking and a focus punch-in: done, except a tested peaking threshold.
 - RAW histogram, waveform and vectorscope.
 - Horizon indicator, using the Phase 6 motion data.
 - Frame guides, a 3x3 grid and anamorphic desqueeze.

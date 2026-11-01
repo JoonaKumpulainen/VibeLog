@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Monitoring tools, switched on from the monitor panel.
 enum Tool: String, CaseIterable, Identifiable {
-    case zebras, falseColor, grid, center, level, punchIn
+    case zebras, falseColor, peaking, grid, center, level, punchIn
 
     var id: String { rawValue }
 
@@ -10,6 +10,7 @@ enum Tool: String, CaseIterable, Identifiable {
         switch self {
         case .zebras: return "Zebras"
         case .falseColor: return "False color"
+        case .peaking: return "Focus peaking"
         case .grid: return "Thirds grid"
         case .center: return "Center mark"
         case .level: return "Level"
@@ -21,6 +22,7 @@ enum Tool: String, CaseIterable, Identifiable {
         switch self {
         case .zebras: return "ZEBRA"
         case .falseColor: return "FALSE"
+        case .peaking: return "PEAK"
         case .grid: return "GRID"
         case .center: return "CENTER"
         case .level: return "LEVEL"
@@ -32,6 +34,7 @@ enum Tool: String, CaseIterable, Identifiable {
         switch self {
         case .zebras: return "circle.lefthalf.striped.horizontal"
         case .falseColor: return "paintpalette"
+        case .peaking: return "scope"
         case .grid: return "squareshape.split.3x3"
         case .center: return "plus"
         case .level: return "level"

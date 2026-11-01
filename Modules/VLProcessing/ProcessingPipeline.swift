@@ -141,6 +141,8 @@ private struct MonitorParams {
     var bandsHigh: SIMD4<Float>
     var viewOrigin: SIMD2<Float>
     var viewScale: Float
+    var peaking: UInt32
+    var peakStep: SIMD2<Float>
 }
 
 private struct CropParams {
@@ -219,6 +221,7 @@ public final class ProcessingPipeline: NSObject {
     private var hot = false
     private var monitorOrigin = SIMD2<Float>(0, 0)
     private var monitorScale: Float = 1
+    private var monitorPeaking = false
     private var drawCounter = 0
     private var loggedFailure = false
 
@@ -269,12 +272,14 @@ public final class ProcessingPipeline: NSObject {
 
     /// The part of the portrait picture the monitor shows. This only moves where the same draw
     /// samples, so it adds no GPU work, and in Maximum quality a third of the picture is close to
-    /// one sensor pixel per drawable pixel. Efficient has half that detail to show.
-    public func setMonitorView(origin: SIMD2<Float>, scale: Float) {
+    /// one sensor pixel per drawable pixel. Efficient has half that detail to show. Peaking adds
+    /// four texture reads per drawable pixel, only while it's on.
+    public func setMonitorView(origin: SIMD2<Float>, scale: Float, peaking: Bool) {
         lock.lock()
         defer { lock.unlock() }
         monitorOrigin = origin
         monitorScale = scale
+        monitorPeaking = peaking
     }
 
     /// Replaces the Rec.709 monitoring LUT, or restores it when nil.
@@ -782,6 +787,7 @@ extension ProcessingPipeline: MTKViewDelegate {
         let custom = customLUT
         let viewOrigin = monitorOrigin
         let viewScale = monitorScale
+        let peaking = monitorPeaking
         lock.unlock()
         guard current.monitor != .isp, let image, let rec709 = currentLUT(curve: current.curve),
             let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
@@ -803,7 +809,10 @@ extension ProcessingPipeline: MTKViewDelegate {
             lutScale: SIMD4(1 / (high - low), 0), lutOffset: SIMD4(low, 0),
             bandsLow: SIMD4(bands.blueBelow, bands.greenFrom, bands.greenTo, bands.pinkFrom),
             bandsHigh: SIMD4(bands.pinkTo, bands.yellowFrom, bands.clip, Float(Self.lutSize)),
-            viewOrigin: viewOrigin, viewScale: viewScale)
+            viewOrigin: viewOrigin, viewScale: viewScale, peaking: peaking ? 1 : 0,
+            // The image is turned on screen, so its first axis runs along the drawable's height.
+            peakStep: SIMD2(
+                viewScale / Float(view.drawableSize.height), viewScale / Float(view.drawableSize.width)))
         encoder.setRenderPipelineState(monitorState)
         encoder.setFragmentTexture(image, index: 0)
         encoder.setFragmentTexture(rec709, index: 1)

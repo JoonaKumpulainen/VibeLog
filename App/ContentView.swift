@@ -67,8 +67,11 @@ struct CameraScreen: View {
             if recording, selectedDial == .focus { selectedDial = nil }
             if recording { showFormat = false }
         }
-        .fullScreenCover(isPresented: $showSettings) {
-            SettingsView()
+        .sheet(isPresented: $showSettings) {
+            SettingsView {
+                model.fullView = false
+                showFormat = true
+            }
         }
         .fullScreenCover(isPresented: Binding(
             get: { model.playingTake != nil },

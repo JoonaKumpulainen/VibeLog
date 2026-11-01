@@ -268,13 +268,12 @@ final class AppModel: ObservableObject {
     }
 
     private func applyMonitorView() {
-        guard isOn(.punchIn) else {
-            pipeline?.setMonitorView(origin: SIMD2(0, 0), scale: 1)
-            return
-        }
-        let scale = Self.punchScale
-        let origin = SIMD2(Float(punchCenter.x - scale / 2), Float(punchCenter.y - scale / 2))
-        pipeline?.setMonitorView(origin: origin, scale: Float(scale))
+        let punched = isOn(.punchIn)
+        let scale = punched ? Self.punchScale : 1
+        let origin = punched
+            ? SIMD2(Float(punchCenter.x - scale / 2), Float(punchCenter.y - scale / 2))
+            : SIMD2<Float>(0, 0)
+        pipeline?.setMonitorView(origin: origin, scale: Float(scale), peaking: isOn(.peaking))
     }
 
     /// The shutter as a share of the frame time.

@@ -236,6 +236,11 @@ struct ControlPanels: View {
                 trayButton("PUNCH", isOn: model.isOn(.punchIn), label: "Punch-in") {
                     model.toggle(.punchIn)
                 }
+                if model.monitorIsProcessed {
+                    trayButton("PEAK", isOn: model.isOn(.peaking), label: "Focus peaking") {
+                        model.toggle(.peaking)
+                    }
+                }
             }
             trayButton("FINE", isOn: fine, label: "Fine adjustment") { fine.toggle() }
         }
