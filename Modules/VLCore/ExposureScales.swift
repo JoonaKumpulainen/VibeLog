@@ -60,9 +60,10 @@ public enum ExposureScales {
     /// Even steps for fine adjustment, in ratios for ISO and shutter.
     public static func fineStops(geometric range: ClosedRange<Double>, perStop: Int) -> [Stop] {
         let count = Int((log2(range.upperBound / range.lowerBound) * Double(perStop)).rounded())
-        return (0...max(count, 1)).map { step in
-            let value = range.lowerBound * pow(2, Double(step) / Double(perStop))
-            return Stop(value: min(value, range.upperBound), label: "", isMajor: step % perStop == 0)
+        let last = max(count, 1)
+        return (0...last).map { step in
+            let value = step == last ? range.upperBound : range.lowerBound * pow(2, Double(step) / Double(perStop))
+            return Stop(value: value, label: "", isMajor: step % perStop == 0)
         }
     }
 
