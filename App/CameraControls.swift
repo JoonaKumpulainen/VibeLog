@@ -1,72 +1,78 @@
 import SwiftUI
-import UIKit
 
 enum ControlDial: CaseIterable, Identifiable {
-    case iso, shutter, whiteBalance, focus
+    case shutter, iso, whiteBalance, focus
 
     var id: Self { self }
 }
 
-/// The value buttons under the viewfinder, and the dial for the chosen one.
-struct ControlStrip: View {
+/// The read-out row, and the dial for the chosen value above it.
+struct ControlPanels: View {
     @EnvironmentObject private var model: AppModel
-    @State private var selected: ControlDial?
-    let iconAngle: Double
+    @Binding var selected: ControlDial?
 
     var body: some View {
         VStack(spacing: 6) {
-            Group {
-                if let selected {
-                    HStack(spacing: 12) {
-                        lockButton(selected)
-                        dial(selected)
+            if let selected {
+                dialPanel(selected)
+                    .transition(.opacity)
+            }
+            HStack(spacing: 0) {
+                cell(title: "FPS", value: "30", held: false)
+                ForEach(ControlDial.allCases) { control in
+                    divider
+                    Button {
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            selected = selected == control ? nil : control
+                        }
+                    } label: {
+                        cell(title: title(control), value: value(control), held: isHeld(control))
+                            .background(selected == control ? Tokens.hairline : Color.clear)
+                            .contentShape(Rectangle())
                     }
-                } else {
-                    Color.clear
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(name(control))
+                    .accessibilityValue(value(control))
                 }
             }
-            .frame(height: 52)
-            HStack(spacing: 8) {
-                ForEach(ControlDial.allCases) { chip($0) }
-            }
-            .frame(height: 44)
+            .frame(height: 46)
+            .instrumentPanel()
         }
-        .padding(.horizontal, 16)
     }
 
-    private func chip(_ control: ControlDial) -> some View {
-        let held = isHeld(control)
-        return Button {
-            withAnimation(.easeOut(duration: 0.15)) {
-                selected = selected == control ? nil : control
-            }
-        } label: {
-            VStack(spacing: 0) {
-                Text(title(control))
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.6))
-                Text(value(control))
-                    .font(.caption.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(held ? Color.yellow : Color.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-            }
-            .rotationEffect(.degrees(iconAngle))
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(
-                .white.opacity(selected == control ? 0.2 : 0.1),
-                in: RoundedRectangle(cornerRadius: 10))
+    private var divider: some View {
+        Rectangle().fill(Tokens.hairline).frame(width: 0.5)
+    }
+
+    private func cell(title: String, value: String, held: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title)
+                .font(Tokens.labelFont)
+                .foregroundStyle(Tokens.label)
+            Text(value)
+                .font(Tokens.valueFont)
+                .foregroundStyle(held ? Tokens.held : Tokens.value)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title(control))
-        .accessibilityValue(value(control))
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 
     private func title(_ control: ControlDial) -> String {
         switch control {
         case .iso: return "ISO"
+        case .shutter: return "SHT"
+        case .whiteBalance: return "WB"
+        case .focus: return "FOC"
+        }
+    }
+
+    private func name(_ control: ControlDial) -> String {
+        switch control {
+        case .iso: return "ISO"
         case .shutter: return "Shutter"
-        case .whiteBalance: return "White"
+        case .whiteBalance: return "White balance"
         case .focus: return "Focus"
         }
     }
@@ -75,10 +81,10 @@ struct ControlStrip: View {
         switch control {
         case .iso: return "\(Int(model.iso))"
         case .shutter: return model.shutterLabel
-        case .whiteBalance: return "\(Int(model.temperature)) K"
+        case .whiteBalance: return "\(Int((model.temperature / 10).rounded()) * 10)"
         case .focus:
             if model.focusLocked { return String(format: "%.2f", model.lensPosition) }
-            return model.focusTapped ? "Tap" : "Auto"
+            return model.focusTapped ? "TAP" : "AF"
         }
     }
 
@@ -88,6 +94,27 @@ struct ControlStrip: View {
         case .whiteBalance: return model.whiteBalanceLocked
         case .focus: return model.focusLocked || model.focusTapped
         }
+    }
+
+    private func dialPanel(_ control: ControlDial) -> some View {
+        HStack(spacing: 8) {
+            lockButton(control)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text(title(control))
+                        .font(Tokens.labelFont)
+                        .foregroundStyle(Tokens.label)
+                    Spacer()
+                    Text(value(control))
+                        .font(Tokens.valueFont)
+                        .foregroundStyle(isHeld(control) ? Tokens.held : Tokens.value)
+                }
+                dial(control)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .instrumentPanel()
     }
 
     private func lockButton(_ control: ControlDial) -> some View {
@@ -100,16 +127,16 @@ struct ControlStrip: View {
                 if held { model.releaseFocus() } else { model.focusLocked = true }
             }
         } label: {
-            Image(systemName: held ? "lock.fill" : "lock.open")
-                .font(.body)
-                .foregroundStyle(held ? Color.yellow : Color.white)
-                .rotationEffect(.degrees(iconAngle))
+            Image(systemName: held ? "lock" : "lock.open")
+                .font(.system(size: 14))
+                .foregroundStyle(held ? Tokens.held : Tokens.value)
                 .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         // Switching continuous autofocus on lost 8 frames in a take.
         .disabled(control == .focus && held && model.isRecording)
-        .accessibilityLabel(held ? "Unlock \(title(control))" : "Lock \(title(control))")
+        .accessibilityLabel(held ? "Unlock \(name(control))" : "Lock \(name(control))")
     }
 
     @ViewBuilder
@@ -125,7 +152,7 @@ struct ControlStrip: View {
                         if !model.exposureLocked { model.exposureLocked = true }
                     }),
                 range: log2(Double(range.lowerBound))...log2(Double(range.upperBound)),
-                step: 1.0 / 6, label: "ISO", valueText: value(.iso))
+                step: 1.0 / 6, label: name(.iso), valueText: value(.iso))
         case .shutter:
             Dial(
                 value: Binding(
@@ -134,7 +161,7 @@ struct ControlStrip: View {
                         model.shutterStops = value
                         if !model.exposureLocked { model.exposureLocked = true }
                     }),
-                range: AppModel.slowestShutterStops...13, step: 1.0 / 6, label: "Shutter",
+                range: AppModel.slowestShutterStops...13, step: 1.0 / 6, label: name(.shutter),
                 valueText: value(.shutter))
         case .whiteBalance:
             Dial(
@@ -144,7 +171,8 @@ struct ControlStrip: View {
                         model.temperature = Float(value)
                         if !model.whiteBalanceLocked { model.whiteBalanceLocked = true }
                     }),
-                range: 2500...9000, step: 100, label: "White balance", valueText: value(.whiteBalance))
+                range: 2500...9000, step: 100, label: name(.whiteBalance),
+                valueText: value(.whiteBalance))
         case .focus:
             Dial(
                 value: Binding(
@@ -154,12 +182,12 @@ struct ControlStrip: View {
                         model.focusTapped = false
                         if !model.focusLocked { model.focusLocked = true }
                     }),
-                range: 0...1, step: 0.01, label: "Focus", valueText: value(.focus))
+                range: 0...1, step: 0.01, label: name(.focus), valueText: value(.focus))
         }
     }
 }
 
-/// A horizontal ruler that moves under a fixed center mark.
+/// An engraved ruler that moves under a fixed center mark.
 struct Dial: View {
     @EnvironmentObject private var model: AppModel
     @Binding var value: Double
@@ -191,16 +219,17 @@ struct Dial: View {
                 guard range.contains(tick * step) else { continue }
                 let x = size.width / 2 + CGFloat(tick - value / step) * spacing
                 let major = Int(tick) % 6 == 0
-                let height = major ? size.height * 0.55 : size.height * 0.3
+                let height = major ? size.height : size.height * 0.5
                 var path = Path()
-                path.move(to: CGPoint(x: x, y: (size.height - height) / 2))
-                path.addLine(to: CGPoint(x: x, y: (size.height + height) / 2))
-                context.stroke(path, with: .color(.white.opacity(major ? 0.9 : 0.45)), lineWidth: 1)
+                path.move(to: CGPoint(x: x, y: size.height - height))
+                path.addLine(to: CGPoint(x: x, y: size.height))
+                context.stroke(path, with: .color(.white.opacity(major ? 0.9 : 0.45)), lineWidth: 0.5)
             }
         }
         .overlay {
-            Rectangle().fill(.yellow).frame(width: 2)
+            Rectangle().fill(Tokens.held).frame(width: 1)
         }
+        .frame(height: 20)
         .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 2)
@@ -225,29 +254,5 @@ struct Dial: View {
             @unknown default: break
             }
         }
-    }
-}
-
-/// The interface stays portrait, so icons turn with the phone instead.
-final class DeviceOrientation: ObservableObject {
-    @Published private(set) var iconAngle = 0.0
-    private var observer: NSObjectProtocol?
-
-    init() {
-        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
-        observer = NotificationCenter.default.addObserver(
-            forName: UIDevice.orientationDidChangeNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            switch UIDevice.current.orientation {
-            case .portrait: self?.iconAngle = 0
-            case .landscapeLeft: self?.iconAngle = 90
-            case .landscapeRight: self?.iconAngle = -90
-            default: break
-            }
-        }
-    }
-
-    deinit {
-        if let observer { NotificationCenter.default.removeObserver(observer) }
     }
 }

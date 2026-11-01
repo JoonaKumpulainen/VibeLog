@@ -10,6 +10,7 @@ import VLRecording
 final class AppModel: ObservableObject {
     let camera = CameraController()
     let pipeline = ProcessingPipeline()
+    let hold = HoldTracker()
 
     @Published var lenses: [LensInfo] = []
     @Published var formats: [FormatInfo] = []
@@ -47,6 +48,8 @@ final class AppModel: ObservableObject {
     /// Empty selects the built-in Rec.709 LUT.
     @Published var selectedLUT = "" { didSet { if selectedLUT != oldValue { loadSelectedLUT() } } }
     @Published var recordElapsed = 0
+    /// Megabytes per second written so far in this recording.
+    @Published var dataRate = 0.0
 
     /// Zero records until stopped.
     @Published var recordSeconds = 0.0
@@ -92,6 +95,7 @@ final class AppModel: ObservableObject {
     private var resumeInForeground = false
     private var hasReference = false
     private var pendingControls: Set<Control> = []
+    private var recordingFile: URL?
     private var ticksSinceReport = 0
     private var recordStart = Date()
     private var recordStarting = false
@@ -168,6 +172,30 @@ final class AppModel: ObservableObject {
     }
 
     var outputLabel: String { outputSize.label }
+
+    /// The real chain, from sensor to file.
+    var signalPath: String {
+        let curve: String
+        switch processing.curve {
+        case .appleLog: curve = "ALOG"
+        case .sLog3: curve = "SLOG3"
+        case .logC3: curve = "LOGC3"
+        }
+        guard recordEncoded else { return "RAW 14 › DUMP" }
+        return "RAW 14 › \(curve) › \(encoderPreset.label.uppercased())"
+    }
+
+    /// Uses rates measured on the phone at full size, and free space alone for the others.
+    var timeLeftLabel: String {
+        let usable = status.freeDiskGB - 10
+        let measured = ["prores422hq": 167.0, "prores4444": 240.0][encoderPreset.id]
+        guard let measured else { return "\(max(usable, 0)) GB" }
+        let share = Double(outputSize.width * outputSize.height) / (4032 * 3024)
+        let minutes = Int(Double(max(usable, 0)) * 1000 / (measured * share) / 60)
+        return minutes >= 60 ? "\(minutes / 60)H \(minutes % 60)M" : "\(minutes)M"
+    }
+
+    var batteryLabel: String { String(status.battery.prefix { $0 != " " }) }
 
     func toggleStream() {
         if isStreaming {
@@ -460,11 +488,13 @@ final class AppModel: ObservableObject {
             "exposureStops": String(processing.exposureStops),
             "aspect": widescreen ? "16:9 center crop" : "4:3 open gate",
             "pipeline": processing.pipeline.label,
+            "orientation": hold.hold.label,
             "note": "The file's transfer tag is nominal; decode with the curve named here.",
         ]
         do {
             let encoder = try VideoEncoder(config: .init(
-                url: url, preset: encoderPreset, size: outputSize, audio: true, metadata: metadata))
+                url: url, preset: encoderPreset, size: outputSize, audio: true, metadata: metadata,
+                rotationDegrees: hold.hold.clipRotation))
             audio.onSample = { [weak encoder] sample in encoder?.appendAudio(sample) }
             encoder.onFailure = { [weak self] message in
                 Log.shared.error("Recording stopped: \(message)")
@@ -477,6 +507,7 @@ final class AppModel: ObservableObject {
             pipeline.resetStats()
             pipeline.setSink(encoder)
             recordStart = Date()
+            recordingFile = url
             isRecording = true
             let seconds = recordSeconds
             Log.shared.info("Encoding \(name): \(encoderPreset.label) \(outputSize.label), \(processing.curve.label), \(processing.pipeline.label) pipeline, \(seconds > 0 ? "\(seconds)s" : "until stopped"), battery \(SystemStatus.batteryText), thermal \(SystemStatus.thermalName), free \(SystemStatus.freeDisk / 1_000_000_000) GB")
@@ -493,6 +524,7 @@ final class AppModel: ObservableObject {
 
     private func stopEncoding(_ encoder: VideoEncoder) {
         activeEncoder = nil
+        recordingFile = nil
         isRecording = false
         pipeline?.setSink(nil)
         audio.stop()
@@ -571,6 +603,8 @@ final class AppModel: ObservableObject {
     /// Measures off the main thread, which capture readiness callbacks depend on.
     private func tick() {
         let battery = SystemStatus.batteryText
+        let file = recordingFile
+        let seconds = Date().timeIntervalSince(recordStart)
         camera.liveValues { [weak self] live in
             DispatchQueue.main.async { self?.adopt(live) }
         }
@@ -582,7 +616,12 @@ final class AppModel: ObservableObject {
                 footprintMB: SystemStatus.footprint / 1_000_000,
                 availableMB: SystemStatus.availableMemory / 1_000_000,
                 freeDiskGB: Int(SystemStatus.freeDisk / 1_000_000_000), battery: battery)
-            DispatchQueue.main.async { [self] in show(snapshot, gpu, line) }
+            let attributes = file.flatMap { try? FileManager.default.attributesOfItem(atPath: $0.path) }
+            let bytes = (attributes?[.size] as? NSNumber)?.doubleValue ?? 0
+            DispatchQueue.main.async { [self] in
+                dataRate = seconds > 0 ? bytes / 1_000_000 / seconds : 0
+                show(snapshot, gpu, line)
+            }
         }
     }
 

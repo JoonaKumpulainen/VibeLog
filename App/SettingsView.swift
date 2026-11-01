@@ -9,6 +9,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var importingLUT = false
     @State private var showDiagnostics = false
+    @AppStorage("telemetry") private var showTelemetry = true
 
     var body: some View {
         NavigationStack {
@@ -111,6 +112,7 @@ struct SettingsView: View {
                 ForEach(ExposureOverlay.allCases) { Text($0.label).tag($0) }
             }
             Toggle("Monitor off while recording", isOn: $model.processing.pauseMonitorWhileRecording)
+            Toggle("Telemetry while recording", isOn: $showTelemetry)
         }
     }
 

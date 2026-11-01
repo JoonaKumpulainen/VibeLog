@@ -11,7 +11,7 @@ An iPhone camera app that records full-sensor RAW frames, processes them on the 
 
 ## How we work
 
-- **No Mac:** the owner cannot build locally, and this Linux machine has no Swift or Xcode. Every build runs on GitHub Actions (`macos-15`, Xcode 16.4), and pushes to `main` trigger it. `.md` changes don't build.
+- **No Mac:** the owner cannot build locally, and this Linux machine has no Swift or Xcode. Every build runs on GitHub Actions (`macos-26`), and pushes to `main` trigger it. `.md` changes don't build.
 - **Project file:** XcodeGen generates it from `project.yml`. Never hand-write a `.pbxproj`.
 - **After each code change:** push, wait for CI with `gh run watch`, and read the logs until it's green. Then download the artifact with `gh run download` and send the `.ipa` to the owner.
 - **Reading CI logs:** the test step only keeps its last 60 lines. Use `gh run view <id> --log-failed` and look under `Testing failed:`. The `Executed N tests` line shows totals, including skips.
@@ -65,7 +65,7 @@ Modules are dynamic frameworks. Swift is in Swift 5 mode.
 
 ## Now: Phase 5
 
-The owner approved Phase 5, in stages with one `.ipa` each: camera screen and settings, direct control, shooting information and warnings, library, then presets, accessibility and a 10-minute test. Gyro logging to a Gyroflow `.gcsv` follows as its own change once that test passes. Stage 1 is confirmed on the phone. `VLCapture` gained focus and exposure points, exposure compensation and live values for direct control. Other module code is unchanged.
+The owner approved a redesign called the precision instrument: a large centered picture, small smoked glass panels, monospaced values and a live signal path. The stages are: glass shell and orientation, snapping dials, format panel and searchable settings, 24 and 25 fps, then warnings, library, accessibility and a 10-minute test. Gyro logging to a Gyroflow `.gcsv` follows as its own change once that test passes. Stage 1 is confirmed on the phone. `VLCapture` gained focus and exposure points, exposure compensation and live values for direct control. Other module code is unchanged.
 
 Diagnostics opens with a long press on **Version** in Settings.
 

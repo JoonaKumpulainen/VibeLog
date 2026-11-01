@@ -13,10 +13,12 @@ public final class VideoEncoder: VideoFrameSink {
         /// Real-time mode drops frames when busy; benchmarks turn it off and wait instead.
         public var realTime: Bool
         public var metadata: [String: String]
+        /// Clockwise turn for playback, in degrees. The pixels stay as the sensor recorded them.
+        public var rotationDegrees: Int
 
         public init(
             url: URL, preset: EncoderPreset, size: EncoderSize, audio: Bool, realTime: Bool = true,
-            metadata: [String: String] = [:]
+            metadata: [String: String] = [:], rotationDegrees: Int = 0
         ) {
             self.url = url
             self.preset = preset
@@ -24,6 +26,7 @@ public final class VideoEncoder: VideoFrameSink {
             self.audio = audio
             self.realTime = realTime
             self.metadata = metadata
+            self.rotationDegrees = rotationDegrees
         }
     }
 
@@ -89,6 +92,7 @@ public final class VideoEncoder: VideoFrameSink {
         }
         videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
         videoInput.expectsMediaDataInRealTime = config.realTime
+        videoInput.transform = CGAffineTransform(rotationAngle: CGFloat(config.rotationDegrees) * .pi / 180)
         guard writer.canAdd(videoInput) else { throw Failure.unsupportedSettings }
         writer.add(videoInput)
 

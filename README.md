@@ -20,7 +20,7 @@ A free Apple ID signature lasts 7 days, so repeat step 3 when the app stops open
 
 Turn the ring/silent switch to silent first. On iOS 17 the shutter sound is only removed with a workaround.
 
-The camera opens live. The red button records, the lens buttons or a pinch switch camera, the eye menu sets the monitor and exposure tool, and the gear opens **Settings**. Tap the picture to focus and meter there, then drag up or down to set exposure. The **ISO**, **Shutter**, **White** and **Focus** buttons open dials, and the lock next to a dial holds its value. Yellow values are held, not automatic.
+The camera opens live, and the controls turn to match how you hold the phone, even with the rotation lock on. The top line shows the signal path, time left and battery. **SHT**, **ISO**, **WB** and **FOC** open dials, and the lock next to a dial holds its value. Yellow values are held, not automatic. Tap the picture to focus and meter there, then drag to set exposure. Pinch or use the lens panel to switch camera. **MON** sets the monitor and exposure tool, and **FMT** opens Settings. Recordings carry the hold they started in, so they play upright.
 
 During a recording you can change the monitor, exposure tool and all four dials. Tap focus, exposure drag and returning to autofocus are off, because switching autofocus on lost frames in testing. Everything else is locked until recording stops.
 
@@ -28,6 +28,7 @@ Long-press **Version** in Settings to open **Diagnostics**:
 
 | Tool | What it does |
 |---|---|
+| **Glass panels** | Off swaps the glass behind controls for a flat fill, to compare what glass costs. |
 | **Debug overlay** | Shows frame rate, GPU, drops, memory, heat and storage on the viewfinder. |
 | **Show log** | Shows the log. **Copy** puts it on the clipboard, **Previous** opens the last session's log, which holds crash details. |
 | **Run control test** | Records 46 seconds and changes focus and exposure on a schedule. Each change is logged with frame and failure counts. |
