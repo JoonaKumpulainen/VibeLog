@@ -70,15 +70,16 @@ struct SettingsView: View {
     private static let stopTerms = "stop after limit duration time timer"
     private static let autoTerms = "auto exposure shutter iso white balance during take recording freeze lock start roll"
     private static let heatTerms = "hot heat thermal cool long takes debayer"
+    private static let audioTerms = "audio pcm aac sound uncompressed microphone"
     private static let gyroTerms = "gyro gyroflow stabilization motion gcsv log"
     private static let mainsTerms = "flicker mains lights hz power frequency shutter"
-    private static let recordingTerms = [stopTerms, autoTerms, gyroTerms, heatTerms, mainsTerms].joined(separator: " ")
+    private static let recordingTerms = [stopTerms, autoTerms, audioTerms, gyroTerms, heatTerms, mainsTerms].joined(separator: " ")
     private static let lookTerms = "look monitor rec.709 log preview isp viewfinder"
     private static let lutTerms = "lut cube import look monitor input"
     private static let pauseTerms = "pause viewfinder monitor off gpu recording"
     private static let viewfinderTerms = [lookTerms, lutTerms, pauseTerms].joined(separator: " ")
     private static let offsetTerms = "exposure offset stops brightness baked"
-    private static let processingTerms = "pipeline debayer demosaic color space gamut rec.2020 quality processing"
+    private static let processingTerms = "pipeline debayer demosaic color space gamut native s-gamut3 arri wide rec.2020 quality processing"
     private static let imageTerms = offsetTerms + " " + processingTerms
 
     /// Every word typed has to appear, so a phrase can come in any order.
@@ -183,6 +184,11 @@ struct SettingsView: View {
                         "Shutter, ISO and white balance keep following the scene. Off freezes them at the start. Values you set stay, and focus always holds.")
                 }
             }
+            if matches(Self.audioTerms) {
+                Toggle(isOn: $model.pcmAudio) {
+                    explained("Uncompressed audio", "Records 24-bit PCM instead of AAC, about 0.5 GB an hour.")
+                }
+            }
             if matches(Self.gyroTerms) {
                 Toggle(isOn: $model.saveGyroLog) {
                     explained("Save gyro data", "Saves a .gcsv file beside each take for stabilizing in Gyroflow.")
@@ -269,7 +275,12 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var processingRows: some View {
-        LabeledContent("Color space", value: "Rec.2020")
+        LabeledContent("Color space", value: model.processing.gamut.label)
+        if model.processing.curve.nativeGamut != .rec2020 {
+            Toggle(isOn: $model.processing.nativeGamut) {
+                explained("Native gamut", "Records \(model.processing.curve.nativeGamut.label) to match the curve's own cameras.")
+            }
+        }
         Picker(selection: $model.processing.pipeline) {
             ForEach(PipelineMode.allCases) { Text($0.label).tag($0) }
         } label: {

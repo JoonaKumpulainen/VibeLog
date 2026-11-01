@@ -11,7 +11,8 @@ public final class MotionLogger {
         queue.qualityOfService = .utility
         return queue
     }()
-    private let rate = 200.0
+    /// What an iPhone 14 Pro really delivers, even when asked for 200.
+    private let rate = 100.0
 
     // Only used on `queue`.
     private var url: URL?

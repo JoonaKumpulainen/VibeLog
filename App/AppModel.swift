@@ -131,7 +131,19 @@ final class AppModel: ObservableObject {
     @Published var lockAtRoll = true
     /// Saves a Gyroflow file beside each take.
     @Published var saveGyroLog = true
+    /// 24-bit PCM instead of AAC.
+    @Published var pcmAudio = false
     @Published var presets: [FormatPreset] = []
+
+    /// A shutter of half the frame time, the usual look for motion.
+    var isHalfAngleShutter: Bool {
+        exposureLocked && abs(pow(2, shutterStops) / (frameRate * 2) - 1) < 0.01
+    }
+
+    func setHalfAngleShutter() {
+        shutterStops = log2(frameRate * 2)
+        if !exposureLocked { exposureLocked = true }
+    }
 
     var shutterLabel: String { "1/\(Int(pow(2, shutterStops).rounded()))" }
 
@@ -344,6 +356,7 @@ final class AppModel: ObservableObject {
         config.frameRate = frameRate
         config.stopAfterSeconds = recordSeconds
         config.logCurve = processing.curve.label
+        config.nativeGamut = processing.nativeGamut
         config.pipeline = processing.pipeline.rawValue
         config.debayer = processing.demosaic.label
         config.exposureOffset = processing.exposureStops
@@ -355,6 +368,7 @@ final class AppModel: ObservableObject {
         config.telemetry = showTelemetry
         config.lockAtRoll = lockAtRoll
         config.saveGyroLog = saveGyroLog
+        config.pcmAudio = pcmAudio
         config.mainsHz = mainsHz
         config.toolbar = toolbar.map(\.rawValue)
         config.activeTools = activeTools.map(\.rawValue).sorted()
@@ -383,6 +397,7 @@ final class AppModel: ObservableObject {
         applyingOptions = false
         recordSeconds = loaded.stopAfterSeconds
         processing.curve = LogCurve.allCases.first { $0.label == loaded.logCurve } ?? processing.curve
+        processing.nativeGamut = loaded.nativeGamut
         processing.pipeline = PipelineMode(rawValue: loaded.pipeline) ?? processing.pipeline
         processing.demosaic = DemosaicMethod.allCases.first { $0.label == loaded.debayer } ?? processing.demosaic
         processing.exposureStops = loaded.exposureOffset
@@ -394,6 +409,7 @@ final class AppModel: ObservableObject {
         showTelemetry = loaded.telemetry
         lockAtRoll = loaded.lockAtRoll
         saveGyroLog = loaded.saveGyroLog
+        pcmAudio = loaded.pcmAudio
         mainsHz = loaded.mainsHz
         toolbar = loaded.toolbar.compactMap(Tool.init(rawValue:))
         activeTools = Set(loaded.activeTools.compactMap(Tool.init(rawValue:)))
@@ -406,7 +422,7 @@ final class AppModel: ObservableObject {
             name: name, codec: encoderPreset.id, size: encoderSize.label, widescreen: widescreen,
             frameRate: frameRate, logCurve: processing.curve.label,
             pipeline: processing.pipeline.rawValue, debayer: processing.demosaic.label,
-            exposureOffset: processing.exposureStops)
+            exposureOffset: processing.exposureStops, nativeGamut: processing.nativeGamut)
     }
 
     /// A name already in use takes the new choices.
@@ -430,6 +446,7 @@ final class AppModel: ObservableObject {
         widescreen = saved.widescreen
         if FrameRates.all.contains(saved.frameRate) { frameRate = saved.frameRate }
         processing.curve = LogCurve.allCases.first { $0.label == saved.logCurve } ?? processing.curve
+        processing.nativeGamut = saved.nativeGamut ?? false
         processing.pipeline = PipelineMode(rawValue: saved.pipeline) ?? processing.pipeline
         processing.demosaic = DemosaicMethod.allCases.first { $0.label == saved.debayer } ?? processing.demosaic
         processing.exposureStops = saved.exposureOffset
@@ -946,7 +963,8 @@ final class AppModel: ObservableObject {
         let name = "video_\(Storage.timestamp())"
         let url = Storage.videos.appendingPathComponent(name + ".mov")
         let metadata: [String: String] = [
-            "curve": processing.curve.label, "gamut": "Rec.2020",
+            "curve": processing.curve.label, "gamut": processing.gamut.label,
+            "audio": pcmAudio ? "24-bit PCM" : "AAC",
             "matrix": "Rec.2020 non-constant luminance, video range",
             "exposureStops": String(processing.exposureStops),
             "frameRate": frameRateLabel,
@@ -961,7 +979,7 @@ final class AppModel: ObservableObject {
         do {
             let encoder = try VideoEncoder(config: .init(
                 url: url, preset: encoderPreset, size: outputSize, frameRate: frameRate, audio: true,
-                metadata: metadata,
+                pcmAudio: pcmAudio, metadata: metadata,
                 rotationDegrees: hold.hold.clipRotation))
             audio.onSample = { [weak encoder] sample in encoder?.appendAudio(sample) }
             audioPeak = 0

@@ -77,11 +77,15 @@ public struct ProcessingSettings: Equatable, Sendable {
     /// Look LUTs expect Rec.709; conversion LUTs expect the log image.
     public var lutExpectsRec709 = false
     public var curve = LogCurve.appleLog
+    /// Records the curve's own gamut instead of Rec.2020.
+    public var nativeGamut = false
     public var demosaic = DemosaicMethod.malvar
     public var monitor = MonitorMode.rec709
     /// On an iPhone 14 Pro, auto exposure on a plain surface read 0.37 linear at +0.5 stops,
     /// so -0.5 stops places it near 0.18. This is from a single measurement.
     public var exposureStops = -0.5
+
+    public var gamut: Gamut { nativeGamut ? curve.nativeGamut : .rec2020 }
 
     public init() {}
 }
@@ -200,7 +204,7 @@ public final class ProcessingPipeline: NSObject {
     private var calibration: CameraCalibration?
     private var black: Float = 2112
     private var clipValue: Float = 14271
-    private var cachedMatrix: (gains: [Float], matrix: simd_double3x3)?
+    private var cachedMatrix: (gains: [Float], gamut: Gamut, matrix: simd_double3x3)?
     private var inFlight = 0
     private var inputs: [MTLTexture] = []
     private var nextInput = 0
@@ -213,6 +217,7 @@ public final class ProcessingPipeline: NSObject {
     private var drawScheduled = false
     private var lut: MTLTexture?
     private var lutCurve: LogCurve?
+    private var lutGamut = Gamut.rec2020
     private var customLUT: CustomLUT?
     private var stats = PipelineStats()
     private var gpuTotalMs = 0.0
@@ -627,12 +632,13 @@ public final class ProcessingPipeline: NSObject {
         cfaGain[Int(cfa.blueOffset.x + 2 * cfa.blueOffset.y)] = blue
 
         let matrix: simd_double3x3
-        if let cachedMatrix, cachedMatrix.gains == usable {
+        let gamut = settings.gamut
+        if let cachedMatrix, cachedMatrix.gains == usable, cachedMatrix.gamut == gamut {
             matrix = cachedMatrix.matrix
         } else {
             let neutral = SIMD3<Double>(1 / Double(red), 1, 1 / Double(blue))
-            matrix = calibration?.balancedToRec2020(neutral: neutral) ?? matrix_identity_double3x3
-            cachedMatrix = (usable, matrix)
+            matrix = gamut.fromRec2020 * (calibration?.balancedToRec2020(neutral: neutral) ?? matrix_identity_double3x3)
+            cachedMatrix = (usable, gamut, matrix)
         }
         func row(_ index: Int) -> SIMD4<Float> {
             SIMD4(Float(matrix[0][index]), Float(matrix[1][index]), Float(matrix[2][index]), 0)
@@ -741,8 +747,8 @@ public final class ProcessingPipeline: NSObject {
         }
     }
 
-    private func currentLUT(curve: LogCurve) -> MTLTexture? {
-        if lutCurve == curve, let lut { return lut }
+    private func currentLUT(curve: LogCurve, gamut: Gamut) -> MTLTexture? {
+        if lutCurve == curve, lutGamut == gamut, let lut { return lut }
         let size = Self.lutSize
         let descriptor = MTLTextureDescriptor()
         descriptor.textureType = .type3D
@@ -752,7 +758,7 @@ public final class ProcessingPipeline: NSObject {
         descriptor.depth = size
         descriptor.usage = .shaderRead
         guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
-        let samples = MonitorTransform.lut(curve: curve, size: size)
+        let samples = MonitorTransform.lut(curve: curve, gamut: gamut, size: size)
         samples.withUnsafeBytes { bytes in
             texture.replace(
                 region: MTLRegionMake3D(0, 0, 0, size, size, size), mipmapLevel: 0, slice: 0,
@@ -760,6 +766,7 @@ public final class ProcessingPipeline: NSObject {
         }
         lut = texture
         lutCurve = curve
+        lutGamut = gamut
         return texture
     }
 
@@ -789,7 +796,7 @@ extension ProcessingPipeline: MTKViewDelegate {
         let viewScale = monitorScale
         let peaking = monitorPeaking
         lock.unlock()
-        guard current.monitor != .isp, let image, let rec709 = currentLUT(curve: current.curve),
+        guard current.monitor != .isp, let image, let rec709 = currentLUT(curve: current.curve, gamut: current.gamut),
             let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
             let commands = queue.makeCommandBuffer(),
             let encoder = commands.makeRenderCommandEncoder(descriptor: pass)

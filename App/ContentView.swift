@@ -835,17 +835,25 @@ struct FormatWheel<Value: Hashable>: View {
                 .fixedSize()
                 .turnedToHold()
                 .frame(height: Self.titleDepth(hold))
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(spacing: 0) {
-                    ForEach(options, id: \.self) { option in
-                        choice(option)
+            ScrollViewReader { reader in
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        ForEach(options, id: \.self) { option in
+                            choice(option)
+                        }
                     }
+                    .scrollTargetLayout()
                 }
-                .scrollTargetLayout()
+                .contentMargins(.vertical, rowDepth, for: .scrollContent)
+                .scrollTargetBehavior(.viewAligned)
+                .scrollPosition(id: $centered, anchor: .center)
+                // The scroll position alone opens at the top. The second call covers a first
+                // layout that hasn't finished.
+                .onAppear {
+                    reader.scrollTo(selection, anchor: .center)
+                    DispatchQueue.main.async { reader.scrollTo(selection, anchor: .center) }
+                }
             }
-            .contentMargins(.vertical, rowDepth, for: .scrollContent)
-            .scrollTargetBehavior(.viewAligned)
-            .scrollPosition(id: $centered, anchor: .center)
             .frame(height: rowDepth * 3)
         }
         .frame(maxWidth: .infinity)
@@ -907,9 +915,11 @@ struct FormatPanel: View {
     private static func chromaLabel(_ preset: EncoderPreset) -> String {
         switch preset.id {
         case "hevc420": return "4:2:0"
-        case "hevc422", "prores422": return "4:2:2"
-        case "prores422hq": return "4:2:2 HQ"
-        case "hevc444", "prores4444": return "4:4:4"
+        case "hevc422": return "4:2:2"
+        case "hevc444": return "4:4:4"
+        case "prores422": return "422"
+        case "prores422hq": return "422 HQ"
+        case "prores4444": return "4444"
         default: return preset.shortLabel
         }
     }
@@ -918,7 +928,7 @@ struct FormatPanel: View {
         HStack(alignment: .bottom, spacing: 0) {
             FormatWheel(title: "CODEC", options: ["PRORES", "HEVC"], selection: family, hold: hold, rowDepth: rowDepth) { $0 }
             FormatWheel(
-                title: "CHROMA", options: chromaChoices, selection: $model.encoderPreset, hold: hold,
+                title: Self.isHEVC(model.encoderPreset) ? "CHROMA" : "PROFILE", options: chromaChoices, selection: $model.encoderPreset, hold: hold,
                 rowDepth: rowDepth, label: Self.chromaLabel
             )
             // Each codec has its own list.

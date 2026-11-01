@@ -14,6 +14,7 @@ public enum StillExporter {
 
     private struct Summary: Codable {
         var curve: String
+        var gamut: String
         var demosaic: String
         var exposureStops: Double
         var shutterSeconds: Double
@@ -45,7 +46,7 @@ public enum StillExporter {
             to: folder.appendingPathComponent("rec709_half.png"))
 
         let summary = Summary(
-            curve: curve.label, demosaic: still.settings.demosaic.label,
+            curve: curve.label, gamut: still.settings.gamut.label, demosaic: still.settings.demosaic.label,
             exposureStops: still.settings.exposureStops, shutterSeconds: still.exposureSeconds,
             iso: still.iso, whiteBalanceGains: still.whiteBalanceGains, width: still.width,
             height: still.height,
@@ -93,7 +94,8 @@ public enum StillExporter {
                 for y in 0..<height {
                     for x in 0..<width {
                         let color = MonitorTransform.display(
-                            log: pixel(bytes, x: x * 2, y: y * 2, width: still.width), curve: curve)
+                            log: pixel(bytes, x: x * 2, y: y * 2, width: still.width), curve: curve,
+                            gamut: still.settings.gamut)
                         let offset = (y * width + x) * 4
                         target[offset] = UInt8(color.x * 255)
                         target[offset + 1] = UInt8(color.y * 255)

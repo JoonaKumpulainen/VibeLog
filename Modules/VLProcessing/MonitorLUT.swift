@@ -32,9 +32,9 @@ public enum MonitorTransform {
     private static let shoulderB = 0.82 * peak / (peak - 1)
     private static let shoulderA = 0.18 + shoulderB
 
-    public static func display(log: SIMD3<Double>, curve: LogCurve) -> SIMD3<Double> {
-        let linear2020 = SIMD3(curve.decode(log.x), curve.decode(log.y), curve.decode(log.z))
-        let linear709 = ColorMath.rec2020ToRec709 * linear2020
+    public static func display(log: SIMD3<Double>, curve: LogCurve, gamut: Gamut = .rec2020) -> SIMD3<Double> {
+        let linear = SIMD3(curve.decode(log.x), curve.decode(log.y), curve.decode(log.z))
+        let linear709 = ColorMath.rec2020ToRec709 * gamut.fromRec2020.inverse * linear
         return SIMD3(tone(linear709.x), tone(linear709.y), tone(linear709.z))
     }
 
@@ -45,7 +45,7 @@ public enum MonitorTransform {
     }
 
     /// RGBA samples for a cubic 3D texture in rgba16Unorm, with red varying fastest.
-    public static func lut(curve: LogCurve, size: Int) -> [UInt16] {
+    public static func lut(curve: LogCurve, gamut: Gamut = .rec2020, size: Int) -> [UInt16] {
         var samples = [UInt16]()
         samples.reserveCapacity(size * size * size * 4)
         let scale = 1 / Double(size - 1)
@@ -53,7 +53,7 @@ public enum MonitorTransform {
             for green in 0..<size {
                 for red in 0..<size {
                     let input = SIMD3(Double(red), Double(green), Double(blue)) * scale
-                    let output = display(log: input, curve: curve)
+                    let output = display(log: input, curve: curve, gamut: gamut)
                     samples.append(UInt16(output.x * 65535))
                     samples.append(UInt16(output.y * 65535))
                     samples.append(UInt16(output.z * 65535))

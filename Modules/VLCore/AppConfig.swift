@@ -11,12 +11,15 @@ public struct FormatPreset: Codable, Equatable, Identifiable, Sendable {
     public var pipeline: String
     public var debayer: String
     public var exposureOffset: Double
+    /// Missing from older presets.
+    public var nativeGamut: Bool?
 
     public var id: String { name }
 
     public init(
         name: String, codec: String, size: String, widescreen: Bool, frameRate: Double,
-        logCurve: String, pipeline: String, debayer: String, exposureOffset: Double
+        logCurve: String, pipeline: String, debayer: String, exposureOffset: Double,
+        nativeGamut: Bool? = nil
     ) {
         self.name = name
         self.codec = codec
@@ -27,6 +30,7 @@ public struct FormatPreset: Codable, Equatable, Identifiable, Sendable {
         self.pipeline = pipeline
         self.debayer = debayer
         self.exposureOffset = exposureOffset
+        self.nativeGamut = nativeGamut
     }
 }
 
@@ -39,6 +43,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var frameRate = 30.0
     public var stopAfterSeconds = 0.0
     public var logCurve = "Apple Log"
+    public var nativeGamut = false
     public var pipeline = "maximum"
     public var debayer = "Malvar-He-Cutler"
     public var exposureOffset = -0.5
@@ -50,6 +55,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var telemetry = true
     public var lockAtRoll = true
     public var saveGyroLog = true
+    public var pcmAudio = false
     public var mainsHz = 50
     /// Tool identifiers, in toolbar order.
     public var toolbar = ["zebras", "falseColor", "grid", "center", "level", "punchIn"]
@@ -72,6 +78,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         frameRate = read(.frameRate, defaults.frameRate)
         stopAfterSeconds = read(.stopAfterSeconds, defaults.stopAfterSeconds)
         logCurve = read(.logCurve, defaults.logCurve)
+        nativeGamut = read(.nativeGamut, defaults.nativeGamut)
         pipeline = read(.pipeline, defaults.pipeline)
         debayer = read(.debayer, defaults.debayer)
         exposureOffset = read(.exposureOffset, defaults.exposureOffset)
@@ -83,6 +90,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         telemetry = read(.telemetry, defaults.telemetry)
         lockAtRoll = read(.lockAtRoll, defaults.lockAtRoll)
         saveGyroLog = read(.saveGyroLog, defaults.saveGyroLog)
+        pcmAudio = read(.pcmAudio, defaults.pcmAudio)
         mainsHz = read(.mainsHz, defaults.mainsHz)
         toolbar = read(.toolbar, defaults.toolbar)
         activeTools = read(.activeTools, defaults.activeTools)

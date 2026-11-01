@@ -48,6 +48,55 @@ public enum ColorMath {
     }
 }
 
+/// The primaries a log image can be recorded in, all with a D65 white.
+public enum Gamut: String, CaseIterable, Identifiable, Sendable {
+    case rec2020
+    case sGamut3
+    case arriWideGamut3
+
+    public var id: String { rawValue }
+
+    public var label: String {
+        switch self {
+        case .rec2020: return "Rec.2020"
+        case .sGamut3: return "S-Gamut3"
+        case .arriWideGamut3: return "ARRI Wide Gamut 3"
+        }
+    }
+
+    /// Red, green and blue as CIE xy.
+    private var primaries: (red: SIMD2<Double>, green: SIMD2<Double>, blue: SIMD2<Double>)? {
+        switch self {
+        case .rec2020: return nil
+        case .sGamut3: return (SIMD2(0.730, 0.280), SIMD2(0.140, 0.855), SIMD2(0.100, -0.050))
+        case .arriWideGamut3: return (SIMD2(0.6840, 0.3130), SIMD2(0.2210, 0.8480), SIMD2(0.0861, -0.1020))
+        }
+    }
+
+    /// Converts linear Rec.2020 to this gamut. Built from the published primaries.
+    public var fromRec2020: simd_double3x3 {
+        guard let primaries else { return matrix_identity_double3x3 }
+        func xyz(_ point: SIMD2<Double>) -> SIMD3<Double> {
+            SIMD3(point.x / point.y, 1, (1 - point.x - point.y) / point.y)
+        }
+        let unscaled = simd_double3x3(columns: (xyz(primaries.red), xyz(primaries.green), xyz(primaries.blue)))
+        let scale = unscaled.inverse * ColorMath.d65
+        let toXYZ = unscaled * simd_double3x3(diagonal: scale)
+        return toXYZ.inverse * ColorMath.xyzToRec2020.inverse
+    }
+}
+
+extension LogCurve {
+    /// The gamut the curve's own cameras record. Apple Log is already Rec.2020.
+    public var nativeGamut: Gamut {
+        switch self {
+        case .appleLog: return .rec2020
+        case .sLog3: return .sGamut3
+        case .logC3: return .arriWideGamut3
+        }
+    }
+}
+
 /// The DNG color model for one camera: converts white-balanced camera RGB to linear Rec.2020.
 public struct CameraCalibration: Sendable {
     private let matrix1: simd_double3x3

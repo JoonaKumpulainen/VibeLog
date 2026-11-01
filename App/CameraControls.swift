@@ -231,6 +231,11 @@ struct ControlPanels: View {
                 valueText: value(control)
             )
             .frame(height: 46)
+            if control == .shutter {
+                trayButton("180°", isOn: model.isHalfAngleShutter, label: "180 degree shutter") {
+                    model.setHalfAngleShutter()
+                }
+            }
             if control == .whiteBalance {
                 trayButton("TINT", isOn: showsTint, label: "Tint") { showsTint.toggle() }
             }

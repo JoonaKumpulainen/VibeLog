@@ -1,6 +1,6 @@
 # VibeLog handoff
 
-For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of the end of Phase 5's build work: the library, presets, frame rates and auto during a take are written and need their first phone test.
+For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of early Phase 6. Phase 5 is finished apart from a few phone checks.
 
 ## What this is
 
@@ -30,7 +30,7 @@ An iPhone camera app that records full-sensor RAW frames, processes them on the 
 | `Modules/VLProcessing` | Log curves, color math, monitor LUT, `.cube` parser, Metal pipeline, still export, `Shaders.metal` |
 | `Modules/VLRecording` | RAW dump writer, `VideoEncoder`, encoder presets, encoder benchmark, `TakeLibrary` |
 | `Modules/ObjCGuard` | Catches Objective-C exceptions from AVFoundation, runtime scan |
-| `Tests/VLTests` | 67 tests, including real GPU tests on the simulator |
+| `Tests/VLTests` | 72 tests, including real GPU tests on the simulator |
 | `tools/inspect_clip.py` | Summarizes a RAW clip and exports a frame |
 
 Modules are dynamic frameworks. Swift is in Swift 5 mode.
@@ -67,9 +67,9 @@ Modules are dynamic frameworks. Swift is in Swift 5 mode.
 - Crash recovery from the 10-second file fragments.
 - What `-12686` and `-16800` mean. In one session, nearly every one was the single failure right after a session rebuild, and none came mid-take after the first seconds.
 - False color ranges, which are my own choice.
-- S-Log3 and LogC3 use Rec.2020, not their native gamuts.
+- Whether **Native gamut** matches real S-Gamut3 and AWG3 footage. Its matrices come from published primaries.
 
-## Now: Phase 5
+## Now: end of Phase 5, start of Phase 6
 
 New additions follow the design rules in [ROADMAP.md](ROADMAP.md). `CameraGeometry.topShare` sets the picture's top and bottom edges, and that share is an estimate of the Camera app's split, not a measurement. The config's `toolbar` and `telemetry` fields are no longer used by the app.
 
@@ -77,11 +77,15 @@ New additions follow the design rules in [ROADMAP.md](ROADMAP.md). `CameraGeomet
 
 None of this has run on a phone, so its first build needs these answers:
 
+- **Native gamut:** with S-Log3 or LogC3 and **Native gamut** on, does the viewfinder look unchanged while the file reads as S-Gamut3 or AWG3 when graded that way? The Rec.709 monitor LUT follows the setting. Sidecars and `still.json` name the gamut, and the file's own tag stays nominal Rec.2020.
+- **180° button:** on the shutter dial. It sets twice the frame rate and locks exposure.
+- **Uncompressed audio:** does a 2-minute take have clean sound and no `DROP`? The writer converts the microphone to 24-bit, 48 kHz.
+- **Format wheels:** do they open on the current choice? They used to open at the top.
 - **Decimal frame rates:** does a 2-minute take at 23.98 and at 29.97 show no `DROP`? The `Frame timing:` log line shows what the sensor accepted, and the take's **Details** shows the measured rate. Files use each frame's real capture time, not a fixed grid, so check what an editor reports for them.
 - **Library delete:** **Select**, a long press on a take, and the player's **Delete**. Each removes the video and its sidecar.
 - **Format panel:** check it stops just short of the picture in all four holds.
 - **Presets:** save, apply, overwrite and swipe to delete, then reopen the app to check they persist.
-- **Gyro log:** does a `.gcsv` appear beside each take, and does a 2-minute take with it on show the same `DROP` as one with it off? The `Gyro log:` log line shows the real sample rate, requested at 200 Hz. Load a handheld clip in Gyroflow and check that the picture steadies instead of shaking more. The orientation `yXZ` is derived from the sensor's layout, because Gyroflow's docs only define it in a figure, and my reading of its axes is from memory. If it shakes more, Gyroflow's IMU Orientation field tries others without a new build; tell me which works.
+- **Gyro log:** does a 2-minute take with it on show the same `DROP` as one with it off? Load a handheld clip in Gyroflow and check that the picture steadies instead of shaking more. The orientation `yXZ` is derived from the sensor's layout, because Gyroflow's docs only define it in a figure, and my reading of its axes is from memory. If it shakes more, Gyroflow's IMU Orientation field tries others without a new build; tell me which works.
 - **10-minute test:** the run so far used Efficient. Repeat it in Maximum quality at 30 fps, hands-off, and send the session log and sidecar. Check `missed` and `gap` on the result line.
 
 ### How the camera screen works
@@ -91,7 +95,7 @@ None of this has run on a phone, so its first build needs these answers:
 - **Control bar:** ISO, shutter, white balance and focus. Amber means set by the user, an A badge means auto and a lock means frozen for the take.
 - **Tray:** above the control bar, it shows the tools and lenses, a dial or the **MON** tools, so the control bar always stays. During a take the mic meter replaces the lenses.
 - **Dials:** they have **AUTO** and **FINE**. The white balance dial also sets tint, and the focus dial has **PUNCH** and **PEAK**. Shutter angle shows while the shutter dial is open.
-- **Format:** **FORMAT** opens slidable columns for codec, chroma, size, log curve, aspect and frame rate. **ASPECT** calls 4:3 **OPEN GATE**, and **SIZE** shows the full recorded size for the chosen aspect. It's square-cornered and reaches from the screen's edge to `CameraGeometry.formatGap` short of the picture, with its rows sharing the depth. ProRes has no 4:2:0. Changing frame rate rebuilds the session 0.3 seconds after the column settles, unlike the other columns, and record waits for it.
+- **Format:** **FORMAT** opens slidable columns for codec, chroma or ProRes profile, size, log curve, aspect and frame rate. **ASPECT** calls 4:3 **OPEN GATE**, and **SIZE** shows the full recorded size for the chosen aspect. It's square-cornered and reaches from the screen's edge to `CameraGeometry.formatGap` short of the picture, with its rows sharing the depth. ProRes has no 4:2:0. Changing frame rate rebuilds the session 0.3 seconds after the column settles, unlike the other columns, and record waits for it.
 - **Clock:** with the drop count, it takes the two columns right of record in every hold. It shows only the digits in use, at the largest size that fits.
 - **Notices:** short notices cover the tray and control bar for a few seconds, and a tap clears them. A take that ends early leaves an orange card until dismissed.
 - **EV:** an offset stays visible in the tool row, and a tap resets it.
@@ -101,12 +105,12 @@ None of this has run on a phone, so its first build needs these answers:
 - **Punch-in:** it moves where the existing monitor draw samples, so it adds no GPU work. It shows a third of the picture, close to one sensor pixel per drawable pixel in Maximum quality and half that in Efficient. It opens on the last focus point and drags, including during a take.
 - **Focus peaking:** a `Tool` that marks fine detail in cyan on the monitor, with four extra texture reads per drawable pixel while it's on. Its neighbors are fixed at about three sensor pixels, so punching in doesn't weaken it.
 - **Mic meter:** the bar moves about twelve times a second by writing to Core Animation layers from the audio queue, so it skips the main thread. Its dB number updates once a second. Green runs to -12 dB, yellow to -3 dB, then red.
-- **Gyro log:** with **Save gyro data** on, the default, each encoded take gets a `.gcsv` of the same name in `videos/`, from `CMDeviceMotion` on its own utility queue. Time zero is the first frame, on the same clock as frame timestamps, and the file is flushed once a second. Rotation is CoreMotion's bias-corrected rate. RAW dumps get none. Share sends it with the video, and delete removes it.
+- **Gyro log:** with **Save gyro data** on, the default, each encoded take gets a `.gcsv` of the same name in `videos/`, from `CMDeviceMotion` at 100 Hz, the most the phone delivered when asked for 200, on its own utility queue. A 5-second sample was evenly spaced with sensible units, but began 0.14 seconds after the first frame, because motion updates take that long to start, so a take's first frames have no gyro data. Time zero is the first frame, on the same clock as frame timestamps, and the file is flushed once a second. Rotation is CoreMotion's bias-corrected rate. RAW dumps get none. Share sends it with the video, and delete removes it.
 - **Settings:** one searchable page ordered by use, shown as a sheet. Format changes link to the panel. Presets save every format column plus pipeline, debayer and exposure offset, inside `VibeLog.config.json`. The volume buttons toggle recording on iOS 18 and later.
 
 ### Still to do
 
-Only the phone tests above, then Phase 6.
+Only the phone tests above, then the Phase 6 items that need footage: highlight reconstruction and vignette correction need a sample `reference.dng` and clipped clips, and color accuracy needs a chart. Shutter priority needs an ISO loop on capture, and lens tests and the stabilization check need the phone.
 
 `VLCapture` gained focus and exposure points, exposure compensation, live values and audio peak measurement. `VLProcessing` gained the monitor view and peaking. Other module code is unchanged.
 

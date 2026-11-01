@@ -9,7 +9,7 @@
 | 3 | ProRes and HEVC encoding with audio | Done: ProRes 422 HQ at 4032x3024 |
 | 4 | Heat, crop, exposure tools, LUT import | Done: 10 minutes at 30 fps |
 | 5 | Camera experience redesign | Built, phone tests remaining |
-| 6 | Image quality and capture | Planned |
+| 6 | Image quality and capture | In progress |
 | 7 | Shooting tools | Planned |
 | 8 | On-phone finishing | Planned |
 
@@ -90,12 +90,12 @@ The rule for this phase: anything that adds to real-time GPU load must prove it 
 - **Frame rates:** 24 and 25 fps recorded with no dropped frames on the phone. 23.98 and 29.97 are added and untested. RAW Cam also offers 18 fps.
 - **Highlight reconstruction:** rebuild clipped green from red and blue, which still hold data above the point where green saturates. This could recover some highlight range that is currently clipped.
 - **Vignette correction:** apply the `FixVignetteRadial` values already found in the photo metadata.
-- **Gyro logging:** added: CoreMotion data at 200 Hz in a Gyroflow `.gcsv` next to each clip. Its cost and axes still need checking on the phone and in Gyroflow.
+- **Gyro logging:** added: CoreMotion data at 100 Hz in a Gyroflow `.gcsv` next to each clip. Its cost and axes still need checking on the phone and in Gyroflow.
 - **Stabilization check:** find out whether optical stabilization is active during RAW capture, and how it affects gyro stabilization.
-- **Exposure modes:** 180-degree shutter, shutter priority and auto exposure with an EV slider. Lock at start, or auto during a take, is a setting.
+- **Exposure modes:** a 180-degree button, lock at start and auto during a take are in. Shutter priority and auto exposure with an EV slider are left.
 - **Focus while recording:** test whether focus can change during capture.
-- **Audio:** PCM recording, level meters and external microphones.
-- **Native gamuts:** S-Gamut3 and ARRI Wide Gamut for S-Log3 and LogC3, plus options for how the file is tagged.
+- **Audio:** PCM recording and level meters are in, with PCM untested. External microphones are left.
+- **Native gamuts:** S-Gamut3 and ARRI Wide Gamut 3 are in, as a setting. Options for how the file is tagged are left.
 - **Color accuracy:** measure against a chart, and confirm the exposure default.
 - **Lenses:** test recording on the ultra wide and tele, each with its own calibration.
 

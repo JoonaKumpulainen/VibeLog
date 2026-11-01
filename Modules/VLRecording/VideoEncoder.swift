@@ -12,6 +12,8 @@ public final class VideoEncoder: VideoFrameSink {
         /// The rate the codec plans for. Timing comes from each frame's own timestamp.
         public var frameRate: Double
         public var audio: Bool
+        /// 24-bit PCM instead of AAC.
+        public var pcmAudio: Bool
         /// Real-time mode drops frames when busy; benchmarks turn it off and wait instead.
         public var realTime: Bool
         public var metadata: [String: String]
@@ -20,13 +22,14 @@ public final class VideoEncoder: VideoFrameSink {
 
         public init(
             url: URL, preset: EncoderPreset, size: EncoderSize, frameRate: Double = 30, audio: Bool,
-            realTime: Bool = true, metadata: [String: String] = [:], rotationDegrees: Int = 0
+            pcmAudio: Bool = false, realTime: Bool = true, metadata: [String: String] = [:], rotationDegrees: Int = 0
         ) {
             self.url = url
             self.preset = preset
             self.size = size
             self.frameRate = frameRate
             self.audio = audio
+            self.pcmAudio = pcmAudio
             self.realTime = realTime
             self.metadata = metadata
             self.rotationDegrees = rotationDegrees
@@ -120,12 +123,7 @@ public final class VideoEncoder: VideoFrameSink {
         pool = created
 
         if config.audio {
-            let audioSettings: [String: Any] = [
-                AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVSampleRateKey: 48000,
-                AVNumberOfChannelsKey: 1,
-                AVEncoderBitRateKey: 192_000,
-            ]
+            let audioSettings = Self.audioSettings(pcm: config.pcmAudio)
             let input = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
             input.expectsMediaDataInRealTime = true
             if writer.canAdd(input) {
@@ -142,6 +140,26 @@ public final class VideoEncoder: VideoFrameSink {
         guard writer.startWriting() else {
             throw Failure.cannotStart(writer.error?.localizedDescription ?? "unknown")
         }
+    }
+
+    static func audioSettings(pcm: Bool) -> [String: Any] {
+        guard pcm else {
+            return [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: 48000,
+                AVNumberOfChannelsKey: 1,
+                AVEncoderBitRateKey: 192_000,
+            ]
+        }
+        return [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: 48000,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 24,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsBigEndianKey: false,
+            AVLinearPCMIsNonInterleaved: false,
+        ]
     }
 
     /// Fails instead of growing the pool, so a slow encoder shows up as dropped frames.

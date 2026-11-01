@@ -651,6 +651,13 @@ final class VideoEncoderTests: XCTestCase {
         XCTAssertTrue(EncoderPreset.all.allSatisfy { formats.contains($0.pixelFormat) })
     }
 
+    func testWriterAcceptsBothAudioFormats() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
+        let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+        XCTAssertTrue(writer.canApply(outputSettings: VideoEncoder.audioSettings(pcm: false), forMediaType: .audio))
+        XCTAssertTrue(writer.canApply(outputSettings: VideoEncoder.audioSettings(pcm: true), forMediaType: .audio))
+    }
+
     func testExpectedFrameRateFollowsTheTake() throws {
         let preset = try XCTUnwrap(EncoderPreset.all.first { $0.id == "hevc420" })
         let settings = preset.outputSettings(width: 1920, height: 1440, frameRate: 24)
@@ -906,6 +913,52 @@ final class AppConfigTests: XCTestCase {
         let config = try JSONDecoder().decode(AppConfig.self, from: Data("{}".utf8))
         XCTAssertEqual(config.frameRate, 30)
         XCTAssertTrue(config.presets.isEmpty)
+    }
+}
+
+final class GamutTests: XCTestCase {
+    private func xyz(_ x: Double, _ y: Double) -> SIMD3<Double> {
+        SIMD3(x / y, 1, (1 - x - y) / y)
+    }
+
+    func testPrimariesLandOnTheirOwnAxis() {
+        let cases: [(Gamut, Double, Double)] = [(.sGamut3, 0.730, 0.280), (.arriWideGamut3, 0.6840, 0.3130)]
+        for (gamut, x, y) in cases {
+            let red = gamut.fromRec2020 * ColorMath.xyzToRec2020 * xyz(x, y)
+            XCTAssertEqual(red.y / red.x, 0, accuracy: 0.001)
+            XCTAssertEqual(red.z / red.x, 0, accuracy: 0.001)
+        }
+    }
+
+    func testWhiteStaysWhite() {
+        for gamut in Gamut.allCases {
+            let white = gamut.fromRec2020 * SIMD3<Double>(repeating: 1)
+            XCTAssertEqual(white.x, 1, accuracy: 0.002)
+            XCTAssertEqual(white.y, 1, accuracy: 0.002)
+            XCTAssertEqual(white.z, 1, accuracy: 0.002)
+        }
+    }
+
+    func testNativeGamutFollowsTheCurve() {
+        var settings = ProcessingSettings()
+        settings.curve = .sLog3
+        XCTAssertEqual(settings.gamut, .rec2020)
+        settings.nativeGamut = true
+        XCTAssertEqual(settings.gamut, .sGamut3)
+        settings.curve = .logC3
+        XCTAssertEqual(settings.gamut, .arriWideGamut3)
+        settings.curve = .appleLog
+        XCTAssertEqual(settings.gamut, .rec2020)
+    }
+
+    func testMonitorKeepsGrayInEveryGamut() {
+        let curve = LogCurve.sLog3
+        let log = SIMD3<Double>(repeating: curve.encode(0.18))
+        let plain = MonitorTransform.display(log: log, curve: curve)
+        let native = MonitorTransform.display(log: log, curve: curve, gamut: .sGamut3)
+        XCTAssertEqual(native.x, plain.x, accuracy: 0.01)
+        XCTAssertEqual(native.y, plain.y, accuracy: 0.01)
+        XCTAssertEqual(native.z, plain.z, accuracy: 0.01)
     }
 }
 
