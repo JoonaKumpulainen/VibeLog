@@ -31,6 +31,7 @@ final class AppModel: ObservableObject {
     @Published var videoFormat: OSType = 0 { didSet { if videoFormat != oldValue { reconfigure() } } }
     @Published var videoFPS = 30.0 { didSet { if videoFPS != oldValue { reconfigure() } } }
     @Published var bracketCount = 3 { didSet { if bracketCount != oldValue { reconfigure() } } }
+    @Published var usePhotoPreset = true { didSet { if usePhotoPreset != oldValue { reconfigure() } } }
 
     @Published var recordSeconds = 5.0
     @Published var writeFrames = true
@@ -72,6 +73,7 @@ final class AppModel: ObservableObject {
         camera.onCaptureDrop = { [router] reason in router.handleDrop(reason) }
         camera.onCaptureFailure = { [router] _ in router.handleFailure() }
         camera.onReference = { [weak self] data, metadata in self?.handleReference(data, metadata) }
+        camera.onOptionsChanged = { [weak self] options in self?.adopt(options) }
 
         thermalObserver = NotificationCenter.default.addObserver(
             forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: nil
@@ -160,22 +162,26 @@ final class AppModel: ObservableObject {
             lensID: lensID, formatIndex: formatIndex, method: method,
             rawPixelFormat: rawFormat == 0 ? nil : rawFormat, photoSize: photoSize,
             videoPixelFormat: videoFormat == 0 ? nil : videoFormat, videoFPS: videoFPS,
-            bracketCount: bracketCount)
+            bracketCount: bracketCount, usePhotoPreset: usePhotoPreset)
         camera.configure(config) { [self] options in
             guard let options else { return }
-            applyingOptions = true
-            self.options = options
-            rawFormat = options.config.rawPixelFormat ?? 0
-            photoSize = options.config.photoSize
-            videoFormat = options.config.videoPixelFormat ?? 0
-            bracketCount = options.config.bracketCount
-            iso = min(max(iso, options.isoRange.lowerBound), options.isoRange.upperBound)
-            applyingOptions = false
+            adopt(options)
             applyExposure()
             applyWhiteBalance()
             applyFocus()
             if wasStreaming { toggleStream() }
         }
+    }
+
+    private func adopt(_ options: CaptureOptions) {
+        applyingOptions = true
+        self.options = options
+        rawFormat = options.config.rawPixelFormat ?? 0
+        photoSize = options.config.photoSize
+        videoFormat = options.config.videoPixelFormat ?? 0
+        bracketCount = options.config.bracketCount
+        iso = min(max(iso, options.isoRange.lowerBound), options.isoRange.upperBound)
+        applyingOptions = false
     }
 
     private func applyExposure() {

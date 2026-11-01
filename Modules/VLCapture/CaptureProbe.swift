@@ -45,6 +45,8 @@ public enum CaptureProbe {
                         + "extensions=\(extensions(of: format))")
                 }
                 if isRearPhysical {
+                    add("--- RAW availability by session setup")
+                    probeRawMatrix(device: device, add: add)
                     add("--- per-format output capabilities")
                     probeOutputs(device: device, add: add)
                 }
@@ -71,6 +73,75 @@ public enum CaptureProbe {
             return "{}"
         }
         return String(describing: values).replacingOccurrences(of: "\n", with: " ")
+    }
+
+    /// RAW lists depend on the session, so this tries each preset with and without a
+    /// video output, before and after the session starts.
+    private static func probeRawMatrix(device: AVCaptureDevice, add: (String) -> Void) {
+        let largest = device.formats.last { format in
+            CMVideoFormatDescriptionGetDimensions(format.formatDescription).width == 4032
+        }
+        for usePhotoPreset in [true, false] {
+            for addVideo in [false, true] {
+                let session = AVCaptureSession()
+                let photo = AVCapturePhotoOutput()
+                let video = AVCaptureVideoDataOutput()
+                guard let input = try? AVCaptureDeviceInput(device: device), session.canAddInput(input) else {
+                    add("cannot open \(device.localizedName)")
+                    return
+                }
+                session.beginConfiguration()
+                session.addInput(input)
+                if session.canAddOutput(photo) { session.addOutput(photo) }
+                if addVideo, session.canAddOutput(video) { session.addOutput(video) }
+                if usePhotoPreset {
+                    session.sessionPreset = .photo
+                } else {
+                    session.sessionPreset = .inputPriority
+                    if let largest, (try? device.lockForConfiguration()) != nil {
+                        device.activeFormat = largest
+                        device.unlockForConfiguration()
+                    }
+                }
+                session.commitConfiguration()
+
+                let setup = "preset=\(usePhotoPreset ? "photo" : "inputPriority") videoOutput=\(addVideo)"
+                add(rawLine(setup + " running=false", device: device, photo: photo))
+                session.startRunning()
+                let line = rawLine(setup + " running=\(session.isRunning)", device: device, photo: photo)
+                add(line)
+                Log.shared.info("\(device.localizedName) \(line)")
+                session.stopRunning()
+                session.removeInput(input)
+            }
+        }
+    }
+
+    private static func rawLine(_ setup: String, device: AVCaptureDevice, photo: AVCapturePhotoOutput) -> String {
+        let raw = photo.availableRawPhotoPixelFormatTypes
+        let bayer = raw.filter(AVCapturePhotoOutput.isBayerRAWPixelFormat)
+        let size = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription)
+        return "\(setup) active=\(device.activeFormat.fourCC) \(size.width)x\(size.height) "
+            + "bayer=\(names(bayer)) allRaw=\(names(raw)) "
+            + "rawFiles=\(photo.availableRawPhotoFileTypes.map(\.rawValue)) "
+            + "proRAWSupported=\(photo.isAppleProRAWSupported) "
+            + "ZSL=\(photo.isZeroShutterLagSupported) responsive=\(photo.isResponsiveCaptureSupported) "
+            + "demosaicedRaw=\(privateValue(photo, "isDemosaicedRawSupported"))"
+    }
+
+    /// Reads a private getter named in the runtime scan, for logging only.
+    private static func privateValue(_ object: NSObject, _ key: String) -> String {
+        guard object.responds(to: NSSelectorFromString(key)) else { return "n/a" }
+        var text = "nil"
+        let exception = VLTryCatch {
+            if let value = object.value(forKey: key) { text = String(describing: value) }
+        }
+        return exception == nil ? text : "raised"
+    }
+
+    private static func fourCCValue(_ object: NSObject, _ key: String) -> String {
+        let text = privateValue(object, key)
+        return UInt32(text).map { PixelFormats.fourCC($0) } ?? text
     }
 
     private static func probeOutputs(device: AVCaptureDevice, add: (String) -> Void) {
@@ -134,7 +205,12 @@ public enum CaptureProbe {
                 + "fastPrio=\(photo.isFastCapturePrioritizationSupported) "
                 + "maxPhoto=\(format.photoSizes.map(\.label).last ?? "-") "
                 + "colorSpaces=\(format.supportedColorSpaces.map(\.rawValue)) "
-                + "highestPhotoQuality=\(format.isHighestPhotoQualitySupported)")
+                + "highestPhotoQuality=\(format.isHighestPhotoQualitySupported) "
+                + "privRaw=\(fourCCValue(format, "supportedRawPixelFormat")) "
+                + "privDemosaiced=\(fourCCValue(format, "supportedDemosaicedRawPixelFormat")) "
+                + "privDemosaicedOK=\(privateValue(format, "isDemosaicedRawSupported")) "
+                + "privPhotoFormat=\(privateValue(format, "isPhotoFormat")) "
+                + "privSensor=\(privateValue(format, "sensorDimensions"))")
         }
         Log.shared.info("\(device.localizedName): Bayer photo types \(seenBayer.sorted())")
     }

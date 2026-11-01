@@ -57,11 +57,13 @@ public struct CaptureConfig: Sendable {
     public var videoPixelFormat: OSType?
     public var videoFPS: Double
     public var bracketCount: Int
+    /// Photo methods only: lets the Photo preset pick the format and ignores `formatIndex`.
+    public var usePhotoPreset: Bool
 
     public init(
         lensID: String, formatIndex: Int, method: CaptureMethod, rawPixelFormat: OSType? = nil,
         photoSize: PhotoSize? = nil, videoPixelFormat: OSType? = nil, videoFPS: Double = 30,
-        bracketCount: Int = 3
+        bracketCount: Int = 3, usePhotoPreset: Bool = true
     ) {
         self.lensID = lensID
         self.formatIndex = formatIndex
@@ -71,6 +73,7 @@ public struct CaptureConfig: Sendable {
         self.videoPixelFormat = videoPixelFormat
         self.videoFPS = videoFPS
         self.bracketCount = bracketCount
+        self.usePhotoPreset = usePhotoPreset
     }
 }
 

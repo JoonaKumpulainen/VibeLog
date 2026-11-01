@@ -233,6 +233,9 @@ public final class RawRecorder {
     private func writeSidecar() -> ClipResult {
         let snapshot = stats.snapshot()
         lock.lock()
+        if records.isEmpty {
+            noteError("No frames arrived during this recording")
+        }
         let metadata = referenceMetadata
         let frames = records
         let layout = self.layout

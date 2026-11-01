@@ -20,7 +20,7 @@ Turn the ring/silent switch to silent first. On iOS 17 the shutter sound is only
 
 | Button | What it does |
 |---|---|
-| **Probe** | Logs every camera, format and RAW type, tries Bayer formats on the video output, and scans AVCapture for RAW-related selectors. Saves `probes/probe_*.txt`. Takes up to a few minutes. |
+| **Probe** | Logs every camera, format and RAW type, checks RAW availability for each session setup, tries Bayer formats on the video output, and scans AVCapture for RAW-related selectors. Saves `probes/probe_*.txt`. Takes up to a few minutes. |
 | **Stream** | Runs the selected method without saving, for the overlay and the small RAW monitor. |
 | **Record** | Records for the chosen duration to `clips/clip_*/`. Turn off **Write frames to disk** to measure capture speed alone. |
 | **Log** | Shows the log. **Copy** puts it on the clipboard, **Previous** opens the last session's log, which holds crash details. |
@@ -30,6 +30,7 @@ Methods:
 - **Photo RAW: sequential**: fires the next Bayer photo when the last one finishes.
 - **Photo RAW: readiness/ZSL**: fires when `AVCapturePhotoOutputReadinessCoordinator` reports ready, with zero shutter lag, responsive capture and fast prioritization on where supported.
 - **Photo RAW: bracket burst**: repeated bracket captures with equal exposures.
+- **Use Photo preset**: on by default for photo methods. It lets iOS choose the format; turn it off to pick a format yourself.
 - **Video data output**: the pixel format picker shows only what iOS lists. If it lists no Bayer format this is a non-RAW control run.
 
 ## Files (Files app > On My iPhone > VibeLog)

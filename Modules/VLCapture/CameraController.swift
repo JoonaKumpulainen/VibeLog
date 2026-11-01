@@ -10,6 +10,8 @@ public final class CameraController: NSObject {
     public var onCaptureDrop: ((String) -> Void)?
     public var onCaptureFailure: ((String) -> Void)?
     public var onReference: ((Data?, [String: Any]) -> Void)?
+    /// Runs on the main queue when options change after configuring.
+    public var onOptionsChanged: ((CaptureOptions) -> Void)?
 
     private let queue = DispatchQueue(label: "vibelog.session", qos: .userInitiated)
     private var device: AVCaptureDevice?
@@ -18,7 +20,7 @@ public final class CameraController: NSObject {
     private var videoOutput: AVCaptureVideoDataOutput?
     private var photoDriver: PhotoRawDriver?
     private var videoDriver: VideoDataDriver?
-    private var config: CaptureConfig?
+    private var options: CaptureOptions?
     private var observers: [NSObjectProtocol] = []
     private var pressureObservation: NSKeyValueObservation?
 
@@ -91,7 +93,15 @@ public final class CameraController: NSObject {
                 Log.shared.error("Session did not start")
                 return
             }
-            if let config { Log.shared.info("Streaming with \(config.method.label)") }
+            if var options, let device {
+                Log.shared.info("Streaming with \(options.config.method.label)")
+                if options.config.method.isPhoto, photoDriver == nil {
+                    configurePhoto(device: device, options: &options)
+                    self.options = options
+                    let updated = options
+                    DispatchQueue.main.async { self.onOptionsChanged?(updated) }
+                }
+            }
             photoDriver?.start()
         }
     }
@@ -219,7 +229,7 @@ public final class CameraController: NSObject {
             Log.shared.error("Lens or format is not available")
             return nil
         }
-        let format = device.formats[requested.formatIndex]
+        let usePhotoPreset = requested.method.isPhoto && requested.usePhotoPreset
 
         do {
             let input = try AVCaptureDeviceInput(device: device)
@@ -252,15 +262,20 @@ public final class CameraController: NSObject {
                 videoOutput = output
             }
 
-            session.sessionPreset = .inputPriority
-            try device.lockForConfiguration()
-            device.activeFormat = format
-            device.unlockForConfiguration()
+            if usePhotoPreset, session.canSetSessionPreset(.photo) {
+                session.sessionPreset = .photo
+            } else {
+                session.sessionPreset = .inputPriority
+                try device.lockForConfiguration()
+                device.activeFormat = device.formats[requested.formatIndex]
+                device.unlockForConfiguration()
+            }
         } catch {
             Log.shared.error("Configure failed: \(error.localizedDescription)")
             return nil
         }
 
+        let format = device.activeFormat
         var options = CaptureOptions(config: requested)
         options.formatDescription = format.description
         options.isoRange = format.minISO...format.maxISO
@@ -274,7 +289,7 @@ public final class CameraController: NSObject {
         } else {
             configureVideo(device: device, format: format, options: &options)
         }
-        config = options.config
+        self.options = options
         return options
     }
 
@@ -295,8 +310,16 @@ public final class CameraController: NSObject {
         options.config.photoSize = size
 
         guard let raw = options.config.rawPixelFormat.flatMap({ bayer.contains($0) ? $0 : nil }) ?? bayer.first else {
-            Log.shared.error("No Bayer RAW photo format on this configuration. All RAW types: "
-                + output.availableRawPhotoPixelFormatTypes.map(PixelFormats.fourCC).joined(separator: " "))
+            let message = "No Bayer RAW photo format (preset \(session.sessionPreset.rawValue), "
+                + "running \(session.isRunning)). All RAW types: ["
+                + output.availableRawPhotoPixelFormatTypes.map(PixelFormats.fourCC).joined(separator: " ") + "]"
+            // The list can fill in once the session runs, so only that case is a failure.
+            if session.isRunning {
+                Log.shared.error(message)
+                options.config.rawPixelFormat = nil
+            } else {
+                Log.shared.info(message)
+            }
             return
         }
         options.config.rawPixelFormat = raw

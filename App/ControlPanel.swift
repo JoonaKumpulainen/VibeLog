@@ -14,8 +14,13 @@ struct ControlPanel: View {
                 Picker("Method", selection: $model.method) {
                     ForEach(CaptureMethod.allCases) { Text($0.label).tag($0) }
                 }
-                Picker("Format", selection: $model.formatIndex) {
-                    ForEach(model.formats) { Text($0.label).tag($0.id) }
+                if model.method.isPhoto {
+                    Toggle("Use Photo preset", isOn: $model.usePhotoPreset)
+                }
+                if !model.method.isPhoto || !model.usePhotoPreset {
+                    Picker("Format", selection: $model.formatIndex) {
+                        ForEach(model.formats) { Text($0.label).tag($0.id) }
+                    }
                 }
                 if model.method.isPhoto {
                     photoControls
