@@ -1,6 +1,6 @@
 # VibeLog handoff
 
-For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of early Phase 6. Phase 5 is built, and only a few phone checks remain. The latest build, from the `Keep 180 degrees across frame rates and make color space a picker` commit, passed CI with 73 tests if the next line of history shows it. It hasn't been tested on the phone, and the last logged session came from `9f9a456`.
+For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of early Phase 6. Phase 5 is built, and only a few phone checks remain. The latest build is `fc8fc51`, which passed CI with 73 tests. It hasn't been tested on the phone, and the last logged session came from `9f9a456`.
 
 ## What this is
 
