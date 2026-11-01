@@ -74,6 +74,12 @@ final class AppModel: ObservableObject {
     @Published var lensPosition: Float = 0.8 { didSet { if focusLocked { throttled(.focus) } } }
     /// A tap's single autofocus holds the lens until focus is released.
     @Published var focusTapped = false
+    /// Automatic controls stopped for the take, which resume when it ends.
+    @Published private(set) var focusHeldForTake = false
+    @Published private(set) var exposureHeldForTake = false
+    @Published private(set) var whiteBalanceHeldForTake = false
+    /// Freezes exposure and white balance as a take starts. Focus always holds.
+    @Published var lockAtRoll = true
 
     var shutterLabel: String { "1/\(Int(pow(2, shutterStops).rounded()))" }
 
@@ -217,14 +223,6 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func setTool(_ tool: Tool, inToolbar: Bool) {
-        if inToolbar {
-            toolbar = Tool.allCases.filter { toolbar.contains($0) || $0 == tool }
-        } else {
-            toolbar.removeAll { $0 == tool }
-        }
-    }
-
     private var config: AppConfig {
         var config = AppConfig()
         config.codec = encoderPreset.id
@@ -241,6 +239,7 @@ final class AppModel: ObservableObject {
         config.lutExpectsRec709 = processing.lutExpectsRec709
         config.monitorOffWhileRecording = processing.pauseMonitorWhileRecording
         config.telemetry = showTelemetry
+        config.lockAtRoll = lockAtRoll
         config.mainsHz = mainsHz
         config.toolbar = toolbar.map(\.rawValue)
         config.activeTools = activeTools.map(\.rawValue).sorted()
@@ -273,6 +272,7 @@ final class AppModel: ObservableObject {
         processing.lutExpectsRec709 = loaded.lutExpectsRec709
         processing.pauseMonitorWhileRecording = loaded.monitorOffWhileRecording
         showTelemetry = loaded.telemetry
+        lockAtRoll = loaded.lockAtRoll
         mainsHz = loaded.mainsHz
         toolbar = loaded.toolbar.compactMap(Tool.init(rawValue:))
         activeTools = Set(loaded.activeTools.compactMap(Tool.init(rawValue:)))
@@ -295,24 +295,80 @@ final class AppModel: ObservableObject {
 
     /// The real chain, from sensor to file.
     var signalPath: String {
-        let curve: String
-        switch processing.curve {
-        case .appleLog: curve = "ALOG"
-        case .sLog3: curve = "SLOG3"
-        case .logC3: curve = "LOGC3"
-        }
         guard recordEncoded else { return "RAW 14 › DUMP" }
-        return "RAW 14 › \(curve) › \(encoderPreset.label.uppercased())"
+        return "RAW 14 › \(curveLabel) › \(encoderPreset.label.uppercased())"
     }
 
-    /// Uses rates measured on the phone at full size, and free space alone for the others.
-    var timeLeftLabel: String {
-        let usable = status.freeDiskGB - 10
+    var curveLabel: String {
+        switch processing.curve {
+        case .appleLog: return "ALOG"
+        case .sLog3: return "SLOG3"
+        case .logC3: return "LOGC3"
+        }
+    }
+
+    var codecLabel: String {
+        guard recordEncoded else { return "RAW" }
+        return encoderPreset.label
+            .replacingOccurrences(of: "ProRes ", with: "")
+            .replacingOccurrences(of: "10-bit ", with: "")
+            .replacingOccurrences(of: ":", with: "")
+            .uppercased()
+    }
+
+    var megapixelLabel: String {
+        "\(Int((Double(outputSize.width * outputSize.height) / 1_000_000).rounded()))MP"
+    }
+
+    private var usableGB: Int { max(status.freeDiskGB - 10, 0) }
+
+    /// Uses rates measured on the phone at full size. Other codecs have none yet.
+    private var minutesLeft: Int? {
         let measured = ["prores422hq": 167.0, "prores4444": 240.0][encoderPreset.id]
-        guard let measured else { return "\(max(usable, 0)) GB" }
+        guard let measured else { return nil }
         let share = Double(outputSize.width * outputSize.height) / (4032 * 3024)
-        let minutes = Int(Double(max(usable, 0)) * 1000 / (measured * share) / 60)
+        return Int(Double(usableGB) * 1000 / (measured * share) / 60)
+    }
+
+    var timeLeftLabel: String {
+        guard let minutes = minutesLeft else { return "\(usableGB) GB" }
         return minutes >= 60 ? "\(minutes / 60)H \(minutes % 60)M" : "\(minutes)M"
+    }
+
+    var timecodeLabel: String {
+        String(format: "%02d:%02d:%02d", recordElapsed / 3600, recordElapsed / 60 % 60, recordElapsed % 60)
+    }
+
+    var heatLabel: String {
+        switch status.thermal {
+        case "NOMINAL": return "OK"
+        case "SERIOUS": return "HOT"
+        case "CRITICAL": return "CRIT"
+        default: return status.thermal
+        }
+    }
+
+    var isStorageLow: Bool { minutesLeft.map { $0 < 5 } ?? (usableGB < 3) }
+
+    /// Near-empty batteries stalled the encoder.
+    var isBatteryLow: Bool { (Int(status.battery.prefix(while: \.isNumber)) ?? 100) < 15 }
+
+    /// Frames lost to the camera, the writer or the GPU since the take started.
+    var takeDrops: Int { stats.captureDrops + stats.writerDrops + pipelineStats.dropped }
+
+    private var takeWarning: String? {
+        if isHot { return "Phone is hot" }
+        if isStorageLow { return "Storage is low" }
+        if isBatteryLow { return "Battery is low" }
+        return nil
+    }
+
+    /// A short message beside the record button, gone after a few seconds.
+    func showNotice(_ text: String, seconds: Double = 3) {
+        notice = text
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            if self?.notice == text { self?.notice = nil }
+        }
     }
 
     var batteryLabel: String { String(status.battery.prefix { $0 != " " }) }
@@ -421,7 +477,15 @@ final class AppModel: ObservableObject {
 
     private func updateHeatMode() {
         let state = ProcessInfo.processInfo.thermalState
-        pipeline?.setHot(state == .serious || state == .critical)
+        let hot = state == .serious || state == .critical
+        pipeline?.setHot(hot)
+        DispatchQueue.main.async { [self] in
+            guard hot != loadReduced else { return }
+            loadReduced = hot
+            if processing.reduceLoadWhenHot {
+                showNotice(hot ? "Hot: reduced load" : "Cool: full quality", seconds: 4)
+            }
+        }
     }
 
     private var outputSize: EncoderSize { widescreen ? encoderSize.widescreen : encoderSize }
@@ -549,9 +613,43 @@ final class AppModel: ObservableObject {
         camera.setFocus(focusLocked ? .locked : .auto, lensPosition: lensPosition)
     }
 
+    /// Refocusing during a take can cost frames, and white balance is baked into the file. Values
+    /// the owner set are already still.
+    private func holdForTake() {
+        if !focusLocked, !focusTapped {
+            focusHeldForTake = true
+            camera.holdFocus()
+        }
+        guard lockAtRoll else { return }
+        if !exposureLocked {
+            exposureHeldForTake = true
+            camera.holdExposure()
+        }
+        if !whiteBalanceLocked {
+            whiteBalanceHeldForTake = true
+            camera.holdWhiteBalance()
+        }
+    }
+
+    private func resumeAfterTake() {
+        if focusHeldForTake {
+            focusHeldForTake = false
+            applyFocus()
+        }
+        if exposureHeldForTake {
+            exposureHeldForTake = false
+            applyExposure()
+        }
+        if whiteBalanceHeldForTake {
+            whiteBalanceHeldForTake = false
+            applyWhiteBalance()
+        }
+    }
+
     private func startRecording() {
         guard !isRecording, !recordStarting else { return }
         notice = nil
+        if let takeWarning { showNotice(takeWarning, seconds: 4) }
         // A frame processed before the reference arrives has no calibration.
         let warmUp = !isStreaming || !hasReference
         if !isStreaming { toggleStream() }
@@ -579,6 +677,7 @@ final class AppModel: ObservableObject {
                 pendingReferences.append(recorder)
                 camera.requestReference()
             }
+            holdForTake()
             router.stats.reset()
             pipeline?.resetStats()
             router.beginRecording(recorder, seconds: rawDumpSeconds)
@@ -609,6 +708,7 @@ final class AppModel: ObservableObject {
             "aspect": widescreen ? "16:9 center crop" : "4:3 open gate",
             "pipeline": processing.pipeline.label,
             "orientation": hold.hold.label,
+            "reducedLoadAtStart": isHot && processing.reduceLoadWhenHot ? "yes, bilinear debayer" : "no",
             "note": "The file's transfer tag is nominal; decode with the curve named here.",
         ]
         do {
@@ -621,8 +721,14 @@ final class AppModel: ObservableObject {
                 DispatchQueue.main.async { self?.notice = "Recording stopped: the encoder failed" }
                 self?.stopRecording()
             }
-            audio.start { _ in }
+            audio.start { [weak self] ready in
+                guard !ready else { return }
+                DispatchQueue.main.async {
+                    self?.showNotice("No mic: recording silent", seconds: 4)
+                }
+            }
             activeEncoder = encoder
+            holdForTake()
             router.stats.reset()
             pipeline.resetStats()
             pipeline.setSink(encoder)
@@ -648,6 +754,7 @@ final class AppModel: ObservableObject {
         isRecording = false
         pipeline?.setSink(nil)
         audio.stop()
+        resumeAfterTake()
         let capture = router.stats.snapshot()
         let gpu = pipeline?.currentStats() ?? PipelineStats()
         encoder.finish { [self] result in
@@ -678,6 +785,7 @@ final class AppModel: ObservableObject {
         recordDeadline = nil
         guard isRecording, let recorder = router.endRecording() else { return }
         isRecording = false
+        resumeAfterTake()
         // A photo reference that never arrives must not block the clip from closing.
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [self] in
             if let index = pendingReferences.firstIndex(where: { $0 === recorder }) {
@@ -690,6 +798,7 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private var loadReduced = false
     private var pendingReferences: [RawRecorder] = []
     private let audio = AudioCapture()
     private var activeEncoder: VideoEncoder?

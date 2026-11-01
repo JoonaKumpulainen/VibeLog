@@ -17,6 +17,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var lutExpectsRec709 = false
     public var monitorOffWhileRecording = false
     public var telemetry = true
+    public var lockAtRoll = true
     public var mainsHz = 50
     /// Tool identifiers, in toolbar order.
     public var toolbar = ["zebras", "falseColor", "grid", "center", "level", "punchIn"]
@@ -46,6 +47,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         lutExpectsRec709 = read(.lutExpectsRec709, defaults.lutExpectsRec709)
         monitorOffWhileRecording = read(.monitorOffWhileRecording, defaults.monitorOffWhileRecording)
         telemetry = read(.telemetry, defaults.telemetry)
+        lockAtRoll = read(.lockAtRoll, defaults.lockAtRoll)
         mainsHz = read(.mainsHz, defaults.mainsHz)
         toolbar = read(.toolbar, defaults.toolbar)
         activeTools = read(.activeTools, defaults.activeTools)

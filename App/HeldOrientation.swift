@@ -61,12 +61,19 @@ enum Hold: Equatable {
     }
 }
 
+/// Tilt from level as the phone is held. Rounded, so it only updates when it visibly moves. It's
+/// its own object so that tilt redraws only the level, never the screen.
+final class LevelReading: ObservableObject {
+    @Published fileprivate(set) var degrees = 0.0
+}
+
 /// Reads gravity directly, because device orientation stops changing under the rotation lock.
 final class HoldTracker: ObservableObject {
     @Published private(set) var hold = Hold.portrait
-    /// Tilt from level as the phone is held. Rounded, so it only updates when it visibly moves.
-    @Published private(set) var levelDegrees = 0.0
-    /// Off unless the level is showing, so tilt can't redraw the screen during a take.
+    /// The hold's angle, reached the short way round from the last one.
+    @Published private(set) var turn = 0.0
+    let level = LevelReading()
+    /// Off unless the level is showing.
     var tracksLevel = false
 
     private let motion = CMMotionManager()
@@ -87,8 +94,11 @@ final class HoldTracker: ObservableObject {
             let changed = next != self.last
             self.last = next
             DispatchQueue.main.async {
-                if changed { self.hold = next }
-                if self.tracksLevel, level != self.levelDegrees { self.levelDegrees = level }
+                if changed {
+                    self.hold = next
+                    self.turn += (next.angle - self.turn).remainder(dividingBy: 360)
+                }
+                if self.tracksLevel, level != self.level.degrees { self.level.degrees = level }
             }
         }
     }
@@ -96,6 +106,30 @@ final class HoldTracker: ObservableObject {
     deinit {
         motion.stopAccelerometerUpdates()
     }
+}
+
+private struct HeldTurnKey: EnvironmentKey {
+    static let defaultValue = 0.0
+}
+
+extension EnvironmentValues {
+    var heldTurn: Double {
+        get { self[HeldTurnKey.self] }
+        set { self[HeldTurnKey.self] = newValue }
+    }
+}
+
+private struct HeldTurn: ViewModifier {
+    @Environment(\.heldTurn) private var turn
+
+    func body(content: Content) -> some View {
+        content.rotationEffect(.degrees(turn))
+    }
+}
+
+extension View {
+    /// Turns content upright for the hold, in place.
+    func turnedToHold() -> some View { modifier(HeldTurn()) }
 }
 
 /// Lays its content out as if the screen were turned to the hold, then turns it back.

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Tools that can sit in the toolbar. The config file holds which ones do, and their order.
+/// Monitoring tools, switched on from the monitor panel.
 enum Tool: String, CaseIterable, Identifiable {
     case zebras, falseColor, grid, center, level, punchIn
 
@@ -17,6 +17,17 @@ enum Tool: String, CaseIterable, Identifiable {
         }
     }
 
+    var shortTitle: String {
+        switch self {
+        case .zebras: return "ZEBRA"
+        case .falseColor: return "FALSE"
+        case .grid: return "GRID"
+        case .center: return "CENTER"
+        case .level: return "LEVEL"
+        case .punchIn: return "PUNCH"
+        }
+    }
+
     var symbol: String {
         switch self {
         case .zebras: return "circle.lefthalf.striped.horizontal"
@@ -26,6 +37,21 @@ enum Tool: String, CaseIterable, Identifiable {
         case .level: return "level"
         case .punchIn: return "plus.magnifyingglass"
         }
+    }
+}
+
+/// The guides, watching the level themselves.
+struct LiveFrameGuides: View {
+    @ObservedObject var level: LevelReading
+    let grid: Bool
+    let center: Bool
+    let showsLevel: Bool
+    let gravityDegrees: Double
+
+    var body: some View {
+        FrameGuides(
+            grid: grid, center: center, levelDegrees: showsLevel ? level.degrees : nil,
+            gravityDegrees: gravityDegrees)
     }
 }
 

@@ -188,6 +188,33 @@ public final class CameraController: NSObject {
         }
     }
 
+    /// Freezes exposure where it is, which stored values could only approximate.
+    public func holdExposure() {
+        withLockedDevice { device in
+            if device.isExposureModeSupported(.locked) {
+                device.exposureMode = .locked
+            }
+        }
+    }
+
+    /// Freezes white balance where it is.
+    public func holdWhiteBalance() {
+        withLockedDevice { device in
+            if device.isWhiteBalanceModeSupported(.locked) {
+                device.whiteBalanceMode = .locked
+            }
+        }
+    }
+
+    /// Stops the lens where it is, which a stored lens position could only approximate.
+    public func holdFocus() {
+        withLockedDevice { device in
+            if device.isFocusModeSupported(.locked) {
+                device.focusMode = .locked
+            }
+        }
+    }
+
     /// Runs a single autofocus at a sensor point, then holds the lens there.
     public func focus(at point: CGPoint) {
         withLockedDevice { device in
