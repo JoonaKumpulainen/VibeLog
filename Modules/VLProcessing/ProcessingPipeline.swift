@@ -39,8 +39,9 @@ public struct ProcessingSettings: Equatable, Sendable {
     public var curve = LogCurve.appleLog
     public var demosaic = DemosaicMethod.malvar
     public var monitor = MonitorMode.rec709
-    /// Half a stop places a typical auto exposure's middle gray near 0.18.
-    public var exposureStops = 0.5
+    /// On an iPhone 14 Pro, auto exposure on a plain surface read 0.37 linear at +0.5 stops,
+    /// so -0.5 stops places it near 0.18. This is from a single measurement.
+    public var exposureStops = -0.5
 
     public init() {}
 }
