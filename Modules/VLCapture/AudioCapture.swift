@@ -5,12 +5,17 @@ import VLCore
 /// behaves. Its timestamps use the host clock, the same as the camera's.
 public final class AudioCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
     public var onSample: ((CMSampleBuffer) -> Void)?
+    /// The loudest sample of each stretch of about 80 ms, on the audio queue.
+    public var onLevel: ((Float) -> Void)?
 
     private let session = AVCaptureSession()
     private let queue = DispatchQueue(label: "vibelog.audio", qos: .userInitiated)
     private var configured = false
     private let peakLock = NSLock()
     private var peak: Float = 0
+    private var levelPeak: Float = 0
+    private var levelFrames = 0
+    private var loggedFormat = false
 
     /// Starts capture on a background queue. Runs `completion` with false without mic access.
     public func start(completion: @escaping (Bool) -> Void) {
@@ -70,13 +75,17 @@ public final class AudioCapture: NSObject, AVCaptureAudioDataOutputSampleBufferD
         measure(sampleBuffer)
     }
 
-    /// Reads interleaved 16-bit or 32-bit float PCM. Anything else leaves the meter still.
+    /// Reads 16-bit or 32-bit PCM. Anything else leaves the meter still, and the log says why.
     private func measure(_ sampleBuffer: CMSampleBuffer) {
         guard let format = CMSampleBufferGetFormatDescription(sampleBuffer),
             let stream = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee,
             stream.mFormatID == kAudioFormatLinearPCM,
             let block = CMSampleBufferGetDataBuffer(sampleBuffer)
         else { return }
+        if !loggedFormat {
+            loggedFormat = true
+            Log.shared.info("Audio format: \(stream.mSampleRate) Hz, \(stream.mBitsPerChannel) bit, \(stream.mChannelsPerFrame) channels, flags \(stream.mFormatFlags)")
+        }
         var length = 0
         var pointer: UnsafeMutablePointer<CChar>?
         guard CMBlockBufferGetDataPointer(
@@ -90,11 +99,21 @@ public final class AudioCapture: NSObject, AVCaptureAudioDataOutputSampleBufferD
             for sample in bytes.bindMemory(to: Int16.self) {
                 loudest = max(loudest, abs(Float(sample)) / 32768)
             }
+        } else if stream.mBitsPerChannel == 32 {
+            for sample in bytes.bindMemory(to: Int32.self) {
+                loudest = max(loudest, abs(Float(sample)) / 2_147_483_648)
+            }
         } else {
             return
         }
         peakLock.lock()
         peak = max(peak, min(loudest, 1))
         peakLock.unlock()
+        levelPeak = max(levelPeak, min(loudest, 1))
+        levelFrames += CMSampleBufferGetNumSamples(sampleBuffer)
+        guard Double(levelFrames) >= stream.mSampleRate * 0.08 else { return }
+        onLevel?(levelPeak)
+        levelPeak = 0
+        levelFrames = 0
     }
 }

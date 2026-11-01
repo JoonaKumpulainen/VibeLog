@@ -810,9 +810,10 @@ extension ProcessingPipeline: MTKViewDelegate {
             bandsLow: SIMD4(bands.blueBelow, bands.greenFrom, bands.greenTo, bands.pinkFrom),
             bandsHigh: SIMD4(bands.pinkTo, bands.yellowFrom, bands.clip, Float(Self.lutSize)),
             viewOrigin: viewOrigin, viewScale: viewScale, peaking: peaking ? 1 : 0,
-            // The image is turned on screen, so its first axis runs along the drawable's height.
-            peakStep: SIMD2(
-                viewScale / Float(view.drawableSize.height), viewScale / Float(view.drawableSize.width)))
+            // Fixed to the image, not the zoom: one sensor pixel apart, punch-in sees too little
+            // change for peaking to fire. The image is turned, so its first axis runs along the
+            // drawable's height.
+            peakStep: SIMD2(1 / Float(view.drawableSize.height), 1 / Float(view.drawableSize.width)))
         encoder.setRenderPipelineState(monitorState)
         encoder.setFragmentTexture(image, index: 0)
         encoder.setFragmentTexture(rec709, index: 1)

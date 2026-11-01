@@ -468,7 +468,7 @@ struct CameraHUD: View {
             if !model.isRecording {
                 lensPill
             } else if model.recordEncoded {
-                AudioMeter(peak: model.audioPeak)
+                AudioMeter()
             }
         }
         .frame(height: CameraGeometry.trayDepth)
@@ -674,40 +674,6 @@ struct StatusBlocks: View {
             .frame(width: CameraGeometry.statusLineWidth, alignment: Alignment(horizontal: lines, vertical: .center))
             .frame(width: CameraGeometry.statusSide, height: CameraGeometry.statusSide, alignment: outer)
             .turnedToHold()
-    }
-}
-
-/// How loud the last second was, on a 60 dB scale. It updates once a second, because faster
-/// interface updates have cost frames during a take.
-struct AudioMeter: View {
-    let peak: Float
-
-    private var share: CGFloat {
-        CGFloat(min(max((20 * log10(max(peak, 0.000_01)) + 60) / 60, 0), 1))
-    }
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Text("MIC")
-                .font(Tokens.labelFont)
-                .foregroundStyle(Tokens.label)
-                .fixedSize()
-                .turnedToHold()
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    Rectangle()
-                        .fill(Tokens.surface)
-                    Rectangle()
-                        .fill(peak >= 0.99 ? Tokens.warning : Tokens.value)
-                        .frame(width: geometry.size.width * share)
-                }
-            }
-            .frame(height: 5)
-        }
-        .frame(width: 132)
-        .accessibilityElement()
-        .accessibilityLabel("Microphone level")
-        .accessibilityValue("\(Int(share * 100)) percent")
     }
 }
 

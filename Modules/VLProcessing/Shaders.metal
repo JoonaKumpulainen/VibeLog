@@ -28,7 +28,7 @@ struct MonitorParams {
     float2 viewOrigin;  // Top left of the part shown, as a share of the portrait picture.
     float viewScale;  // Share of the picture shown. Below 1 it reaches past the drawable's pixels.
     uint peaking;  // 1 marks fine detail, for judging focus.
-    float2 peakStep;  // One drawable pixel, in the image's coordinates.
+    float2 peakStep;  // One drawable pixel at full view, in the image's coordinates.
 };
 
 struct CropParams {
@@ -280,7 +280,7 @@ fragment float4 monitorFragment(VertexOut in [[stage_in]],
         }
     }
 
-    // Log luma against its four neighbors, a pixel of the screen away. Sharp edges stand out most.
+    // Log luma against four neighbors a few sensor pixels away. Sharp edges stand out most.
     if (m.peaking != 0) {
         float edge = 4.0 * rec2020Luma(logColor);
         edge -= rec2020Luma(image.sample(linearSampler, rotated + float2(m.peakStep.x, 0)).rgb);

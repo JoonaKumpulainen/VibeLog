@@ -43,6 +43,7 @@ final class AppModel: ObservableObject {
     let camera = CameraController()
     let pipeline = ProcessingPipeline()
     let hold = HoldTracker()
+    let audioBar = AudioBar()
 
     @Published var lenses: [LensInfo] = []
     @Published var formats: [FormatInfo] = []
@@ -172,6 +173,7 @@ final class AppModel: ObservableObject {
         router.onRecordingElapsed = { [weak self] in
             DispatchQueue.main.async { self?.stopRecording() }
         }
+        audio.onLevel = { [audioBar] peak in audioBar.show(peak: peak) }
         camera.onFrame = { [router] frame in router.handle(frame) }
         camera.onCaptureDrop = { [router] reason in router.handleDrop(reason) }
         camera.onCaptureFailure = { [router] _ in router.handleFailure() }
@@ -876,6 +878,7 @@ final class AppModel: ObservableObject {
                 rotationDegrees: hold.hold.clipRotation))
             audio.onSample = { [weak encoder] sample in encoder?.appendAudio(sample) }
             audioPeak = 0
+            audioBar.reset()
             encoder.onFailure = { [weak self] message in
                 Log.shared.error("Recording stopped: \(message)")
                 DispatchQueue.main.async { self?.takeStopped("The encoder failed.") }

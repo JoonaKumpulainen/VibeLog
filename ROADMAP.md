@@ -22,7 +22,7 @@ Everything added from here on follows these rules, so the app stays one instrume
 - **Nothing covers the picture.** Controls and messages stay in the space around it. Monitoring marks that help judge the image, such as zebras or peaking, are the only things drawn on it, and they never reach the file.
 - **Controls don't move.** Every control keeps its portrait position in every hold, and only its contents turn in place. Record never moves.
 - **A take comes first.** A new control must say whether it's allowed during a take, and it stays off until a control test shows it costs no frames. See "Adjusting the camera while recording" in the handoff.
-- **Keep the main thread quiet.** Interface values update about once a second during a take, and nothing animates continuously. Short animations only follow a tap.
+- **Keep the main thread quiet.** Interface values update about once a second during a take, and nothing animates continuously. Short animations only follow a tap. A reading that must move faster draws on its own layers from its own queue, as the audio bar does.
 
 ### Where a new thing goes
 
@@ -43,7 +43,7 @@ Each setting has one home. Settings can link to the format panel, but never repe
 
 ### How it should look
 
-- **Color has fixed meanings.** Amber is set by the user. Orange fill is a warning. Red is recording only. Cyan is peaking. A new meaning needs a new shape, because color can't be the only signal.
+- **Color has fixed meanings.** Amber is set by the user. Orange fill is a warning. Red is recording only. Cyan is peaking. The one exception is the audio bar, which uses the standard green, yellow and red scale. A new meaning needs a new shape, because color can't be the only signal.
 - **Use `Tokens` and `CameraGeometry`,** never new sizes or colors in a view. Text sizes follow the hold, not a per-view shrink.
 - **Labels are plain.** Use a whole word where it fits, and an industry term where one exists. Icons need a text label beside them or an accessibility label.
 - **No boxes.** Group with alignment and spacing. A flat `Tokens.surface` fill marks what's selected, and `Tokens.opaquePanel` is for a panel that sits above the controls.
