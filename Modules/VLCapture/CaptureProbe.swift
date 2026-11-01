@@ -107,6 +107,10 @@ public enum CaptureProbe {
 
                 let setup = "preset=\(usePhotoPreset ? "photo" : "inputPriority") videoOutput=\(addVideo)"
                 add(rawLine(setup + " running=false", device: device, photo: photo))
+                if addVideo {
+                    add("    video=\(names(video.availableVideoPixelFormatTypes)) "
+                        + "forcedVideoOK=\(forcedVideoFormats(video, extra: photo.availableRawPhotoPixelFormatTypes))")
+                }
                 session.startRunning()
                 let line = rawLine(setup + " running=\(session.isRunning)", device: device, photo: photo)
                 add(line)
@@ -115,6 +119,22 @@ public enum CaptureProbe {
                 session.removeInput(input)
             }
         }
+    }
+
+    /// Tries Bayer formats on the video output, which raises when one is refused.
+    private static func forcedVideoFormats(_ video: AVCaptureVideoDataOutput, extra: [OSType]) -> [String] {
+        var accepted: [String] = []
+        for candidate in PixelFormats.forcedVideoCandidates + extra {
+            let name = PixelFormats.fourCC(candidate)
+            let failure = VLTryCatch {
+                video.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: candidate]
+            }
+            if failure == nil, !accepted.contains(name) {
+                accepted.append(name)
+            }
+        }
+        _ = VLTryCatch { video.videoSettings = [:] }
+        return accepted
     }
 
     private static func rawLine(_ setup: String, device: AVCaptureDevice, photo: AVCapturePhotoOutput) -> String {
@@ -185,17 +205,7 @@ public enum CaptureProbe {
             let proRAW = raw.filter(AVCapturePhotoOutput.isAppleProRAWPixelFormat)
             bayer.forEach { seenBayer.insert(PixelFormats.fourCC($0)) }
 
-            var accepted: [String] = []
-            for candidate in PixelFormats.forcedVideoCandidates + bayer {
-                let name = PixelFormats.fourCC(candidate)
-                let failure = VLTryCatch {
-                    video.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: candidate]
-                }
-                if failure == nil, !accepted.contains(name) {
-                    accepted.append(name)
-                }
-            }
-            _ = VLTryCatch { video.videoSettings = [:] }
+            let accepted = forcedVideoFormats(video, extra: bayer)
 
             add("[\(index)] \(key) bayer=\(names(bayer)) proRAW=\(names(proRAW)) "
                 + "video=\(names(video.availableVideoPixelFormatTypes)) forcedVideoOK=\(accepted) "

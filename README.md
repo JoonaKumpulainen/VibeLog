@@ -27,10 +27,11 @@ Turn the ring/silent switch to silent first. On iOS 17 the shutter sound is only
 
 Methods:
 
+- **Photo RAW: readiness/ZSL** is the default and the fastest so far.
 - **Photo RAW: sequential**: fires the next Bayer photo when the last one finishes.
-- **Photo RAW: readiness/ZSL**: fires when `AVCapturePhotoOutputReadinessCoordinator` reports ready, with zero shutter lag, responsive capture and fast prioritization on where supported.
+- **Readiness/ZSL detail**: fires when `AVCapturePhotoOutputReadinessCoordinator` reports ready, with zero shutter lag, responsive capture and fast prioritization on where supported.
 - **Photo RAW: bracket burst**: repeated bracket captures with equal exposures.
-- **Use Photo preset**: on by default for photo methods. It lets iOS choose the format; turn it off to pick a format yourself.
+- **Use Photo preset**: on by default for photo methods, and required for RAW: with it off, iOS lists no RAW formats at all.
 - **Video data output**: the pixel format picker shows only what iOS lists. If it lists no Bayer format this is a non-RAW control run.
 
 ## Files (Files app > On My iPhone > VibeLog)
@@ -51,6 +52,8 @@ Summarize a clip and export a frame on a computer:
 ```bash
 python3 tools/inspect_clip.py path/to/clip_x --png frame.png
 ```
+
+`clip.json` holds `blackLevel` and `whiteLevel` for `frames.raw`. The `dng` block holds the tags of `reference.dng`, which use a different scale. A recording needs about 730 MB/s, or 44 GB per minute, at 12 MP and 30 fps.
 
 ## Project layout
 

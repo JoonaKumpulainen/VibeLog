@@ -104,6 +104,54 @@ final class DNGMetadataTests: XCTestCase {
     }
 }
 
+final class RawLevelsTests: XCTestCase {
+    func testReadsBufferLevelsFromPhotoMetadata() {
+        let metadata: [String: Any] = ["{DNG}": ["BlackLevel": 2112, "WhiteLevel": 16383]]
+        XCTAssertEqual(RawLevels(photoMetadata: metadata), RawLevels(black: [2112], white: 16383))
+    }
+
+    func testReadsPerChannelBlackLevels() {
+        let levels: [String: Any] = ["BlackLevel": [2112, 2110, 2111, 2113], "WhiteLevel": 16383]
+        let metadata: [String: Any] = ["{DNG}": levels]
+        XCTAssertEqual(RawLevels(photoMetadata: metadata)?.black, [2112, 2110, 2111, 2113])
+    }
+
+    func testMissingLevels() {
+        XCTAssertNil(RawLevels(photoMetadata: [:]))
+        XCTAssertNil(RawLevels(photoMetadata: ["{DNG}": ["WhiteLevel": 16383]]))
+    }
+}
+
+final class FrameSamplerTests: XCTestCase {
+    private func sample(_ values: [UInt16], width: Int) -> FrameSample? {
+        values.withUnsafeBytes {
+            FrameSampler.sample(
+                base: $0.baseAddress!, width: width, height: values.count / width,
+                bytesPerRow: width * 2, step: 1)
+        }
+    }
+
+    func testRangeAndMean() {
+        let result = sample([2112, 3000, 16383, 4000], width: 2)
+        XCTAssertEqual(result?.min, 2112)
+        XCTAssertEqual(result?.max, 16383)
+        XCTAssertEqual(result?.mean ?? 0, 6373.75, accuracy: 0.001)
+    }
+
+    func testHashSeparatesFrames() {
+        XCTAssertEqual(sample([1, 2, 3, 4], width: 2)?.hash, sample([1, 2, 3, 4], width: 2)?.hash)
+        XCTAssertNotEqual(sample([1, 2, 3, 4], width: 2)?.hash, sample([1, 2, 3, 5], width: 2)?.hash)
+    }
+
+    func testRejectsEightBitLayout() {
+        let values: [UInt16] = [0, 0]
+        let result = values.withUnsafeBytes {
+            FrameSampler.sample(base: $0.baseAddress!, width: 4, height: 1, bytesPerRow: 4)
+        }
+        XCTAssertNil(result)
+    }
+}
+
 final class RawRecorderTests: XCTestCase {
     private func makeBuffer(fill: UInt8) -> CVPixelBuffer {
         var buffer: CVPixelBuffer?
@@ -148,6 +196,24 @@ final class RawRecorderTests: XCTestCase {
         let frames = try XCTUnwrap(sidecar["frames"] as? [[String: Any]])
         XCTAssertEqual(frames.count, 5)
         XCTAssertEqual(frames[2]["fileOffset"] as? Int, frameSize * 2)
+    }
+
+    func testSidecarUsesBufferLevelsNotDNGLevels() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let recorder = try RawRecorder(config: .init(
+            directory: folder, writeFrames: false, memoryBudget: 1 << 24,
+            context: ClipContext(method: "test", lens: "test", format: "test", requestedSeconds: 1)))
+        recorder.beginReference()
+        recorder.finishReference(dng: nil, metadata: ["{DNG}": ["BlackLevel": 2112, "WhiteLevel": 16383]])
+        recorder.append(frame(0))
+        let done = expectation(description: "finished")
+        recorder.finish { _ in done.fulfill() }
+        wait(for: [done], timeout: 10)
+        let json = try Data(contentsOf: folder.appendingPathComponent("clip.json"))
+        let sidecar = try XCTUnwrap(JSONSerialization.jsonObject(with: json) as? [String: Any])
+        XCTAssertEqual(sidecar["blackLevel"] as? [Double], [2112])
+        XCTAssertEqual(sidecar["whiteLevel"] as? [Double], [16383])
     }
 
     func testMeasureOnlyModeWritesNoFrames() throws {

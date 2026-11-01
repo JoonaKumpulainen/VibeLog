@@ -25,7 +25,7 @@ final class AppModel: ObservableObject {
 
     @Published var lensID = "" { didSet { if lensID != oldValue { lensChanged() } } }
     @Published var formatIndex = 0 { didSet { if formatIndex != oldValue { reconfigure() } } }
-    @Published var method = CaptureMethod.photoSequential { didSet { if method != oldValue { reconfigure() } } }
+    @Published var method = CaptureMethod.photoReadiness { didSet { if method != oldValue { reconfigure() } } }
     @Published var rawFormat: OSType = 0 { didSet { if rawFormat != oldValue { reconfigure() } } }
     @Published var photoSize: PhotoSize? { didSet { if photoSize != oldValue { reconfigure() } } }
     @Published var videoFormat: OSType = 0 { didSet { if videoFormat != oldValue { reconfigure() } } }
@@ -61,6 +61,7 @@ final class AppModel: ObservableObject {
     private var thermalObserver: NSObjectProtocol?
     private var recordDeadline: Date?
     private var started = false
+    private var ticksSinceReport = 0
 
     func onAppear() {
         guard !started else { return }
@@ -247,10 +248,13 @@ final class AppModel: ObservableObject {
 
     /// Runs off the main thread with a DNG from the capture driver.
     private func handleReference(_ data: Data?, _ metadata: [String: Any]) {
+        if let levels = RawLevels(photoMetadata: metadata) {
+            preview?.setLevels(black: Float(levels.black.first ?? 0), white: Float(levels.white))
+            Log.shared.info("RAW buffer levels: black \(levels.black) white \(levels.white)")
+        } else {
+            Log.shared.warn("Photo metadata has no RAW levels")
+        }
         if let data, let parsed = try? DNGMetadata(dng: data) {
-            let black = Float(parsed.blackLevel?.first ?? 0)
-            let white = Float(parsed.whiteLevel?.first ?? 16383)
-            preview?.setLevels(black: black, white: white)
             Log.shared.info("DNG: cfa=\(parsed.cfaPattern ?? "?") black=\(parsed.blackLevel ?? []) "
                 + "white=\(parsed.whiteLevel ?? []) neutral=\(parsed.asShotNeutral ?? []) "
                 + "model=\(parsed.model ?? "?")")
@@ -273,6 +277,16 @@ final class AppModel: ObservableObject {
             footprintMB: SystemStatus.footprint / 1_000_000,
             availableMB: SystemStatus.availableMemory / 1_000_000,
             freeDiskGB: Int(SystemStatus.freeDisk / 1_000_000_000))
+        if isRecording {
+            ticksSinceReport += 1
+            if ticksSinceReport >= 10 {
+                ticksSinceReport = 0
+                Log.shared.info(String(
+                    format: "Recording: %.2f fps now, n=%d, writer drops %d, mem %d MB, avail %d MB, thermal %@, free %d GB",
+                    stats.rollingFPS, stats.frames, stats.writerDrops, status.footprintMB,
+                    status.availableMB, status.thermal, status.freeDiskGB))
+            }
+        }
         if let deadline = recordDeadline, Date() > deadline {
             Log.shared.warn("Recording stopped by deadline, frames stopped arriving")
             stopRecording()

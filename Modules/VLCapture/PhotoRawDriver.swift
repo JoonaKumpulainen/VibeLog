@@ -157,7 +157,8 @@ extension PhotoRawDriver: AVCapturePhotoCaptureDelegate {
         error: Error?
     ) {
         if let error {
-            onFailure?("Photo failed: \(error.localizedDescription)")
+            let details = error as NSError
+            onFailure?("Photo failed: \(details.domain) \(details.code) \(details.localizedDescription) \(details.userInfo)")
             return
         }
         guard let buffer = photo.pixelBuffer else {

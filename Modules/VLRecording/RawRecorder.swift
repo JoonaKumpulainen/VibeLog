@@ -42,6 +42,8 @@ public final class RawRecorder {
     private var errors: [String] = []
     private var cfa: CFAPattern?
     private var referenceMetadata: DNGMetadata?
+    private var levels: RawLevels?
+    private var frameCheck = FrameCheck()
 
     public init(config: Config) throws {
         self.config = config
@@ -67,7 +69,9 @@ public final class RawRecorder {
         let index = records.count
         var record = FrameRecord(
             index: index, fileOffset: nil, pts: frame.pts, exposureSeconds: frame.exposureSeconds,
-            iso: frame.iso, whiteBalanceGains: frame.whiteBalanceGains)
+            iso: frame.iso, whiteBalanceGains: frame.whiteBalanceGains,
+            sample: frame.cfa == nil ? nil : FrameSampler.sample(frame.buffer))
+        updateFrameCheck(record.sample)
 
         if config.writeFrames {
             guard let block = takeBlock(size: layout.bytesPerFrame) else {
@@ -98,6 +102,9 @@ public final class RawRecorder {
     public func finishReference(dng: Data?, metadata: [String: Any]) {
         defer { references.leave() }
         let folder = config.directory
+        lock.lock()
+        levels = RawLevels(photoMetadata: metadata)
+        lock.unlock()
         if let dng {
             try? dng.write(to: folder.appendingPathComponent("reference.dng"))
             do {
@@ -158,6 +165,16 @@ public final class RawRecorder {
         }
         _ = fcntl(fileDescriptor, F_NOCACHE, 1)
         return true
+    }
+
+    private func updateFrameCheck(_ sample: FrameSample?) {
+        guard let sample else { return }
+        if let previous = records.last?.sample, previous.hash == sample.hash {
+            frameCheck.repeatedFrames += 1
+        }
+        frameCheck.sampledFrames += 1
+        frameCheck.minValue = min(frameCheck.minValue ?? .max, sample.min)
+        frameCheck.maxValue = max(frameCheck.maxValue ?? .min, sample.max)
     }
 
     private func takeBlock(size: Int) -> UnsafeMutableRawPointer? {
@@ -237,6 +254,8 @@ public final class RawRecorder {
             noteError("No frames arrived during this recording")
         }
         let metadata = referenceMetadata
+        let levels = self.levels
+        let check = frameCheck
         let frames = records
         let layout = self.layout
         let cfa = self.cfa
@@ -250,10 +269,10 @@ public final class RawRecorder {
             createdAt: Storage.timestamp(), context: config.context, layout: layout,
             bitsPerSample: cfa == nil ? nil : 14,
             cfaPattern: metadata?.cfaPattern ?? cfa?.rawValue,
-            blackLevel: metadata?.blackLevel, whiteLevel: metadata?.whiteLevel,
+            blackLevel: levels?.black, whiteLevel: levels.map { [$0.white] },
             whiteBalanceGains: frames.first?.whiteBalanceGains,
             colorMatrix1: metadata?.colorMatrix1, colorMatrix2: metadata?.colorMatrix2,
-            dng: metadata, stats: snapshot, bytesWritten: bytesWritten,
+            dng: metadata, frameCheck: check, stats: snapshot, bytesWritten: bytesWritten,
             writeThroughputMBps: throughput, peakPoolBlocks: peak, poolLimitBlocks: limit,
             errors: errors, frames: frames)
 
@@ -268,6 +287,9 @@ public final class RawRecorder {
 
         let summary = Self.summary(context: config.context, layout: layout, stats: snapshot, throughput: throughput)
         Log.shared.info("CLIP RESULT \(config.directory.lastPathComponent): \(summary)")
+        Log.shared.info("Frame check: \(check.sampledFrames) sampled, \(check.repeatedFrames) repeated, "
+            + "values \(check.minValue.map(String.init) ?? "-") to \(check.maxValue.map(String.init) ?? "-"), "
+            + "levels \(levels.map { "\($0.black) to \($0.white)" } ?? "none"), peak pool \(peak) of \(limit)")
         appendBenchmark(snapshot: snapshot, layout: layout, throughput: throughput, peak: peak)
         return ClipResult(directory: config.directory, summary: summary, stats: snapshot)
     }

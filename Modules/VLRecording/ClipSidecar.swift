@@ -23,6 +23,15 @@ public struct FrameRecord: Codable, Sendable {
     public var exposureSeconds: Double
     public var iso: Float
     public var whiteBalanceGains: [Float]
+    public var sample: FrameSample?
+}
+
+/// Sparse pixel checks across the clip, showing the frames are real and on which scale.
+public struct FrameCheck: Codable, Equatable, Sendable {
+    public var sampledFrames = 0
+    public var repeatedFrames = 0
+    public var minValue: UInt16?
+    public var maxValue: UInt16?
 }
 
 /// clip.json, written next to frames.raw when the recording finishes.
@@ -35,12 +44,14 @@ public struct ClipSidecar: Codable, Sendable {
     public var layout: FrameLayout?
     public var bitsPerSample: Int?
     public var cfaPattern: String?
+    /// Levels for frames.raw. They differ from `dng`, which holds the DNG file's own tags.
     public var blackLevel: [Double]?
     public var whiteLevel: [Double]?
     public var whiteBalanceGains: [Float]?
     public var colorMatrix1: [Double]?
     public var colorMatrix2: [Double]?
     public var dng: DNGMetadata?
+    public var frameCheck: FrameCheck
     public var stats: FrameStats.Snapshot
     public var bytesWritten: Int
     public var writeThroughputMBps: Double
