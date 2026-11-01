@@ -90,6 +90,15 @@ public struct CaptureOptions: Sendable {
     public var maxWhiteBalanceGain: Float = 1
 }
 
+/// What the camera is doing now, so the interface can show it and lock to it.
+public struct LiveCameraValues: Sendable {
+    public var iso: Float
+    public var seconds: Double
+    public var lensPosition: Float
+    public var temperature: Float?
+    public var tint: Float?
+}
+
 public enum ControlMode: Sendable {
     case auto
     case locked

@@ -16,7 +16,7 @@ struct SettingsView: View {
                 recording
                 image
                 monitor
-                manual
+                whiteBalance
                 Section {
                     LabeledContent("Version", value: Self.version)
                         .contentShape(Rectangle())
@@ -114,33 +114,10 @@ struct SettingsView: View {
         }
     }
 
-    @ViewBuilder
-    private var manual: some View {
-        Section("Exposure") {
-            Toggle("Lock ISO and shutter", isOn: $model.exposureLocked)
-            if let range = model.options?.isoRange {
-                labeled("ISO \(Int(model.iso))") {
-                    Slider(value: $model.iso, in: range)
-                }
-            }
-            // Stops at 1/30 s, because a longer exposure cannot keep 30 fps.
-            labeled("Shutter \(model.shutterLabel)") {
-                Slider(value: $model.shutterStops, in: 4.91...13)
-            }
-        }
+    private var whiteBalance: some View {
         Section("White balance") {
-            Toggle("Lock white balance", isOn: $model.whiteBalanceLocked)
-            labeled("\(Int(model.temperature)) K") {
-                Slider(value: $model.temperature, in: 2500...9000)
-            }
             labeled("Tint \(Int(model.tint))") {
                 Slider(value: $model.tint, in: -150...150)
-            }
-        }
-        Section("Focus") {
-            Toggle("Lock focus", isOn: $model.focusLocked)
-            labeled(String(format: "Lens %.2f", model.lensPosition)) {
-                Slider(value: $model.lensPosition, in: 0...1)
             }
         }
     }

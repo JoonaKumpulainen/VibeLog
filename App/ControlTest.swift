@@ -8,17 +8,30 @@ extension AppModel {
     /// frame and failure counts, so the gaps between steps show any lost frames.
     func runControlTest() {
         guard isStreaming, recordEncoded, !isRecording, isBusy == nil else { return }
-        let steps: [(at: Double, label: String, action: () -> Void)] = [
-            (8, "focus lens 0.2", { [camera] in camera.setFocus(.locked, lensPosition: 0.2) }),
-            (12, "focus lens 0.9", { [camera] in camera.setFocus(.locked, lensPosition: 0.9) }),
-            (16, "focus auto", { [camera] in camera.setFocus(.auto, lensPosition: 0.8) }),
-            (20, "exposure 1/60 ISO 200", { [camera] in camera.setExposure(.locked, seconds: 1 / 60.0, iso: 200) }),
-            (24, "exposure 1/120 ISO 400", { [camera] in camera.setExposure(.locked, seconds: 1 / 120.0, iso: 400) }),
-            (28, "exposure auto", { [camera] in camera.setExposure(.auto, seconds: 1 / 100.0, iso: 100) }),
-            (32, "white balance 3200 K", { [camera] in camera.setWhiteBalance(.locked, temperature: 3200, tint: 0) }),
-            (36, "white balance 6500 K", { [camera] in camera.setWhiteBalance(.locked, temperature: 6500, tint: 0) }),
-            (40, "white balance auto", { [camera] in camera.setWhiteBalance(.auto, temperature: 5600, tint: 0) }),
+        let center = CGPoint(x: 0.5, y: 0.5)
+        var steps: [(at: Double, label: String?, action: () -> Void)] = [
+            (8, "tap focus center", { [camera] in camera.focus(at: center) }),
+            (12, "tap focus corner", { [camera] in camera.focus(at: CGPoint(x: 0.3, y: 0.3)) }),
+            (16, "rack focus", {}),
+            (18, "rack done", {}),
+            (20, "ISO ramp", {}),
+            (22, "ramp done", {}),
+            (24, "exposure auto", { [camera] in camera.setExposure(.auto, seconds: 1 / 100.0, iso: 100) }),
+            (28, "bias +1", { [camera] in camera.setExposureBias(1) }),
+            (32, "bias 0", { [camera] in camera.setExposureBias(0) }),
+            (36, "focus auto", { [camera] in camera.setFocus(.auto, lensPosition: 0.8) }),
+            (40, "meter center", { [camera] in camera.meter(at: center) }),
         ]
+        // Dials send about ten changes a second.
+        for tick in 0..<20 {
+            let share = Float(tick) / 19
+            steps.append((16 + Double(tick) / 10, nil, { [camera] in
+                camera.setFocus(.locked, lensPosition: 0.3 + 0.5 * share)
+            }))
+            steps.append((20 + Double(tick) / 10, nil, { [camera] in
+                camera.setExposure(.locked, seconds: 1 / 60.0, iso: 200 + 200 * share)
+            }))
+        }
         let savedSeconds = recordSeconds
         recordSeconds = Self.controlTestSeconds
         Log.shared.info("Control test started")
@@ -30,12 +43,14 @@ extension AppModel {
             DispatchQueue.main.asyncAfter(deadline: .now() + step.at) { [self] in
                 guard isRecording else { return }
                 step.action()
-                logControlTest(step.label)
+                if let label = step.label { logControlTest(label) }
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.controlTestSeconds + 3) { [self] in
             applyExposure()
+            applyBias()
             applyWhiteBalance()
+            focusTapped = false
             applyFocus()
             recordSeconds = savedSeconds
             notice = "Control test finished, send the log"

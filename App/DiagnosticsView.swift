@@ -30,7 +30,7 @@ struct DiagnosticsView: View {
                 }
                 .disabled(!model.isStreaming || !model.recordEncoded)
             } footer: {
-                Text("Records \(Int(AppModel.controlTestSeconds)) seconds and changes focus, exposure and white balance during it. Keep the phone still and pointed at a detailed scene.")
+                Text("Records \(Int(AppModel.controlTestSeconds)) seconds and changes focus and exposure during it. Keep the phone still and pointed at a detailed scene.")
             }
             Section("Tools") {
                 Button(model.isStreaming ? "Stop stream" : "Start stream") { model.toggleStream() }

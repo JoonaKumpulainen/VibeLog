@@ -53,16 +53,25 @@ final class AppModel: ObservableObject {
     @Published var writeFrames = true
 
     @Published var exposureLocked = false { didSet { applyExposure() } }
-    @Published var iso: Float = 100 { didSet { if exposureLocked { applyExposure() } } }
+    @Published var iso: Float = 100 { didSet { if exposureLocked { throttled(.exposure) } } }
     /// Log2 of the shutter denominator: 6.64 is 1/100 s.
-    @Published var shutterStops: Double = 6.64 { didSet { if exposureLocked { applyExposure() } } }
+    @Published var shutterStops: Double = 6.64 { didSet { if exposureLocked { throttled(.exposure) } } }
+    /// Offsets auto exposure at the sensor, in stops.
+    @Published var exposureBias: Float = 0 { didSet { throttled(.bias) } }
     @Published var whiteBalanceLocked = false { didSet { applyWhiteBalance() } }
-    @Published var temperature: Float = 5600 { didSet { if whiteBalanceLocked { applyWhiteBalance() } } }
-    @Published var tint: Float = 0 { didSet { if whiteBalanceLocked { applyWhiteBalance() } } }
+    @Published var temperature: Float = 5600 { didSet { if whiteBalanceLocked { throttled(.whiteBalance) } } }
+    @Published var tint: Float = 0 { didSet { if whiteBalanceLocked { throttled(.whiteBalance) } } }
     @Published var focusLocked = false { didSet { applyFocus() } }
-    @Published var lensPosition: Float = 0.8 { didSet { if focusLocked { applyFocus() } } }
+    @Published var lensPosition: Float = 0.8 { didSet { if focusLocked { throttled(.focus) } } }
+    /// A tap's single autofocus holds the lens until focus is released.
+    @Published var focusTapped = false
 
     var shutterLabel: String { "1/\(Int(pow(2, shutterStops).rounded()))" }
+
+    /// Slowest shutter that keeps 30 fps, as log2 of the denominator.
+    static let slowestShutterStops = 4.91
+
+    private enum Control { case exposure, bias, whiteBalance, focus }
 
     struct SystemLine {
         var thermal = "-"
@@ -82,6 +91,7 @@ final class AppModel: ObservableObject {
     private var startStreamAfterConfigure = true
     private var resumeInForeground = false
     private var hasReference = false
+    private var pendingControls: Set<Control> = []
     private var ticksSinceReport = 0
     private var recordStart = Date()
     private var recordStarting = false
@@ -124,6 +134,25 @@ final class AppModel: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Focuses and meters at a sensor point. Stays off during a take until the control test
+    /// shows what a single autofocus costs there.
+    func focus(at point: CGPoint) {
+        guard !isRecording else { return }
+        if focusLocked { focusLocked = false }
+        focusTapped = true
+        camera.focus(at: point)
+        guard !exposureLocked else { return }
+        exposureBias = 0
+        camera.meter(at: point)
+    }
+
+    /// Returns to continuous autofocus, which lost 8 frames when switched on during a take.
+    func releaseFocus() {
+        guard !isRecording else { return }
+        focusTapped = false
+        focusLocked = false
     }
 
     func enteredBackground() {
@@ -211,6 +240,35 @@ final class AppModel: ObservableObject {
                 Log.shared.error("Cannot load LUT \(name): \(error)")
             }
         }
+    }
+
+    /// Dial drags change values far faster than the camera needs them.
+    private func throttled(_ control: Control) {
+        guard pendingControls.insert(control).inserted else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [self] in
+            pendingControls.remove(control)
+            switch control {
+            case .exposure: applyExposure()
+            case .bias: applyBias()
+            case .whiteBalance: applyWhiteBalance()
+            case .focus: applyFocus()
+            }
+        }
+    }
+
+    /// Unlocked controls follow the camera, so a lock or dial starts from what it is doing.
+    private func adopt(_ live: LiveCameraValues) {
+        if !exposureLocked {
+            iso = live.iso
+            if live.seconds > 0 {
+                shutterStops = min(max(log2(1 / live.seconds), Self.slowestShutterStops), 13)
+            }
+        }
+        if !whiteBalanceLocked {
+            temperature = live.temperature ?? temperature
+            tint = live.tint ?? tint
+        }
+        if !focusLocked { lensPosition = live.lensPosition }
     }
 
     private func updateHeatMode() {
@@ -303,7 +361,9 @@ final class AppModel: ObservableObject {
         camera.configure(config) { [self] options in
             guard let options else { return }
             adopt(options)
+            focusTapped = false
             applyExposure()
+            if exposureBias != 0 { applyBias() }
             applyWhiteBalance()
             applyFocus()
             if wasStreaming { toggleStream() }
@@ -324,6 +384,11 @@ final class AppModel: ObservableObject {
     func applyExposure() {
         guard !applyingOptions else { return }
         camera.setExposure(exposureLocked ? .locked : .auto, seconds: 1 / pow(2, shutterStops), iso: iso)
+    }
+
+    func applyBias() {
+        guard !applyingOptions else { return }
+        camera.setExposureBias(exposureBias)
     }
 
     func applyWhiteBalance() {
@@ -506,6 +571,9 @@ final class AppModel: ObservableObject {
     /// Measures off the main thread, which capture readiness callbacks depend on.
     private func tick() {
         let battery = SystemStatus.batteryText
+        camera.liveValues { [weak self] live in
+            DispatchQueue.main.async { self?.adopt(live) }
+        }
         statsQueue.async { [self] in
             let snapshot = router.stats.snapshot()
             let gpu = pipeline?.currentStats() ?? PipelineStats()

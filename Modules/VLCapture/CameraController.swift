@@ -188,6 +188,55 @@ public final class CameraController: NSObject {
         }
     }
 
+    /// Runs a single autofocus at a sensor point, then holds the lens there.
+    public func focus(at point: CGPoint) {
+        withLockedDevice { device in
+            if device.isFocusPointOfInterestSupported {
+                device.focusPointOfInterest = point
+            }
+            if device.isFocusModeSupported(.autoFocus) {
+                device.focusMode = .autoFocus
+            }
+        }
+    }
+
+    /// Moves auto exposure's metering to a sensor point.
+    public func meter(at point: CGPoint) {
+        withLockedDevice { device in
+            if device.isExposurePointOfInterestSupported {
+                device.exposurePointOfInterest = point
+            }
+            if device.isExposureModeSupported(.continuousAutoExposure) {
+                device.exposureMode = .continuousAutoExposure
+            }
+        }
+    }
+
+    /// Offsets auto exposure at the sensor, unlike the pipeline's digital exposure offset.
+    public func setExposureBias(_ stops: Float) {
+        withLockedDevice { device in
+            let bias = min(max(stops, device.minExposureTargetBias), device.maxExposureTargetBias)
+            device.setExposureTargetBias(bias, completionHandler: nil)
+        }
+    }
+
+    /// The completion runs on the session queue, and only while the session runs.
+    public func liveValues(completion: @escaping (LiveCameraValues) -> Void) {
+        queue.async { [self] in
+            guard let device, session.isRunning else { return }
+            var values = LiveCameraValues(
+                iso: device.iso, seconds: CMTimeGetSeconds(device.exposureDuration),
+                lensPosition: device.lensPosition)
+            // Gains can be outside the range this conversion accepts.
+            _ = VLTryCatch {
+                let balance = device.temperatureAndTintValues(for: device.deviceWhiteBalanceGains)
+                values.temperature = balance.temperature
+                values.tint = balance.tint
+            }
+            completion(values)
+        }
+    }
+
     private func withLockedDevice(_ body: @escaping (AVCaptureDevice) -> Void) {
         queue.async { [self] in
             guard let device else { return }

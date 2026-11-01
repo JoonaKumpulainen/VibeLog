@@ -20,7 +20,9 @@ A free Apple ID signature lasts 7 days, so repeat step 3 when the app stops open
 
 Turn the ring/silent switch to silent first. On iOS 17 the shutter sound is only removed with a workaround.
 
-The camera opens live. The red button records, the lens buttons switch camera, the eye menu sets the monitor and exposure tool, and the gear opens **Settings**. **Monitor** and **Exposure tool** can change during a recording. Everything else is locked until it stops.
+The camera opens live. The red button records, the lens buttons or a pinch switch camera, the eye menu sets the monitor and exposure tool, and the gear opens **Settings**. Tap the picture to focus and meter there, then drag up or down to set exposure. The **ISO**, **Shutter**, **White** and **Focus** buttons open dials, and the lock next to a dial holds its value. Yellow values are held, not automatic.
+
+During a recording you can change the monitor, exposure tool and all four dials. Tap focus, exposure drag and returning to autofocus are off, because switching autofocus on lost frames in testing. Everything else is locked until recording stops.
 
 Long-press **Version** in Settings to open **Diagnostics**:
 
@@ -28,7 +30,7 @@ Long-press **Version** in Settings to open **Diagnostics**:
 |---|---|
 | **Debug overlay** | Shows frame rate, GPU, drops, memory, heat and storage on the viewfinder. |
 | **Show log** | Shows the log. **Copy** puts it on the clipboard, **Previous** opens the last session's log, which holds crash details. |
-| **Run control test** | Records 46 seconds and changes focus, exposure and white balance on a schedule. Each change is logged with frame and failure counts. |
+| **Run control test** | Records 46 seconds and changes focus and exposure on a schedule. Each change is logged with frame and failure counts. |
 | **Run probe** | Logs every camera, format and RAW type, checks RAW availability for each session setup, tries Bayer formats on the video output, and scans AVCapture for RAW-related selectors. Saves `probes/probe_*.txt`. Takes up to a few minutes. |
 | **Start stream** / **Stop stream** | Starts or stops the selected method without saving. |
 | **Encode video** | Off records a RAW dump to `clips/clip_*/`. Turn off **Write frames to disk** to measure capture speed alone. |

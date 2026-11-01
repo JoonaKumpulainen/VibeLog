@@ -65,30 +65,31 @@ Modules are dynamic frameworks. Swift is in Swift 5 mode.
 
 ## Now: Phase 5
 
-The owner approved Phase 5, in stages with one `.ipa` each: camera screen and settings, direct control, shooting information and warnings, library, then presets, accessibility and a 10-minute test. Gyro logging to a Gyroflow `.gcsv` follows as its own change once that test passes. Direct control needs a small addition to `VLCapture`: focus and exposure points, exposure compensation, and reading live values. Other module code stays unchanged.
+The owner approved Phase 5, in stages with one `.ipa` each: camera screen and settings, direct control, shooting information and warnings, library, then presets, accessibility and a 10-minute test. Gyro logging to a Gyroflow `.gcsv` follows as its own change once that test passes. Stage 1 is confirmed on the phone. `VLCapture` gained focus and exposure points, exposure compensation and live values for direct control. Other module code is unchanged.
 
 Diagnostics opens with a long press on **Version** in Settings.
 
 ## Adjusting the camera while recording
 
-From reading the code, not yet measured. **Run control test** exists to measure the second list.
+From one 46-second control test at ProRes 422 HQ, 30 fps, indoors. Each change got a 4-second window, which should hold 120 frames.
 
-Must stay locked during a take:
+| Change during the take | Frames in the window | Result |
+|---|---|---|
+| Lens position jump to 0.2, then 0.9 | 119, 120 | Clean, at most 1 frame lost |
+| Switch to continuous autofocus | 112 | **Lost 8 frames, a 267 ms gap, with no photo failure.** The owner saw stutter |
+| Exposure 1/60 ISO 200, then 1/120 ISO 400, then auto | 120, 120, 120 | Clean |
+| White balance 3200 K, then 6500 K, then auto | 120, 120, 120 | Clean |
 
-- **Lens and capture settings:** any change rebuilds the session, which ends the recording.
-- **Curve, exposure offset, debayer, crop and pipeline:** these are baked in, and the clip's metadata is written at the start.
-- **Shutter slower than 1/30 s:** it can't keep 30 fps. Auto exposure in low light may do this itself.
+Encoder drops were 0. The test holds one run of each, and a second control test measures tap focus, a dial-speed focus rack and ISO ramp, exposure bias, and metering.
 
-Unknown until tested on the phone:
+- **While recording, allowed:** ISO, shutter and white balance dials, the focus dial, Monitor and Exposure tool.
+- **While recording, blocked:** switching on continuous autofocus. Tap focus and exposure drag stay off until the second test.
+- **Must stay locked:** lens and capture settings, because any change rebuilds the session and ends the take. Curve, exposure offset, debayer, crop and pipeline, because they're baked in and the clip's metadata is written at the start.
+- **Shutter:** dials stop at 1/30 s, which is the slowest that keeps 30 fps. Auto exposure in low light hasn't been tested for this.
+- **Not settled:** continuous autofocus that's already on when recording starts showed no hole in 8 seconds, but it wasn't hunting. Per-frame ISO, shutter and white balance values are read from the device when a photo arrives, so they can lag the frame. White balance gains are baked into the debayer, so auto drift is recorded for good. The RAW frames have no correction for focus breathing.
+- **Streaming before a recording:** 19 failed photos and a 575 ms gap appeared while Settings and Diagnostics were open, with none of that in the takes. Check whether sheets cost frames.
 
-- **Focus, ISO, shutter and white balance changes:** the code allows them, but ZSL and the photo loop may lose frames or apply them late.
-- **Per-frame values:** ISO, shutter and white balance gains are read from the device when a photo arrives, not from that photo, so they can lag. White balance gains are baked into the debayer, so auto white balance drift or a late gain is recorded for good.
-- **Auto modes:** continuous focus, exposure and white balance keep running during a take. Only the locks stop them.
-- **Focus breathing:** the RAW frames have no correction for it.
-
-Safe during a take: **Monitor** (Rec.709 or log) and **Exposure tool**, which only affect drawing. The ISP monitor removes the Metal view, so it stays in Settings.
-
-Keep SwiftUI updates to about once a second while recording, and avoid continuous animations, because main-thread load has cost frames before.
+The ISP monitor removes the Metal view, so it stays in Settings. Keep SwiftUI updates to about once a second while recording, and avoid continuous animations, because main-thread load has cost frames before.
 
 ## Known simulator limits
 
