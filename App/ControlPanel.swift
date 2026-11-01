@@ -1,6 +1,7 @@
 import SwiftUI
 import VLCapture
 import VLCore
+import VLProcessing
 
 struct ControlPanel: View {
     @EnvironmentObject private var model: AppModel
@@ -26,6 +27,23 @@ struct ControlPanel: View {
                     photoControls
                 } else {
                     videoControls
+                }
+            }
+            if model.method.isPhoto {
+                Section("Processing") {
+                    Toggle("GPU pipeline", isOn: $model.processing.enabled)
+                    Picker("Monitor", selection: $model.processing.monitor) {
+                        ForEach(MonitorMode.allCases) { Text($0.label).tag($0) }
+                    }
+                    Picker("Log curve", selection: $model.processing.curve) {
+                        ForEach(LogCurve.allCases) { Text($0.label).tag($0) }
+                    }
+                    Picker("Debayer", selection: $model.processing.demosaic) {
+                        ForEach(DemosaicMethod.allCases) { Text($0.label).tag($0) }
+                    }
+                    labeled(String(format: "Exposure %+.1f", model.processing.exposureStops)) {
+                        Slider(value: $model.processing.exposureStops, in: -3...3, step: 0.1)
+                    }
                 }
             }
             Section("Recording") {

@@ -9,7 +9,7 @@ import VLRecording
 
 final class AppModel: ObservableObject {
     let camera = CameraController()
-    let preview = RawPreviewRenderer()
+    let pipeline = ProcessingPipeline()
 
     @Published var lenses: [LensInfo] = []
     @Published var formats: [FormatInfo] = []
@@ -32,6 +32,9 @@ final class AppModel: ObservableObject {
     @Published var videoFPS = 30.0 { didSet { if videoFPS != oldValue { reconfigure() } } }
     @Published var bracketCount = 3 { didSet { if bracketCount != oldValue { reconfigure() } } }
     @Published var usePhotoPreset = true { didSet { if usePhotoPreset != oldValue { reconfigure() } } }
+
+    @Published var processing = ProcessingSettings() { didSet { pipeline?.update(processing) } }
+    @Published var pipelineStats = PipelineStats()
 
     @Published var recordSeconds = 5.0
     @Published var writeFrames = true
@@ -67,7 +70,7 @@ final class AppModel: ObservableObject {
     func onAppear() {
         guard !started else { return }
         started = true
-        router.preview = preview
+        router.pipeline = pipeline
         router.onRecordingElapsed = { [weak self] in
             DispatchQueue.main.async { self?.stopRecording() }
         }
@@ -110,6 +113,7 @@ final class AppModel: ObservableObject {
             isStreaming = false
         } else {
             router.stats.reset()
+            pipeline?.resetStats()
             if method.isPhoto { camera.requestReference() }
             camera.start()
             isStreaming = true
@@ -136,6 +140,30 @@ final class AppModel: ObservableObject {
     }
 
     // MARK: Private
+
+    func saveStill() {
+        guard let pipeline else { return }
+        guard isStreaming else {
+            Log.shared.warn("Start streaming before saving a still")
+            return
+        }
+        pipeline.requestStill { [weak self] still in
+            guard let still else {
+                Log.shared.error("Still readback failed")
+                return
+            }
+            DispatchQueue.global(qos: .utility).async {
+                do {
+                    let (folder, spot) = try StillExporter.export(still)
+                    let message = "Still saved: stills/\(folder.lastPathComponent)"
+                    Log.shared.info("\(message), center log \(spot.log) linear \(spot.linear)")
+                    DispatchQueue.main.async { self?.lastResult = message }
+                } catch {
+                    Log.shared.error("Still export failed: \(error)")
+                }
+            }
+        }
+    }
 
     private func loadLenses() {
         lenses = CameraController.lenses()
@@ -220,6 +248,7 @@ final class AppModel: ObservableObject {
                 camera.requestReference()
             }
             router.stats.reset()
+            pipeline?.resetStats()
             router.beginRecording(recorder, seconds: recordSeconds)
             recordDeadline = Date().addingTimeInterval(recordSeconds + 5)
             isRecording = true
@@ -249,9 +278,10 @@ final class AppModel: ObservableObject {
 
     /// Runs off the main thread with a DNG from the capture driver.
     private func handleReference(_ data: Data?, _ metadata: [String: Any]) {
-        if let levels = RawLevels(photoMetadata: metadata) {
-            preview?.setLevels(black: Float(levels.black.first ?? 0), white: Float(levels.white))
-            Log.shared.info("RAW buffer levels: black \(levels.black) white \(levels.white)")
+        let levels = RawLevels(photoMetadata: metadata)
+        pipeline?.setCalibration(data.flatMap { try? DNGMetadata(dng: $0) }, levels: levels)
+        if let levels {
+            Log.shared.info("RAW buffer levels: black \(levels.black) white \(levels.white) clip \(levels.clipValue)")
         } else {
             Log.shared.warn("Photo metadata has no RAW levels")
         }
@@ -275,26 +305,29 @@ final class AppModel: ObservableObject {
     private func tick() {
         statsQueue.async { [self] in
             let snapshot = router.stats.snapshot()
+            let gpu = pipeline?.currentStats() ?? PipelineStats()
             let line = SystemLine(
                 thermal: SystemStatus.thermalName,
                 footprintMB: SystemStatus.footprint / 1_000_000,
                 availableMB: SystemStatus.availableMemory / 1_000_000,
                 freeDiskGB: Int(SystemStatus.freeDisk / 1_000_000_000))
-            DispatchQueue.main.async { [self] in show(snapshot, line) }
+            DispatchQueue.main.async { [self] in show(snapshot, gpu, line) }
         }
     }
 
-    private func show(_ snapshot: FrameStats.Snapshot, _ line: SystemLine) {
+    private func show(_ snapshot: FrameStats.Snapshot, _ gpu: PipelineStats, _ line: SystemLine) {
         stats = snapshot
+        pipelineStats = gpu
         status = line
         if isRecording {
             ticksSinceReport += 1
             if ticksSinceReport >= 5 {
                 ticksSinceReport = 0
                 Log.shared.info(String(
-                    format: "Recording: %.2f fps now, n=%d, writer drops %d, mem %d MB, avail %d MB, thermal %@, free %d GB",
-                    stats.rollingFPS, stats.frames, stats.writerDrops, status.footprintMB,
-                    status.availableMB, status.thermal, status.freeDiskGB))
+                    format: "Recording: %.2f fps now, n=%d, writer drops %d, gpu %d done %d dropped %.1f avg %.1f max ms, mem %d MB, avail %d MB, thermal %@, free %d GB",
+                    stats.rollingFPS, stats.frames, stats.writerDrops, gpu.processed, gpu.dropped,
+                    gpu.gpuAverageMs, gpu.gpuMaxMs, status.footprintMB, status.availableMB,
+                    status.thermal, status.freeDiskGB))
             }
         }
         if let deadline = recordDeadline, Date() > deadline {

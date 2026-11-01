@@ -32,13 +32,13 @@ struct SessionPreview: UIViewRepresentable {
     }
 }
 
-/// The crude debayer of the newest RAW frame, proving the sensor data is real.
-struct RawMonitor: UIViewRepresentable {
-    let renderer: RawPreviewRenderer
+/// The GPU pipeline's output, in log or through the Rec.709 monitoring LUT.
+struct ProcessedMonitor: UIViewRepresentable {
+    let pipeline: ProcessingPipeline
 
     func makeUIView(context: Context) -> MTKView {
         let view = MTKView()
-        renderer.attach(to: view)
+        pipeline.attach(to: view)
         view.backgroundColor = .black
         view.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
         return view

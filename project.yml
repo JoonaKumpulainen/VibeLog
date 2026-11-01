@@ -96,6 +96,7 @@ targets:
       - path: Tests/VLTests
     dependencies:
       - target: VLCore
+      - target: VLProcessing
       - target: VLRecording
     settings:
       base:

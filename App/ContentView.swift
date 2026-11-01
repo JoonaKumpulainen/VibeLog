@@ -9,18 +9,13 @@ struct ContentView: View {
         VStack(spacing: 0) {
             ZStack(alignment: .topLeading) {
                 SessionPreview(session: model.camera.session)
-                DebugOverlay()
-                if let renderer = model.preview {
-                    RawMonitor(renderer: renderer)
+                if let pipeline = model.pipeline, model.method.isPhoto,
+                    model.processing.enabled, model.processing.monitor != .isp {
+                    ProcessedMonitor(pipeline: pipeline)
                         .aspectRatio(3.0 / 4.0, contentMode: .fit)
-                        .frame(width: 120)
-                        .border(.white.opacity(0.5))
-                        .overlay(alignment: .bottom) {
-                            Text("RAW").font(.caption2.bold())
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                        .padding(6)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+                DebugOverlay()
                 if let busy = model.isBusy {
                     ProgressView(busy)
                         .padding()
@@ -56,6 +51,8 @@ struct ContentView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(model.isRecording ? Color.red : Color.accentColor)
+            Button("Still") { model.saveStill() }
+                .buttonStyle(.bordered)
             Button("Probe") { model.runProbe() }
                 .buttonStyle(.bordered)
             Button("Log") { showLog = true }
@@ -76,6 +73,9 @@ struct DebugOverlay: View {
             line(model.method.label)
             line(String(format: "fps %.2f now  %.2f sustained  n=%d", stats.rollingFPS, stats.sustainedFPS, stats.frames))
             line(String(format: "gap ms med %.1f p95 %.1f max %.1f", stats.gapMedianMs, stats.gapP95Ms, stats.gapMaxMs))
+            line(String(
+                format: "gpu %.1f ms avg %.1f max  done %d drop %d", model.pipelineStats.gpuLastMs,
+                model.pipelineStats.gpuAverageMs, model.pipelineStats.processed, model.pipelineStats.dropped))
             line("drops cap \(stats.captureDrops) writer \(stats.writerDrops) fail \(stats.captureFailures) missed~\(stats.estimatedMissed)")
             line(frameLine)
             line("thermal \(model.status.thermal)  mem \(model.status.footprintMB) MB  avail \(model.status.availableMB) MB")

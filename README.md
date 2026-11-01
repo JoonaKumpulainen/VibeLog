@@ -34,12 +34,19 @@ Methods:
 - **Use Photo preset**: on by default for photo methods, and required for RAW: with it off, iOS lists no RAW formats at all.
 - **Video data output**: the pixel format picker shows only what iOS lists. If it lists no Bayer format this is a non-RAW control run.
 
+## Processing
+
+Photo methods feed a GPU pipeline: black level, white balance, debayer, camera RAW to linear Rec.2020 using the DNG's color matrices, exposure, then a log curve. **Monitor** shows the result through a Rec.709 LUT, as plain log, or switches back to the ISP preview. **Still** saves the next processed frame to `stills/`. The overlay's `gpu` line shows the time per frame and any frames the pipeline dropped.
+
+The log image is Rec.2020 with the chosen curve for all three curves, so S-Log3 and LogC3 here use their transfer functions but not S-Gamut3 or ARRI Wide Gamut. Curve constants match colour-science's implementations of the vendor formulas.
+
 ## Files (Files app > On My iPhone > VibeLog)
 
 ```
 benchmarks.csv              one row per recording
 logs/session_*.log
 probes/probe_*.txt
+stills/still_*/             log_rec2020.png (16-bit), rec709_half.png, still.json
 clips/clip_*/
   frames.raw                frames back to back, rows keep their bytesPerRow
   clip.json                 layout, CFA, black/white, WB, matrices, stats, per-frame timestamps
@@ -61,7 +68,7 @@ python3 tools/inspect_clip.py path/to/clip_x --png frame.png
 |---|---|
 | `Modules/VLCore` | Frames, stats, DNG tag reader, logging, device status |
 | `Modules/VLCapture` | Session, capture methods, manual controls, probe |
-| `Modules/VLProcessing` | Metal preview; the Phase 2 pipeline goes here |
+| `Modules/VLProcessing` | Log curves, color math, monitor LUT, Metal pipeline, still export |
 | `Modules/VLRecording` | RAW dump writer; the Phase 3 encoder goes here |
 | `Modules/ObjCGuard` | Catches AVFoundation's Objective-C exceptions, runtime scan |
 | `App` | SwiftUI UI, overlay and wiring |

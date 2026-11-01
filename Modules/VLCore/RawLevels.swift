@@ -13,6 +13,10 @@ public struct RawLevels: Codable, Equatable, Sendable {
         self.white = white
     }
 
+    /// Where sensor values really stop. On an iPhone 14 Pro at ISO 100 highlights clip at
+    /// exactly 14271, which is the stated white level minus the black level.
+    public var clipValue: Double { white - (black.first ?? 0) }
+
     public init?(photoMetadata: [String: Any]) {
         guard let dng = photoMetadata["{DNG}"] as? [AnyHashable: Any],
             let white = (dng["WhiteLevel"] as? NSNumber)?.doubleValue

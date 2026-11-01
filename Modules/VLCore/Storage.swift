@@ -9,6 +9,7 @@ public enum Storage {
     public static var clips: URL { folder("clips") }
     public static var logs: URL { folder("logs") }
     public static var probes: URL { folder("probes") }
+    public static var stills: URL { folder("stills") }
     public static var benchmarks: URL { documents.appendingPathComponent("benchmarks.csv") }
 
     public static func timestamp(_ date: Date = Date()) -> String {

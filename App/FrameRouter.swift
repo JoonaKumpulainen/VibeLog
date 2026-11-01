@@ -6,7 +6,7 @@ import VLRecording
 /// Fans frames out from the capture thread to stats, preview and the active recorder.
 final class FrameRouter {
     let stats = FrameStats()
-    var preview: RawPreviewRenderer?
+    var pipeline: ProcessingPipeline?
     var onRecordingElapsed: (() -> Void)?
 
     private let lock = NSLock()
@@ -34,7 +34,7 @@ final class FrameRouter {
 
     func handle(_ frame: RawFrame) {
         stats.recordFrame(pts: frame.pts)
-        preview?.submit(frame)
+        pipeline?.submit(frame)
 
         lock.lock()
         let active = recorder
