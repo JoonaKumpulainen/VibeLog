@@ -1,4 +1,4 @@
-#include <metal/metal.h>
+#include <metal_stdlib>
 using namespace metal;
 
 struct PreviewUniforms {

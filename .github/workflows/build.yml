@@ -38,7 +38,7 @@ jobs:
           xcodebuild test \
             -project VibeLog.xcodeproj \
             -scheme VibeLog \
-            -destination "id=$SIM_ID" \
+            -destination "id=$SIM_ID,arch=arm64" \
             -derivedDataPath build/test \
             CODE_SIGNING_ALLOWED=NO \
             | tail -n 60
