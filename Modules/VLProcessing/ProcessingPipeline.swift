@@ -68,6 +68,13 @@ public struct ProcessedStill: Sendable {
     public var whiteBalanceGains: [Float]
 }
 
+private struct FrameCapture {
+    var exposureSeconds: Double
+    var iso: Float
+    var whiteBalanceGains: [Float]
+    var pts: Double
+}
+
 // Must match ProcessParams in Shaders.metal.
 private struct ProcessParams {
     var matrixRow0: SIMD4<Float>
@@ -102,8 +109,11 @@ public final class ProcessingPipeline: NSObject {
 
     private let queue: MTLCommandQueue
     private let processState: MTLComputePipelineState
+    private let lumaState: MTLComputePipelineState
+    private let chromaState: MTLComputePipelineState
     private let monitorState: MTLRenderPipelineState
     private let encodeQueue = DispatchQueue(label: "vibelog.process", qos: .userInitiated)
+    private var textureCache: CVMetalTextureCache?
     private weak var view: MTKView?
 
     private let lock = NSLock()
@@ -124,6 +134,7 @@ public final class ProcessingPipeline: NSObject {
     private var stats = PipelineStats()
     private var gpuTotalMs = 0.0
     private var stillRequest: ((ProcessedStill?) -> Void)?
+    private var sink: VideoFrameSink?
     private var loggedFailure = false
 
     public init?(pixelFormat: MTLPixelFormat = .bgra8Unorm) {
@@ -135,11 +146,16 @@ public final class ProcessingPipeline: NSObject {
         self.queue = queue
         do {
             let library = try device.makeDefaultLibrary(bundle: Bundle(for: ProcessingPipeline.self))
-            guard let kernel = library.makeFunction(name: "processRaw") else {
-                Log.shared.error("processRaw shader is missing")
+            guard let kernel = library.makeFunction(name: "processRaw"),
+                let lumaKernel = library.makeFunction(name: "encodeLuma"),
+                let chromaKernel = library.makeFunction(name: "encodeChroma")
+            else {
+                Log.shared.error("A pipeline shader is missing")
                 return nil
             }
             processState = try device.makeComputePipelineState(function: kernel)
+            lumaState = try device.makeComputePipelineState(function: lumaKernel)
+            chromaState = try device.makeComputePipelineState(function: chromaKernel)
             let descriptor = MTLRenderPipelineDescriptor()
             descriptor.vertexFunction = library.makeFunction(name: "monitorVertex")
             descriptor.fragmentFunction = library.makeFunction(name: "monitorFragment")
@@ -150,6 +166,14 @@ public final class ProcessingPipeline: NSObject {
             return nil
         }
         super.init()
+        CVMetalTextureCacheCreate(nil, nil, device, nil, &textureCache)
+    }
+
+    /// Sends finished frames to an encoder until set back to nil.
+    public func setSink(_ newSink: VideoFrameSink?) {
+        lock.lock()
+        sink = newSink
+        lock.unlock()
     }
 
     public func attach(to view: MTKView) {
@@ -219,7 +243,9 @@ public final class ProcessingPipeline: NSObject {
                 finishFrame(nil)
                 return
             }
-            let capture = (frame.exposureSeconds, frame.iso, frame.whiteBalanceGains)
+            let capture = FrameCapture(
+                exposureSeconds: frame.exposureSeconds, iso: frame.iso,
+                whiteBalanceGains: frame.whiteBalanceGains, pts: frame.pts)
             // A separate step, so the capture buffer is released before any slow setup.
             encodeQueue.async { [self] in process(input, cfa: cfa, capture: capture) }
         }
@@ -266,16 +292,18 @@ public final class ProcessingPipeline: NSObject {
         return inputs[nextInput]
     }
 
-    private func process(_ input: MTLTexture, cfa: CFAPattern, capture: (Double, Float, [Float])) {
+    private func process(_ input: MTLTexture, cfa: CFAPattern, capture: FrameCapture) {
         guard let output = takeOutput(width: input.width, height: input.height),
             let commands = queue.makeCommandBuffer(),
-            encode(into: commands, input: input, output: output, cfa: cfa, gains: capture.2)
+            encode(into: commands, input: input, output: output, cfa: cfa, gains: capture.whiteBalanceGains)
         else {
             finishFrame(nil)
             return
         }
         let still = encodeStillReadback(commands, output: output, capture: capture)
+        let delivery = encodeForSink(commands, image: output, pts: capture.pts)
         commands.addCompletedHandler { [self] finished in
+            if finished.status == .completed { delivery?() }
             let milliseconds = (finished.gpuEndTime - finished.gpuStartTime) * 1000
             finishFrame(finished.status == .completed ? output : nil, gpuMs: milliseconds)
             still?()
@@ -300,6 +328,57 @@ public final class ProcessingPipeline: NSObject {
         encoder.dispatchThreads(
             MTLSize(width: input.width, height: input.height, depth: 1),
             threadsPerThreadgroup: MTLSize(width: width, height: height, depth: 1))
+        encoder.endEncoding()
+        return true
+    }
+
+    /// Renders the log image into the encoder's next buffer. Returns the step that hands the
+    /// buffer over once the GPU is done, or nil when no frame goes to the encoder.
+    private func encodeForSink(_ commands: MTLCommandBuffer, image: MTLTexture, pts: Double) -> (() -> Void)? {
+        lock.lock()
+        let target = sink
+        lock.unlock()
+        guard let target, let cache = textureCache, let buffer = target.nextPixelBuffer() else { return nil }
+
+        func wrap(plane: Int, format: MTLPixelFormat) -> CVMetalTexture? {
+            var texture: CVMetalTexture?
+            let status = CVMetalTextureCacheCreateTextureFromImage(
+                nil, cache, buffer, nil, format, CVPixelBufferGetWidthOfPlane(buffer, plane),
+                CVPixelBufferGetHeightOfPlane(buffer, plane), plane, &texture)
+            return status == kCVReturnSuccess ? texture : nil
+        }
+        guard let wrappedLuma = wrap(plane: 0, format: .r16Unorm),
+            let wrappedChroma = wrap(plane: 1, format: .rg16Unorm),
+            let luma = CVMetalTextureGetTexture(wrappedLuma),
+            let chroma = CVMetalTextureGetTexture(wrappedChroma)
+        else {
+            logOnce("Cannot wrap the encoder's pixel buffer as textures")
+            return nil
+        }
+        guard encodeYCbCr(into: commands, image: image, luma: luma, chroma: chroma) else { return nil }
+        let time = CMTime(seconds: pts, preferredTimescale: 1_000_000_000)
+        return {
+            withExtendedLifetime((wrappedLuma, wrappedChroma)) {}
+            target.append(buffer, at: time)
+        }
+    }
+
+    /// Converts a log image to biplanar 10-bit YCbCr. Separate so tests can use plain textures.
+    @discardableResult
+    func encodeYCbCr(
+        into commands: MTLCommandBuffer, image: MTLTexture, luma: MTLTexture, chroma: MTLTexture
+    ) -> Bool {
+        guard let encoder = commands.makeComputeCommandEncoder() else { return false }
+        for (state, target) in [(lumaState, luma), (chromaState, chroma)] {
+            encoder.setComputePipelineState(state)
+            encoder.setTexture(image, index: 0)
+            encoder.setTexture(target, index: 1)
+            let width = state.threadExecutionWidth
+            let height = max(state.maxTotalThreadsPerThreadgroup / width, 1)
+            encoder.dispatchThreads(
+                MTLSize(width: target.width, height: target.height, depth: 1),
+                threadsPerThreadgroup: MTLSize(width: width, height: height, depth: 1))
+        }
         encoder.endEncoding()
         return true
     }
@@ -356,7 +435,7 @@ public final class ProcessingPipeline: NSObject {
     }
 
     private func encodeStillReadback(
-        _ commands: MTLCommandBuffer, output: MTLTexture, capture: (Double, Float, [Float])
+        _ commands: MTLCommandBuffer, output: MTLTexture, capture: FrameCapture
     ) -> (() -> Void)? {
         lock.lock()
         let request = stillRequest
@@ -384,7 +463,8 @@ public final class ProcessingPipeline: NSObject {
             let pixels = Data(bytes: buffer.contents(), count: buffer.length)
             request(ProcessedStill(
                 pixels: pixels, width: width, height: height, settings: current,
-                exposureSeconds: capture.0, iso: capture.1, whiteBalanceGains: capture.2))
+                exposureSeconds: capture.exposureSeconds, iso: capture.iso,
+                whiteBalanceGains: capture.whiteBalanceGains))
         }
     }
 

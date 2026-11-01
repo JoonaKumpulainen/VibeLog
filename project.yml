@@ -81,6 +81,7 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSCameraUsageDescription: VibeLog reads the camera sensor to record RAW frames.
+        NSMicrophoneUsageDescription: VibeLog records sound with your video.
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         UILaunchScreen: {}

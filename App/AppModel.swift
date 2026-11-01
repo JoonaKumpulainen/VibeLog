@@ -36,6 +36,10 @@ final class AppModel: ObservableObject {
     @Published var processing = ProcessingSettings() { didSet { pipeline?.update(processing) } }
     @Published var pipelineStats = PipelineStats()
 
+    @Published var recordEncoded = true
+    @Published var encoderPreset = EncoderPreset.all[0]
+    @Published var encoderSize = EncoderSize.all[0]
+
     @Published var recordSeconds = 5.0
     @Published var writeFrames = true
 
@@ -117,6 +121,21 @@ final class AppModel: ObservableObject {
             if method.isPhoto { camera.requestReference() }
             camera.start()
             isStreaming = true
+        }
+    }
+
+    func runEncoderTest() {
+        guard !isRecording, isBusy == nil else { return }
+        isBusy = "Releasing camera"
+        isStreaming = false
+        camera.teardown { [self] in
+            EncoderProbe.run(progress: { text in
+                DispatchQueue.main.async { self.isBusy = text }
+            }, completion: { [self] url in
+                isBusy = nil
+                lastResult = "Encoder test saved: probes/\(url.lastPathComponent)"
+                reconfigure()
+            })
         }
     }
 
@@ -232,6 +251,10 @@ final class AppModel: ObservableObject {
     private func startRecording() {
         guard !isRecording else { return }
         if !isStreaming { toggleStream() }
+        if recordEncoded {
+            startEncoding()
+            return
+        }
         let name = "clip_\(Storage.timestamp())"
         let budget = min(1_000_000_000, SystemStatus.availableMemory * 2 / 5)
         let lens = lenses.first { $0.id == lensID }?.name ?? lensID
@@ -258,7 +281,70 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func startEncoding() {
+        guard let pipeline, processing.enabled, method.isPhoto else {
+            Log.shared.error("Encoding needs a photo method and the GPU pipeline")
+            return
+        }
+        let name = "video_\(Storage.timestamp())"
+        let url = Storage.videos.appendingPathComponent(name + ".mov")
+        let metadata = [
+            "curve": processing.curve.label, "gamut": "Rec.2020",
+            "matrix": "Rec.2020 non-constant luminance, video range",
+            "exposureStops": String(processing.exposureStops),
+            "note": "The file's transfer tag is nominal; decode with the curve named here.",
+        ]
+        do {
+            let encoder = try VideoEncoder(config: .init(
+                url: url, preset: encoderPreset, size: encoderSize, audio: true, metadata: metadata))
+            audio.onSample = { [weak encoder] sample in encoder?.appendAudio(sample) }
+            audio.start { _ in }
+            activeEncoder = encoder
+            router.stats.reset()
+            pipeline.resetStats()
+            pipeline.setSink(encoder)
+            isRecording = true
+            let seconds = recordSeconds
+            Log.shared.info("Encoding \(name): \(encoderPreset.label) \(encoderSize.label), \(processing.curve.label), \(seconds)s")
+            DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self, weak encoder] in
+                guard let self, let encoder, self.activeEncoder === encoder else { return }
+                self.stopRecording()
+            }
+        } catch {
+            Log.shared.error("Cannot start \(encoderPreset.label) \(encoderSize.label): \(error)")
+        }
+    }
+
+    private func stopEncoding(_ encoder: VideoEncoder) {
+        activeEncoder = nil
+        isRecording = false
+        pipeline?.setSink(nil)
+        audio.stop()
+        let capture = router.stats.snapshot()
+        let gpu = pipeline?.currentStats() ?? PipelineStats()
+        encoder.finish { [self] result in
+            let summary = String(
+                format: "%@ %dx%d: %.2f fps written, %d frames, %d dropped, %.1f MB/s, audio %d, capture %.2f fps fail %d, gpu %.1f recent %.1f max ms drop %d",
+                result.preset, result.width, result.height, result.fps, result.framesWritten,
+                result.framesDropped, result.megabytesPerSecond, result.audioSamplesWritten,
+                capture.sustainedFPS, capture.captureFailures, gpu.gpuRecentMs, gpu.gpuMaxMs, gpu.dropped)
+            if let failure = result.failure {
+                Log.shared.error("VIDEO FAILED \(result.file): \(failure)")
+            }
+            Log.shared.info("VIDEO RESULT \(result.file): \(summary)")
+            lastResult = summary
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let sidecar = Storage.videos.appendingPathComponent(result.file + ".json")
+            try? encoder.encode(result).write(to: sidecar)
+        }
+    }
+
     private func stopRecording() {
+        if let encoder = activeEncoder {
+            stopEncoding(encoder)
+            return
+        }
         recordDeadline = nil
         guard isRecording, let recorder = router.endRecording() else { return }
         isRecording = false
@@ -275,6 +361,8 @@ final class AppModel: ObservableObject {
     }
 
     private var pendingReferences: [RawRecorder] = []
+    private let audio = AudioCapture()
+    private var activeEncoder: VideoEncoder?
 
     /// Runs off the main thread with a DNG from the capture driver.
     private func handleReference(_ data: Data?, _ metadata: [String: Any]) {

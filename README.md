@@ -40,12 +40,19 @@ Photo methods feed a GPU pipeline: black level, white balance, debayer, camera R
 
 The log image is Rec.2020 with the chosen curve for all three curves, so S-Log3 and LogC3 here use their transfer functions but not S-Gamut3 or ARRI Wide Gamut. Curve constants match colour-science's implementations of the vendor formulas.
 
+## Encoding
+
+With **Encode video** on, **Record** writes the log image to `videos/video_*.mov` with microphone audio, plus a `.json` sidecar naming the curve and gamut. **Run encoder test** benchmarks every codec and size on synthetic frames, without the camera, and saves `probes/encoders_*.txt`. Support differs by phone, so check that before trusting a preset.
+
+The file is tagged Rec.2020, but its transfer tag is nominal. Apply the log curve named in the sidecar when grading.
+
 ## Files (Files app > On My iPhone > VibeLog)
 
 ```
 benchmarks.csv              one row per recording
 logs/session_*.log
 probes/probe_*.txt
+videos/video_*.mov          encoded log video with audio, plus .json
 stills/still_*/             log_rec2020.png (16-bit), rec709_half.png, still.json
 clips/clip_*/
   frames.raw                frames back to back, rows keep their bytesPerRow
@@ -67,9 +74,9 @@ python3 tools/inspect_clip.py path/to/clip_x --png frame.png
 | Target | Role |
 |---|---|
 | `Modules/VLCore` | Frames, stats, DNG tag reader, logging, device status |
-| `Modules/VLCapture` | Session, capture methods, manual controls, probe |
+| `Modules/VLCapture` | Session, capture methods, manual controls, audio, probe |
 | `Modules/VLProcessing` | Log curves, color math, monitor LUT, Metal pipeline, still export |
-| `Modules/VLRecording` | RAW dump writer; the Phase 3 encoder goes here |
+| `Modules/VLRecording` | RAW dump writer, video encoder, encoder benchmark |
 | `Modules/ObjCGuard` | Catches AVFoundation's Objective-C exceptions, runtime scan |
 | `App` | SwiftUI UI, overlay and wiring |
 

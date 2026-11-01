@@ -2,6 +2,7 @@ import SwiftUI
 import VLCapture
 import VLCore
 import VLProcessing
+import VLRecording
 
 struct ControlPanel: View {
     @EnvironmentObject private var model: AppModel
@@ -47,10 +48,22 @@ struct ControlPanel: View {
                 }
             }
             Section("Recording") {
+                Toggle("Encode video (off: RAW dump)", isOn: $model.recordEncoded)
+                if model.recordEncoded {
+                    Picker("Encoder", selection: $model.encoderPreset) {
+                        ForEach(EncoderPreset.all) { Text($0.label).tag($0) }
+                    }
+                    Picker("Size", selection: $model.encoderSize) {
+                        ForEach(EncoderSize.all) { Text($0.label).tag($0) }
+                    }
+                    Button("Run encoder test") { model.runEncoderTest() }
+                }
                 Stepper(value: $model.recordSeconds, in: 1...120) {
                     Text("Duration \(Int(model.recordSeconds)) s")
                 }
-                Toggle("Write frames to disk", isOn: $model.writeFrames)
+                if !model.recordEncoded {
+                    Toggle("Write frames to disk", isOn: $model.writeFrames)
+                }
             }
             Section("Exposure") {
                 Toggle("Lock ISO and shutter", isOn: $model.exposureLocked)

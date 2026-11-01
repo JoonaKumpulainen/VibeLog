@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreVideo
 import Metal
 import XCTest
@@ -346,6 +347,45 @@ final class PipelineGPUTests: XCTestCase {
         }
     }
 
+    /// A flat gray log image must become Y = 64 + 876 * level with neutral chroma, MSB-aligned.
+    func testYCbCrConversionOfGray() throws {
+        let pipeline = try makePipeline()
+        let device = pipeline.device
+        func texture(_ format: MTLPixelFormat, _ width: Int, _ height: Int, _ usage: MTLTextureUsage) throws -> MTLTexture {
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: format, width: width, height: height, mipmapped: false)
+            descriptor.usage = usage
+            return try XCTUnwrap(device.makeTexture(descriptor: descriptor))
+        }
+        let image = try texture(.rgba16Unorm, 8, 8, .shaderRead)
+        let level = UInt16(0.5 * 65535)
+        let pixels = [UInt16](repeating: level, count: 8 * 8 * 4)
+        pixels.withUnsafeBytes {
+            image.replace(region: MTLRegionMake2D(0, 0, 8, 8), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: 64)
+        }
+        let luma = try texture(.r16Unorm, 8, 8, .shaderWrite)
+        let chroma = try texture(.rg16Unorm, 4, 4, .shaderWrite)
+        let queue = try XCTUnwrap(device.makeCommandQueue())
+        let commands = try XCTUnwrap(queue.makeCommandBuffer())
+        XCTAssertTrue(pipeline.encodeYCbCr(into: commands, image: image, luma: luma, chroma: chroma))
+        let blit = try XCTUnwrap(commands.makeBlitCommandEncoder())
+        blit.synchronize(resource: luma)
+        blit.synchronize(resource: chroma)
+        blit.endEncoding()
+        commands.commit()
+        commands.waitUntilCompleted()
+        XCTAssertEqual(commands.status, .completed)
+
+        var lumaValue: UInt16 = 0
+        luma.getBytes(&lumaValue, bytesPerRow: 16, from: MTLRegionMake2D(4, 4, 1, 1), mipmapLevel: 0)
+        var chromaValue: [UInt16] = [0, 0]
+        chroma.getBytes(&chromaValue, bytesPerRow: 8, from: MTLRegionMake2D(2, 2, 1, 1), mipmapLevel: 0)
+        XCTAssertEqual(lumaValue >> 6, 502)
+        XCTAssertEqual(lumaValue & 63, 0)
+        XCTAssertEqual(chromaValue[0] >> 6, 512)
+        XCTAssertEqual(chromaValue[1] >> 6, 512)
+    }
+
     func testClippedSamplesStayNeutral() throws {
         let pipeline = try makePipeline()
         var settings = ProcessingSettings()
@@ -354,6 +394,44 @@ final class PipelineGPUTests: XCTestCase {
         let result = try run(pipeline, level: 1.4, cfa: .bggr, gains: [2, 1, 1.5])
         XCTAssertEqual(result.x, result.y, accuracy: 1e-3)
         XCTAssertEqual(result.y, result.z, accuracy: 1e-3)
+    }
+}
+
+final class VideoEncoderTests: XCTestCase {
+    func testPresetsAreUniqueAnd10Bit() {
+        XCTAssertEqual(Set(EncoderPreset.all.map(\.id)).count, EncoderPreset.all.count)
+        let formats: Set<OSType> = [
+            kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange,
+            kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange,
+            kCVPixelFormatType_444YpCbCr10BiPlanarVideoRange,
+        ]
+        XCTAssertTrue(EncoderPreset.all.allSatisfy { formats.contains($0.pixelFormat) })
+    }
+
+    func testWritesAPlayableFile() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
+        let preset = EncoderPreset.all[0]
+        let encoder: VideoEncoder
+        do {
+            encoder = try VideoEncoder(config: .init(
+                url: url, preset: preset, size: EncoderSize(width: 640, height: 480), audio: false,
+                realTime: false))
+        } catch {
+            throw XCTSkip("\(preset.label) is not available here: \(error)")
+        }
+        for index in 0..<10 {
+            let buffer = try XCTUnwrap(encoder.nextPixelBuffer())
+            encoder.append(buffer, at: CMTime(value: Int64(index), timescale: 30))
+        }
+        let result = await withCheckedContinuation { continuation in
+            encoder.finish { continuation.resume(returning: $0) }
+        }
+        if result.failure != nil { throw XCTSkip("Encoder failed here: \(result.failure ?? "")") }
+        XCTAssertEqual(result.framesWritten, 10)
+        XCTAssertEqual(result.fps, 30, accuracy: 0.01)
+        let asset = AVURLAsset(url: url)
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        XCTAssertEqual(tracks.count, 1)
     }
 }
 

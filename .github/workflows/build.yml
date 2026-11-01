@@ -68,7 +68,7 @@ jobs:
         run: |
           APP=dist/Payload/VibeLog.app
           ls -la "$APP" "$APP/Frameworks"
-          plutil -p "$APP/Info.plist" | grep -E 'UIFileSharingEnabled|LSSupportsOpeningDocumentsInPlace|NSCameraUsageDescription|MinimumOSVersion'
+          plutil -p "$APP/Info.plist" | grep -E 'UIFileSharingEnabled|LSSupportsOpeningDocumentsInPlace|NSCameraUsageDescription|NSMicrophoneUsageDescription|MinimumOSVersion'
           lipo -info "$APP/VibeLog"
           test -f "$APP/Frameworks/VLProcessing.framework/default.metallib"
           for f in ObjCGuard VLCore VLCapture VLProcessing VLRecording; do

@@ -120,6 +120,40 @@ kernel void processRaw(texture2d<ushort, access::read> raw [[texture(0)]],
     output.write(float4(encoded, 1.0), gid);
 }
 
+// Rec.2020 non-constant luminance, 10-bit video range, MSB-aligned in 16 bits. Sampling on
+// the output grid resizes the image and averages chroma when it is subsampled.
+static inline float3 logSample(texture2d<float, access::sample> image, float2 uv) {
+    constexpr sampler linearSampler(filter::linear, address::clamp_to_edge);
+    return image.sample(linearSampler, uv).rgb;
+}
+
+static inline float rec2020Luma(float3 rgb) {
+    return dot(rgb, float3(0.2627, 0.6780, 0.0593));
+}
+
+static inline float msbAligned(float code) {
+    return round(clamp(code, 4.0, 1019.0)) * 64.0 / 65535.0;
+}
+
+kernel void encodeLuma(texture2d<float, access::sample> image [[texture(0)]],
+                       texture2d<float, access::write> luma [[texture(1)]],
+                       uint2 gid [[thread_position_in_grid]]) {
+    float2 uv = (float2(gid) + 0.5) / float2(luma.get_width(), luma.get_height());
+    float y = rec2020Luma(saturate(logSample(image, uv)));
+    luma.write(float4(msbAligned(64.0 + 876.0 * y)), gid);
+}
+
+kernel void encodeChroma(texture2d<float, access::sample> image [[texture(0)]],
+                         texture2d<float, access::write> chroma [[texture(1)]],
+                         uint2 gid [[thread_position_in_grid]]) {
+    float2 uv = (float2(gid) + 0.5) / float2(chroma.get_width(), chroma.get_height());
+    float3 rgb = saturate(logSample(image, uv));
+    float y = rec2020Luma(rgb);
+    float cb = (rgb.b - y) / 1.8814;
+    float cr = (rgb.r - y) / 1.4746;
+    chroma.write(float4(msbAligned(512.0 + 896.0 * cb), msbAligned(512.0 + 896.0 * cr), 0.0, 0.0), gid);
+}
+
 struct VertexOut {
     float4 position [[position]];
     float2 uv;
