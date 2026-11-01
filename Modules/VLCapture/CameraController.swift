@@ -290,7 +290,15 @@ public final class CameraController: NSObject {
             configureVideo(device: device, format: format, options: &options)
         }
         self.options = options
+        observePressure(on: device)
         return options
+    }
+
+    private func observePressure(on device: AVCaptureDevice) {
+        pressureObservation = device.observe(\.systemPressureState, options: [.new]) { device, _ in
+            let state = device.systemPressureState
+            Log.shared.warn("Camera pressure \(state.level.rawValue), factors \(state.factors.rawValue)")
+        }
     }
 
     private func configurePhoto(device: AVCaptureDevice, options: inout CaptureOptions) {

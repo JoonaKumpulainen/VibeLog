@@ -48,6 +48,14 @@ The default is ProRes 422 HQ at 4032x3024. On an iPhone 14 Pro it recorded 60 se
 
 The file is tagged Rec.2020, but its transfer tag is nominal. Apply the log curve named in the sidecar when grading.
 
+## Long recordings and monitoring
+
+**Duration** goes up to 30 minutes or **Until stopped**. Recording stops safely if the thermal state turns critical or less than 2 GB is free. Files are written in 10-second fragments, so a killed app should lose only the last few seconds. **Monitor off while recording** freezes the preview to save power and heat.
+
+**Aspect** records 4:3 open gate or a 16:9 center crop, and the monitor dims the area outside it. **Exposure tool** adds zebras where the sensor clips, or false color: blue is four stops under middle gray, green is middle gray, pink is about one stop over, yellow is well above that, and red is clipped. These show exposure of the signal, not of the graded image.
+
+**Import .cube LUT** replaces the Rec.709 monitor LUT. It expects log Rec.2020 input in the chosen curve, is used for monitoring only, and isn't baked into recordings. 3D LUTs up to size 129 work; 1D LUTs do not.
+
 ## Files (Files app > On My iPhone > VibeLog)
 
 ```
@@ -55,6 +63,7 @@ benchmarks.csv              one row per recording
 logs/session_*.log
 probes/probe_*.txt
 videos/video_*.mov          encoded log video with audio, plus .json
+luts/                       imported .cube files
 stills/still_*/             log_rec2020.png (16-bit), rec709_half.png, still.json
 clips/clip_*/
   frames.raw                frames back to back, rows keep their bytesPerRow

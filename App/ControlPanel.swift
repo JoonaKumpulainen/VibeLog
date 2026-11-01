@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import VLCapture
 import VLCore
 import VLProcessing
@@ -6,6 +7,7 @@ import VLRecording
 
 struct ControlPanel: View {
     @EnvironmentObject private var model: AppModel
+    @State private var importingLUT = false
 
     var body: some View {
         Form {
@@ -36,6 +38,15 @@ struct ControlPanel: View {
                     Picker("Monitor", selection: $model.processing.monitor) {
                         ForEach(MonitorMode.allCases) { Text($0.label).tag($0) }
                     }
+                    Picker("Monitor LUT", selection: $model.selectedLUT) {
+                        Text("Rec.709").tag("")
+                        ForEach(model.lutNames, id: \.self) { Text($0).tag($0) }
+                    }
+                    Button("Import .cube LUT") { importingLUT = true }
+                    Picker("Exposure tool", selection: $model.processing.overlay) {
+                        ForEach(ExposureOverlay.allCases) { Text($0.label).tag($0) }
+                    }
+                    Toggle("Monitor off while recording", isOn: $model.processing.pauseMonitorWhileRecording)
                     Picker("Log curve", selection: $model.processing.curve) {
                         ForEach(LogCurve.allCases) { Text($0.label).tag($0) }
                     }
@@ -56,10 +67,21 @@ struct ControlPanel: View {
                     Picker("Size", selection: $model.encoderSize) {
                         ForEach(EncoderSize.all) { Text($0.label).tag($0) }
                     }
+                    Picker("Aspect", selection: $model.widescreen) {
+                        Text("4:3 open gate").tag(false)
+                        Text("16:9").tag(true)
+                    }
                     Button("Run encoder test") { model.runEncoderTest() }
                 }
-                Stepper(value: $model.recordSeconds, in: 1...120) {
-                    Text("Duration \(Int(model.recordSeconds)) s")
+                Picker("Duration", selection: $model.recordSeconds) {
+                    Text("10 seconds").tag(10.0)
+                    Text("30 seconds").tag(30.0)
+                    Text("1 minute").tag(60.0)
+                    Text("2 minutes").tag(120.0)
+                    Text("5 minutes").tag(300.0)
+                    Text("10 minutes").tag(600.0)
+                    Text("30 minutes").tag(1800.0)
+                    Text("Until stopped").tag(0.0)
                 }
                 if !model.recordEncoded {
                     Toggle("Write frames to disk", isOn: $model.writeFrames)
@@ -93,6 +115,12 @@ struct ControlPanel: View {
             }
         }
         .disabled(model.isRecording)
+        .fileImporter(isPresented: $importingLUT, allowedContentTypes: [.data]) { result in
+            switch result {
+            case .success(let url): model.importLUT(from: url)
+            case .failure(let error): Log.shared.error("LUT picker failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     @ViewBuilder

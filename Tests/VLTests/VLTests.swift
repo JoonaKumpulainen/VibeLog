@@ -382,6 +382,46 @@ final class PipelineGPUTests: XCTestCase {
         XCTAssertEqual(chromaValue[1] >> 6, 512)
     }
 
+    /// A vertical ramp, cropped to half its height, must start a quarter of the way down.
+    func testYCbCrCropsToCenter() throws {
+        let pipeline = try makePipeline()
+        let device = pipeline.device
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .rgba16Unorm, width: 16, height: 16, mipmapped: false)
+        descriptor.usage = .shaderRead
+        let image = try XCTUnwrap(device.makeTexture(descriptor: descriptor))
+        var pixels = [UInt16]()
+        for y in 0..<16 {
+            let value = UInt16(Double(y) / 15 * 65535)
+            for _ in 0..<16 { pixels += [value, value, value, 65535] }
+        }
+        pixels.withUnsafeBytes {
+            image.replace(region: MTLRegionMake2D(0, 0, 16, 16), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: 128)
+        }
+        func target(_ format: MTLPixelFormat, _ width: Int, _ height: Int) throws -> MTLTexture {
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: format, width: width, height: height, mipmapped: false)
+            descriptor.usage = .shaderWrite
+            return try XCTUnwrap(device.makeTexture(descriptor: descriptor))
+        }
+        let luma = try target(.r16Unorm, 16, 8)
+        let chroma = try target(.rg16Unorm, 8, 4)
+        let queue = try XCTUnwrap(device.makeCommandQueue())
+        let commands = try XCTUnwrap(queue.makeCommandBuffer())
+        XCTAssertTrue(pipeline.encodeYCbCr(into: commands, image: image, luma: luma, chroma: chroma))
+        commands.commit()
+        commands.waitUntilCompleted()
+        XCTAssertEqual(commands.status, .completed)
+
+        func level(row: Int) -> Double {
+            var value: UInt16 = 0
+            luma.getBytes(&value, bytesPerRow: 32, from: MTLRegionMake2D(4, row, 1, 1), mipmapLevel: 0)
+            return (Double(value >> 6) - 64) / 876
+        }
+        XCTAssertEqual(level(row: 0), 4.0 / 15, accuracy: 0.03)
+        XCTAssertEqual(level(row: 7), 11.0 / 15, accuracy: 0.03)
+    }
+
     func testClippedSamplesStayNeutral() throws {
         let pipeline = try makePipeline()
         var settings = ProcessingSettings()
@@ -393,7 +433,86 @@ final class PipelineGPUTests: XCTestCase {
     }
 }
 
+final class CubeLUTTests: XCTestCase {
+    private let identity = """
+        # comment
+        TITLE "Test"
+        LUT_3D_SIZE 2
+        DOMAIN_MIN 0.0 0.0 0.0
+        DOMAIN_MAX 1.0 1.0 2.0
+
+        0 0 0
+        1 0 0
+        0 1 0
+        1 1 0
+        0 0 1
+        1 0 1
+        0 1 1
+        1.5 1 -0.5
+        """
+
+    func testParsesHeaderAndSamples() throws {
+        let lut = try CubeLUT(text: identity)
+        XCTAssertEqual(lut.size, 2)
+        XCTAssertEqual(lut.domainMax.z, 2)
+        XCTAssertEqual(lut.samples[1], SIMD3(1, 0, 0))
+        XCTAssertEqual(lut.samples.count, 8)
+    }
+
+    func testTextureSamplesClamp() throws {
+        let samples = try CubeLUT(text: identity).textureSamples
+        XCTAssertEqual(samples.count, 32)
+        XCTAssertEqual(Array(samples[28..<32]), [65535, 65535, 0, 65535])
+    }
+
+    func testRejectsBadFiles() {
+        XCTAssertThrowsError(try CubeLUT(text: "LUT_1D_SIZE 4\n")) {
+            XCTAssertEqual($0 as? CubeLUT.ParseError, .oneDimensional)
+        }
+        XCTAssertThrowsError(try CubeLUT(text: "0 0 0\n")) {
+            XCTAssertEqual($0 as? CubeLUT.ParseError, .missingSize)
+        }
+        XCTAssertThrowsError(try CubeLUT(text: "LUT_3D_SIZE 2\n0 0 0\n")) {
+            XCTAssertEqual($0 as? CubeLUT.ParseError, .wrongSampleCount(expected: 8, found: 1))
+        }
+        XCTAssertThrowsError(try CubeLUT(text: "LUT_3D_SIZE 500\n")) {
+            XCTAssertEqual($0 as? CubeLUT.ParseError, .unsupportedSize(500))
+        }
+        XCTAssertThrowsError(try CubeLUT(text: "LUT_3D_SIZE 2\nnot a number here\n"))
+    }
+}
+
+final class MonitorBandsTests: XCTestCase {
+    func testBandsAreOrderedAroundMiddleGray() {
+        for curve in LogCurve.allCases {
+            let bands = MonitorBands(curve: curve, exposureStops: 2)
+            let gray = Float(curve.encode(0.18))
+            XCTAssertLessThan(bands.blueBelow, bands.greenFrom)
+            XCTAssertLessThan(bands.greenFrom, gray)
+            XCTAssertLessThan(gray, bands.greenTo)
+            XCTAssertLessThan(bands.greenTo, bands.pinkFrom)
+            XCTAssertLessThan(bands.pinkFrom, bands.pinkTo)
+            XCTAssertLessThan(bands.pinkTo, bands.yellowFrom)
+            XCTAssertLessThan(bands.yellowFrom, bands.clip)
+        }
+    }
+
+    func testClipFollowsExposure() {
+        let curve = LogCurve.appleLog
+        let low = MonitorBands(curve: curve, exposureStops: -0.5).clip
+        let high = MonitorBands(curve: curve, exposureStops: 0.5).clip
+        XCTAssertEqual(low, Float(curve.encode(0.98 * pow(2, -0.5))), accuracy: 1e-5)
+        XCTAssertGreaterThan(high, low)
+    }
+}
+
 final class VideoEncoderTests: XCTestCase {
+    func testWidescreenSizes() {
+        XCTAssertEqual(EncoderSize(width: 4032, height: 3024).widescreen, EncoderSize(width: 4032, height: 2268))
+        XCTAssertEqual(EncoderSize(width: 1920, height: 1440).widescreen, EncoderSize(width: 1920, height: 1080))
+        XCTAssertTrue(EncoderSize.all.allSatisfy { $0.widescreen.height % 2 == 0 })
+    }
+
     func testPresetsAreUniqueAnd10Bit() {
         XCTAssertEqual(Set(EncoderPreset.all.map(\.id)).count, EncoderPreset.all.count)
         let formats: Set<OSType> = [

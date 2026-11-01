@@ -64,8 +64,18 @@ public struct EncoderSize: Identifiable, Hashable, Sendable {
     public let width: Int
     public let height: Int
 
+    public init(width: Int, height: Int) {
+        self.width = width
+        self.height = height
+    }
+
     public var id: String { label }
     public var label: String { "\(width)x\(height)" }
+
+    /// Center crop to 16:9 at the same width, kept to even dimensions.
+    public var widescreen: EncoderSize {
+        EncoderSize(width: width, height: (width * 9 / 16 + 1) & ~1)
+    }
 
     public static let all = [
         EncoderSize(width: 4032, height: 3024),

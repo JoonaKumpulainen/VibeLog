@@ -71,6 +71,9 @@ struct DebugOverlay: View {
         let stats = model.stats
         VStack(alignment: .leading, spacing: 1) {
             line(model.method.label)
+            if model.isRecording {
+                line(String(format: "REC %02d:%02d", model.recordElapsed / 60, model.recordElapsed % 60))
+            }
             line(String(format: "fps %.2f now  %.2f sustained  n=%d", stats.rollingFPS, stats.sustainedFPS, stats.frames))
             line(String(format: "gap ms med %.1f p95 %.1f max %.1f", stats.gapMedianMs, stats.gapP95Ms, stats.gapMaxMs))
             line(String(

@@ -19,6 +19,17 @@ struct ProcessParams {
 struct MonitorParams {
     uint useLUT;
     float lutSize;
+    uint overlay;  // 0 none, 1 zebras, 2 false color.
+    float cropFraction;  // Share of the sensor height kept by the recording crop.
+    float4 lutScale;
+    float4 lutOffset;
+    float4 bandsLow;  // Blue below, green from, green to, pink from.
+    float4 bandsHigh;  // Pink to, yellow from, clip.
+};
+
+struct CropParams {
+    float2 uvOffset;
+    float2 uvScale;
 };
 
 static inline int mirrored(int value, int size) {
@@ -137,16 +148,18 @@ static inline float msbAligned(float code) {
 
 kernel void encodeLuma(texture2d<float, access::sample> image [[texture(0)]],
                        texture2d<float, access::write> luma [[texture(1)]],
+                       constant CropParams &crop [[buffer(0)]],
                        uint2 gid [[thread_position_in_grid]]) {
-    float2 uv = (float2(gid) + 0.5) / float2(luma.get_width(), luma.get_height());
+    float2 uv = crop.uvOffset + crop.uvScale * (float2(gid) + 0.5) / float2(luma.get_width(), luma.get_height());
     float y = rec2020Luma(saturate(logSample(image, uv)));
     luma.write(float4(msbAligned(64.0 + 876.0 * y)), gid);
 }
 
 kernel void encodeChroma(texture2d<float, access::sample> image [[texture(0)]],
                          texture2d<float, access::write> chroma [[texture(1)]],
+                         constant CropParams &crop [[buffer(0)]],
                          uint2 gid [[thread_position_in_grid]]) {
-    float2 uv = (float2(gid) + 0.5) / float2(chroma.get_width(), chroma.get_height());
+    float2 uv = crop.uvOffset + crop.uvScale * (float2(gid) + 0.5) / float2(chroma.get_width(), chroma.get_height());
     float3 rgb = saturate(logSample(image, uv));
     float y = rec2020Luma(rgb);
     float cb = (rgb.b - y) / 1.8814;
@@ -175,10 +188,38 @@ fragment float4 monitorFragment(VertexOut in [[stage_in]],
                                 constant MonitorParams &m [[buffer(0)]]) {
     constexpr sampler linearSampler(filter::linear, address::clamp_to_edge);
     float2 rotated = float2(in.uv.y, 1.0 - in.uv.x);
-    float3 color = image.sample(linearSampler, rotated).rgb;
+    float3 logColor = image.sample(linearSampler, rotated).rgb;
+    float3 color = logColor;
     if (m.useLUT != 0) {
-        float3 coordinate = (saturate(color) * (m.lutSize - 1.0) + 0.5) / m.lutSize;
+        float3 normalized = saturate((logColor - m.lutOffset.rgb) * m.lutScale.rgb);
+        float3 coordinate = (normalized * (m.lutSize - 1.0) + 0.5) / m.lutSize;
         color = lut.sample(linearSampler, coordinate).rgb;
+    }
+
+    float clip = m.bandsHigh.z;
+    if (m.overlay == 1) {
+        bool clipped = max(max(logColor.r, logColor.g), logColor.b) >= clip;
+        if (clipped) {
+            color = float3(fmod(in.position.x + in.position.y, 24.0) < 12.0 ? 1.0 : 0.0);
+        }
+    } else if (m.overlay == 2) {
+        float luma = rec2020Luma(logColor);
+        color = float3(luma);
+        if (luma >= clip) {
+            color = float3(1.0, 0.0, 0.0);
+        } else if (luma < m.bandsLow.x) {
+            color = float3(0.1, 0.2, 0.9);
+        } else if (luma >= m.bandsLow.y && luma <= m.bandsLow.z) {
+            color = float3(0.1, 0.8, 0.2);
+        } else if (luma >= m.bandsLow.w && luma <= m.bandsHigh.x) {
+            color = float3(1.0, 0.5, 0.75);
+        } else if (luma >= m.bandsHigh.y) {
+            color = float3(1.0, 0.9, 0.1);
+        }
+    }
+
+    if (abs(rotated.y - 0.5) * 2.0 > m.cropFraction) {
+        color *= 0.35;
     }
     return float4(color, 1.0);
 }

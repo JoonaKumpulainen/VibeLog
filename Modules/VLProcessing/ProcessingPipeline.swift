@@ -35,8 +35,28 @@ public enum MonitorMode: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+public enum ExposureOverlay: UInt32, CaseIterable, Identifiable, Sendable {
+    case none = 0
+    case zebras = 1
+    case falseColor = 2
+
+    public var id: UInt32 { rawValue }
+
+    public var label: String {
+        switch self {
+        case .none: return "None"
+        case .zebras: return "Zebras"
+        case .falseColor: return "False color"
+        }
+    }
+}
+
 public struct ProcessingSettings: Equatable, Sendable {
     public var enabled = true
+    public var overlay = ExposureOverlay.none
+    /// Share of the sensor height kept by the recording crop, dimmed outside on the monitor.
+    public var cropFraction = 1.0
+    public var pauseMonitorWhileRecording = false
     public var curve = LogCurve.appleLog
     public var demosaic = DemosaicMethod.malvar
     public var monitor = MonitorMode.rec709
@@ -94,6 +114,22 @@ private struct ProcessParams {
 private struct MonitorParams {
     var useLUT: UInt32
     var lutSize: Float
+    var overlay: UInt32
+    var cropFraction: Float
+    var lutScale: SIMD4<Float>
+    var lutOffset: SIMD4<Float>
+    var bandsLow: SIMD4<Float>
+    var bandsHigh: SIMD4<Float>
+}
+
+private struct CropParams {
+    var uvOffset: SIMD2<Float>
+    var uvScale: SIMD2<Float>
+}
+
+private struct CustomLUT {
+    var texture: MTLTexture
+    var lut: CubeLUT
 }
 
 /// Turns Bayer frames into log Rec.2020 on the GPU and shows the result. When work backs up
@@ -133,6 +169,7 @@ public final class ProcessingPipeline: NSObject {
     private var drawScheduled = false
     private var lut: MTLTexture?
     private var lutCurve: LogCurve?
+    private var customLUT: CustomLUT?
     private var stats = PipelineStats()
     private var gpuTotalMs = 0.0
     private var stillRequest: ((ProcessedStill?) -> Void)?
@@ -169,6 +206,33 @@ public final class ProcessingPipeline: NSObject {
         }
         super.init()
         CVMetalTextureCacheCreate(nil, nil, device, nil, &textureCache)
+    }
+
+    /// Replaces the Rec.709 monitoring LUT, or restores it when nil.
+    public func setCustomLUT(_ lut: CubeLUT?) {
+        var custom: CustomLUT?
+        if let lut {
+            let descriptor = MTLTextureDescriptor()
+            descriptor.textureType = .type3D
+            descriptor.pixelFormat = .rgba16Unorm
+            descriptor.width = lut.size
+            descriptor.height = lut.size
+            descriptor.depth = lut.size
+            descriptor.usage = .shaderRead
+            if let texture = device.makeTexture(descriptor: descriptor) {
+                let samples = lut.textureSamples
+                let size = lut.size
+                samples.withUnsafeBytes { bytes in
+                    texture.replace(
+                        region: MTLRegionMake3D(0, 0, 0, size, size, size), mipmapLevel: 0, slice: 0,
+                        withBytes: bytes.baseAddress!, bytesPerRow: size * 8, bytesPerImage: size * size * 8)
+                }
+                custom = CustomLUT(texture: texture, lut: lut)
+            }
+        }
+        lock.lock()
+        customLUT = custom
+        lock.unlock()
     }
 
     /// Sends finished frames to an encoder until set back to nil.
@@ -371,10 +435,14 @@ public final class ProcessingPipeline: NSObject {
         into commands: MTLCommandBuffer, image: MTLTexture, luma: MTLTexture, chroma: MTLTexture
     ) -> Bool {
         guard let encoder = commands.makeComputeCommandEncoder() else { return false }
+        var crop = Self.centerCrop(
+            imageAspect: Float(image.width) / Float(image.height),
+            targetAspect: Float(luma.width) / Float(luma.height))
         for (state, target) in [(lumaState, luma), (chromaState, chroma)] {
             encoder.setComputePipelineState(state)
             encoder.setTexture(image, index: 0)
             encoder.setTexture(target, index: 1)
+            encoder.setBytes(&crop, length: MemoryLayout<CropParams>.stride, index: 0)
             let width = state.threadExecutionWidth
             let height = max(state.maxTotalThreadsPerThreadgroup / width, 1)
             encoder.dispatchThreads(
@@ -383,6 +451,11 @@ public final class ProcessingPipeline: NSObject {
         }
         encoder.endEncoding()
         return true
+    }
+
+    private static func centerCrop(imageAspect: Float, targetAspect: Float) -> CropParams {
+        let scale = SIMD2<Float>(min(targetAspect / imageAspect, 1), min(imageAspect / targetAspect, 1))
+        return CropParams(uvOffset: (SIMD2(repeating: 1) - scale) * 0.5, uvScale: scale)
     }
 
     private func makeParameters(cfa: CFAPattern, gains: [Float]) -> ProcessParams {
@@ -482,7 +555,8 @@ public final class ProcessingPipeline: NSObject {
             stats.gpuAverageMs = gpuTotalMs / Double(stats.processed)
             stats.gpuRecentMs = stats.processed == 1 ? gpuMs : stats.gpuRecentMs * 0.95 + gpuMs * 0.05
             stats.gpuMaxMs = max(stats.gpuMaxMs, gpuMs)
-            schedule = !drawScheduled && settings.monitor != .isp
+            let paused = settings.pauseMonitorWhileRecording && sink != nil
+            schedule = !drawScheduled && settings.monitor != .isp && !paused
             if schedule { drawScheduled = true }
         } else {
             stats.dropped += 1
@@ -537,15 +611,25 @@ extension ProcessingPipeline: MTKViewDelegate {
         drawScheduled = false
         let image = latest
         let current = settings
+        let custom = customLUT
         lock.unlock()
-        guard current.monitor != .isp, let image, let lut = currentLUT(curve: current.curve),
+        guard current.monitor != .isp, let image,
+            let lut = custom?.texture ?? currentLUT(curve: current.curve),
             let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
             let commands = queue.makeCommandBuffer(),
             let encoder = commands.makeRenderCommandEncoder(descriptor: pass)
         else { return }
 
+        let low = custom?.lut.domainMin ?? SIMD3(repeating: 0)
+        let high = custom?.lut.domainMax ?? SIMD3(repeating: 1)
+        let bands = MonitorBands(curve: current.curve, exposureStops: current.exposureStops)
         var parameters = MonitorParams(
-            useLUT: current.monitor == .rec709 ? 1 : 0, lutSize: Float(Self.lutSize))
+            useLUT: current.monitor == .rec709 ? 1 : 0,
+            lutSize: Float(custom?.lut.size ?? Self.lutSize), overlay: current.overlay.rawValue,
+            cropFraction: Float(current.cropFraction),
+            lutScale: SIMD4(1 / (high - low), 0), lutOffset: SIMD4(low, 0),
+            bandsLow: SIMD4(bands.blueBelow, bands.greenFrom, bands.greenTo, bands.pinkFrom),
+            bandsHigh: SIMD4(bands.pinkTo, bands.yellowFrom, bands.clip, 0))
         encoder.setRenderPipelineState(monitorState)
         encoder.setFragmentTexture(image, index: 0)
         encoder.setFragmentTexture(lut, index: 1)

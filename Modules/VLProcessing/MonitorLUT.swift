@@ -1,6 +1,29 @@
 import Foundation
 import simd
 
+/// Log levels for exposure tools, in the same log space as the pipeline's output. Each is a
+/// scene level relative to middle gray; the clip level is where the sensor saturates.
+public struct MonitorBands: Equatable, Sendable {
+    public var blueBelow: Float
+    public var greenFrom: Float
+    public var greenTo: Float
+    public var pinkFrom: Float
+    public var pinkTo: Float
+    public var yellowFrom: Float
+    public var clip: Float
+
+    public init(curve: LogCurve, exposureStops: Double) {
+        func level(_ stops: Double) -> Float { Float(curve.encode(0.18 * pow(2, stops))) }
+        blueBelow = level(-4)
+        greenFrom = level(-1.0 / 3)
+        greenTo = level(1.0 / 3)
+        pinkFrom = level(2.0 / 3)
+        pinkTo = level(4.0 / 3)
+        yellowFrom = level(5.0 / 3)
+        clip = Float(curve.encode(0.98 * pow(2, exposureStops)))
+    }
+}
+
 /// Monitoring transform from log Rec.2020 to display Rec.709. It holds middle gray in
 /// place and rolls highlights off, for judging exposure rather than as a finished look.
 public enum MonitorTransform {

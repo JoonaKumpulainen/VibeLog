@@ -69,6 +69,8 @@ public final class VideoEncoder: VideoFrameSink {
         self.config = config
         try? FileManager.default.removeItem(at: config.url)
         writer = try AVAssetWriter(outputURL: config.url, fileType: .mov)
+        // Long recordings stay playable up to the last fragment if the app is killed.
+        writer.movieFragmentInterval = CMTime(seconds: 10, preferredTimescale: 600)
 
         let settings = config.preset.outputSettings(width: config.size.width, height: config.size.height)
         guard writer.canApply(outputSettings: settings, forMediaType: .video) else {

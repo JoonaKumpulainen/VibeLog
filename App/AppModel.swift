@@ -40,8 +40,14 @@ final class AppModel: ObservableObject {
     /// The best preset proven at full size on an iPhone 14 Pro at 30 fps.
     @Published var encoderPreset = EncoderPreset.all.first { $0.id == "prores422hq" } ?? EncoderPreset.all[0]
     @Published var encoderSize = EncoderSize.all[0]
+    @Published var widescreen = false { didSet { updateCrop() } }
+    @Published var lutNames: [String] = []
+    /// Empty selects the built-in Rec.709 LUT.
+    @Published var selectedLUT = "" { didSet { if selectedLUT != oldValue { loadSelectedLUT() } } }
+    @Published var recordElapsed = 0
 
-    @Published var recordSeconds = 5.0
+    /// Zero records until stopped.
+    @Published var recordSeconds = 120.0
     @Published var writeFrames = true
 
     @Published var exposureLocked = false { didSet { applyExposure() } }
@@ -70,12 +76,15 @@ final class AppModel: ObservableObject {
     private var recordDeadline: Date?
     private var started = false
     private var ticksSinceReport = 0
+    private var recordStart = Date()
+    private var recordStarting = false
     private let statsQueue = DispatchQueue(label: "vibelog.stats", qos: .utility)
 
     func onAppear() {
         guard !started else { return }
         started = true
         router.pipeline = pipeline
+        refreshLUTs()
         router.onRecordingElapsed = { [weak self] in
             DispatchQueue.main.async { self?.stopRecording() }
         }
@@ -139,6 +148,51 @@ final class AppModel: ObservableObject {
                 reconfigure()
             })
         }
+    }
+
+    func importLUT(from url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let text = try String(contentsOf: url, encoding: .utf8)
+            let lut = try CubeLUT(text: text)
+            let target = Storage.luts.appendingPathComponent(url.lastPathComponent)
+            try text.write(to: target, atomically: true, encoding: .utf8)
+            Log.shared.info("Imported LUT \(url.lastPathComponent), size \(lut.size)")
+            refreshLUTs()
+            selectedLUT = url.lastPathComponent
+        } catch {
+            Log.shared.error("LUT import failed for \(url.lastPathComponent): \(error)")
+        }
+    }
+
+    private func refreshLUTs() {
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: Storage.luts.path)) ?? []
+        lutNames = files.filter { $0.lowercased().hasSuffix(".cube") }.sorted()
+    }
+
+    private func loadSelectedLUT() {
+        let name = selectedLUT
+        guard !name.isEmpty else {
+            pipeline?.setCustomLUT(nil)
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async { [pipeline] in
+            do {
+                let url = Storage.luts.appendingPathComponent(name)
+                let lut = try CubeLUT(text: String(contentsOf: url, encoding: .utf8))
+                pipeline?.setCustomLUT(lut)
+            } catch {
+                Log.shared.error("Cannot load LUT \(name): \(error)")
+            }
+        }
+    }
+
+    private var outputSize: EncoderSize { widescreen ? encoderSize.widescreen : encoderSize }
+
+    private func updateCrop() {
+        // The sensor is 4:3, so 16:9 keeps three quarters of its height.
+        processing.cropFraction = widescreen ? 0.75 : 1
     }
 
     func toggleRecord() {
@@ -251,10 +305,16 @@ final class AppModel: ObservableObject {
     }
 
     private func startRecording() {
-        guard !isRecording else { return }
-        if !isStreaming { toggleStream() }
+        guard !isRecording, !recordStarting else { return }
+        let warmUp = !isStreaming
+        if warmUp { toggleStream() }
         if recordEncoded {
-            startEncoding()
+            // The first frames after a stream starts are unreliable, so give it a moment.
+            recordStarting = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + (warmUp ? 1 : 0)) { [self] in
+                recordStarting = false
+                if isStreaming { startEncoding() }
+            }
             return
         }
         let name = "clip_\(Storage.timestamp())"
@@ -262,7 +322,7 @@ final class AppModel: ObservableObject {
         let lens = lenses.first { $0.id == lensID }?.name ?? lensID
         let context = ClipContext(
             method: method.rawValue, lens: lens, format: options?.formatDescription ?? "",
-            requestedSeconds: recordSeconds)
+            requestedSeconds: rawDumpSeconds)
         do {
             let recorder = try RawRecorder(config: .init(
                 directory: Storage.clips.appendingPathComponent(name, isDirectory: true),
@@ -274,14 +334,18 @@ final class AppModel: ObservableObject {
             }
             router.stats.reset()
             pipeline?.resetStats()
-            router.beginRecording(recorder, seconds: recordSeconds)
-            recordDeadline = Date().addingTimeInterval(recordSeconds + 5)
+            router.beginRecording(recorder, seconds: rawDumpSeconds)
+            recordDeadline = Date().addingTimeInterval(rawDumpSeconds + 5)
+            recordStart = Date()
             isRecording = true
-            Log.shared.info("Recording \(name) for \(recordSeconds)s, write=\(writeFrames), budget \(budget / 1_000_000) MB")
+            Log.shared.info("Recording \(name) for \(rawDumpSeconds)s, write=\(writeFrames), budget \(budget / 1_000_000) MB")
         } catch {
             Log.shared.error("Cannot start recording: \(error.localizedDescription)")
         }
     }
+
+    /// RAW dumps need an end time, so until-stopped means an hour.
+    private var rawDumpSeconds: Double { recordSeconds > 0 ? recordSeconds : 3600 }
 
     private func startEncoding() {
         guard let pipeline, processing.enabled, method.isPhoto else {
@@ -294,26 +358,29 @@ final class AppModel: ObservableObject {
             "curve": processing.curve.label, "gamut": "Rec.2020",
             "matrix": "Rec.2020 non-constant luminance, video range",
             "exposureStops": String(processing.exposureStops),
+            "aspect": widescreen ? "16:9 center crop" : "4:3 open gate",
             "note": "The file's transfer tag is nominal; decode with the curve named here.",
         ]
         do {
             let encoder = try VideoEncoder(config: .init(
-                url: url, preset: encoderPreset, size: encoderSize, audio: true, metadata: metadata))
+                url: url, preset: encoderPreset, size: outputSize, audio: true, metadata: metadata))
             audio.onSample = { [weak encoder] sample in encoder?.appendAudio(sample) }
             audio.start { _ in }
             activeEncoder = encoder
             router.stats.reset()
             pipeline.resetStats()
             pipeline.setSink(encoder)
+            recordStart = Date()
             isRecording = true
             let seconds = recordSeconds
-            Log.shared.info("Encoding \(name): \(encoderPreset.label) \(encoderSize.label), \(processing.curve.label), \(seconds)s")
+            Log.shared.info("Encoding \(name): \(encoderPreset.label) \(outputSize.label), \(processing.curve.label), \(seconds > 0 ? "\(seconds)s" : "until stopped")")
+            guard seconds > 0 else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self, weak encoder] in
                 guard let self, let encoder, self.activeEncoder === encoder else { return }
                 self.stopRecording()
             }
         } catch {
-            Log.shared.error("Cannot start \(encoderPreset.label) \(encoderSize.label): \(error)")
+            Log.shared.error("Cannot start \(encoderPreset.label) \(outputSize.label): \(error)")
         }
     }
 
@@ -409,6 +476,16 @@ final class AppModel: ObservableObject {
     private func show(_ snapshot: FrameStats.Snapshot, _ gpu: PipelineStats, _ line: SystemLine) {
         stats = snapshot
         pipelineStats = gpu
+        if isRecording {
+            recordElapsed = Int(Date().timeIntervalSince(recordStart))
+            if line.thermal == "CRITICAL" {
+                Log.shared.warn("Stopping at \(recordElapsed)s: thermal state is critical")
+                stopRecording()
+            } else if line.freeDiskGB < 2 {
+                Log.shared.warn("Stopping at \(recordElapsed)s: less than 2 GB free")
+                stopRecording()
+            }
+        }
         status = line
         if isRecording {
             ticksSinceReport += 1
