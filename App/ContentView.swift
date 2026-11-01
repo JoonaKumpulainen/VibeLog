@@ -82,7 +82,7 @@ struct DebugOverlay: View {
             line("drops cap \(stats.captureDrops) writer \(stats.writerDrops) fail \(stats.captureFailures) missed~\(stats.estimatedMissed)")
             line(frameLine)
             line("thermal \(model.status.thermal)  mem \(model.status.footprintMB) MB  avail \(model.status.availableMB) MB")
-            line("disk free \(model.status.freeDiskGB) GB")
+            line("disk free \(model.status.freeDiskGB) GB  battery \(model.status.battery)")
             if let error = log.lastError {
                 Text("errors \(log.errorCount): \(error)")
                     .foregroundStyle(.red)

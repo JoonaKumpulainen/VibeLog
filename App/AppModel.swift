@@ -67,6 +67,7 @@ final class AppModel: ObservableObject {
         var footprintMB = 0
         var availableMB = 0
         var freeDiskGB = 0
+        var battery = "?"
     }
 
     private let router = FrameRouter()
@@ -84,6 +85,7 @@ final class AppModel: ObservableObject {
         guard !started else { return }
         started = true
         router.pipeline = pipeline
+        SystemStatus.enableBatteryMonitoring()
         refreshLUTs()
         router.onRecordingElapsed = { [weak self] in
             DispatchQueue.main.async { self?.stopRecording() }
@@ -384,7 +386,7 @@ final class AppModel: ObservableObject {
             recordStart = Date()
             isRecording = true
             let seconds = recordSeconds
-            Log.shared.info("Encoding \(name): \(encoderPreset.label) \(outputSize.label), \(processing.curve.label), \(seconds > 0 ? "\(seconds)s" : "until stopped")")
+            Log.shared.info("Encoding \(name): \(encoderPreset.label) \(outputSize.label), \(processing.curve.label), \(seconds > 0 ? "\(seconds)s" : "until stopped"), battery \(SystemStatus.batteryText), thermal \(SystemStatus.thermalName), free \(SystemStatus.freeDisk / 1_000_000_000) GB")
             guard seconds > 0 else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self, weak encoder] in
                 guard let self, let encoder, self.activeEncoder === encoder else { return }
@@ -404,9 +406,10 @@ final class AppModel: ObservableObject {
         let gpu = pipeline?.currentStats() ?? PipelineStats()
         encoder.finish { [self] result in
             let summary = String(
-                format: "%@ %dx%d: %.2f fps written, %d frames, %d dropped, %.1f MB/s, audio %d, capture %.2f fps fail %d, gpu %.1f recent %.1f max ms drop %d",
+                format: "%@ %dx%d: %.2f fps written, %d frames, %d dropped (%d no buffer, %d not ready), %.1f MB/s, audio %d, capture %.2f fps fail %d, gpu %.1f recent %.1f max ms drop %d",
                 result.preset, result.width, result.height, result.fps, result.framesWritten,
-                result.framesDropped, result.megabytesPerSecond, result.audioSamplesWritten,
+                result.framesDropped, result.droppedNoBuffer, result.droppedNotReady,
+                result.megabytesPerSecond, result.audioSamplesWritten,
                 capture.sustainedFPS, capture.captureFailures, gpu.gpuRecentMs, gpu.gpuMaxMs, gpu.dropped)
             if let failure = result.failure {
                 Log.shared.error("VIDEO FAILED \(result.file): \(failure)")
@@ -472,6 +475,7 @@ final class AppModel: ObservableObject {
 
     /// Measures off the main thread, which capture readiness callbacks depend on.
     private func tick() {
+        let battery = SystemStatus.batteryText
         statsQueue.async { [self] in
             let snapshot = router.stats.snapshot()
             let gpu = pipeline?.currentStats() ?? PipelineStats()
@@ -479,7 +483,7 @@ final class AppModel: ObservableObject {
                 thermal: SystemStatus.thermalName,
                 footprintMB: SystemStatus.footprint / 1_000_000,
                 availableMB: SystemStatus.availableMemory / 1_000_000,
-                freeDiskGB: Int(SystemStatus.freeDisk / 1_000_000_000))
+                freeDiskGB: Int(SystemStatus.freeDisk / 1_000_000_000), battery: battery)
             DispatchQueue.main.async { [self] in show(snapshot, gpu, line) }
         }
     }
@@ -502,12 +506,19 @@ final class AppModel: ObservableObject {
             ticksSinceReport += 1
             if ticksSinceReport >= 5 {
                 ticksSinceReport = 0
-                Log.shared.info(String(
-                    format: "Recording: %.2f fps now, n=%d, fail %d, writer drops %d, gpu %d done %d dropped %.1f recent %.1f max ms, mem %d MB, avail %d MB, thermal %@, free %d GB",
+                let line = String(
+                    format: "Recording: %.2f fps now, n=%d, fail %d, writer drops %d, gpu %d done %d dropped %.1f recent %.1f max ms, mem %d MB, avail %d MB, thermal %@, free %d GB, battery %@",
                     stats.rollingFPS, stats.frames, stats.captureFailures, stats.writerDrops,
                     gpu.processed, gpu.dropped, gpu.gpuRecentMs, gpu.gpuMaxMs,
                     status.footprintMB, status.availableMB,
-                    status.thermal, status.freeDiskGB))
+                    status.thermal, status.freeDiskGB, status.battery)
+                if let activeEncoder {
+                    activeEncoder.counts { written, dropped in
+                        Log.shared.info("\(line), encoder \(written) written \(dropped) dropped")
+                    }
+                } else {
+                    Log.shared.info(line)
+                }
             }
         }
         if let deadline = recordDeadline, Date() > deadline {

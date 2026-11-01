@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import UIKit
 import os
 
 public enum SystemStatus {
@@ -9,6 +10,25 @@ public enum SystemStatus {
         return withUnsafeBytes(of: &info.machine) { raw in
             String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
         }
+    }
+
+    /// Call once on the main thread before reading `batteryText`.
+    public static func enableBatteryMonitoring() {
+        UIDevice.current.isBatteryMonitoringEnabled = true
+    }
+
+    /// Reads on the main thread. Power limits near an empty battery can stall capture and encoding.
+    public static var batteryText: String {
+        let device = UIDevice.current
+        let level = device.batteryLevel < 0 ? "?" : "\(Int((device.batteryLevel * 100).rounded()))%"
+        let state: String
+        switch device.batteryState {
+        case .charging: state = " charging"
+        case .full: state = " full"
+        default: state = ""
+        }
+        let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled ? " low power mode" : ""
+        return level + state + lowPower
     }
 
     public static var thermalName: String {

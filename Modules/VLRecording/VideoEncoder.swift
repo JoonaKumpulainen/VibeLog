@@ -34,6 +34,8 @@ public final class VideoEncoder: VideoFrameSink {
         public var height: Int
         public var framesWritten: Int
         public var framesDropped: Int
+        public var droppedNoBuffer: Int
+        public var droppedNotReady: Int
         public var audioSamplesWritten: Int
         public var seconds: Double
         public var fps: Double
@@ -68,6 +70,11 @@ public final class VideoEncoder: VideoFrameSink {
     private var framesDropped = 0
     private var audioSamples = 0
     private var failureReported = false
+    private var droppedNoBuffer = 0
+    private var droppedNotReady = 0
+    private var lastWrite = Date()
+    /// Real-time input should never refuse frames for this long unless the encoder has stalled.
+    private let stallSeconds = 3.0
 
     public init(config: Config) throws {
         self.config = config
@@ -131,7 +138,11 @@ public final class VideoEncoder: VideoFrameSink {
         let auxiliary = [kCVPixelBufferPoolAllocationThresholdKey as String: 10] as CFDictionary
         let status = CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(nil, pool, auxiliary, &buffer)
         guard status == kCVReturnSuccess, let buffer else {
-            queue.async { [self] in framesDropped += 1 }
+            queue.async { [self] in
+                framesDropped += 1
+                droppedNoBuffer += 1
+                checkForStall()
+            }
             return nil
         }
         return buffer
@@ -158,8 +169,12 @@ public final class VideoEncoder: VideoFrameSink {
             if videoInput.isReadyForMoreMediaData, adaptor.append(buffer, withPresentationTime: time) {
                 framesWritten += 1
                 lastTime = time
+                lastWrite = Date()
             } else {
                 framesDropped += 1
+                droppedNotReady += 1
+                reportFailure()
+                checkForStall()
             }
         }
     }
@@ -195,6 +210,23 @@ public final class VideoEncoder: VideoFrameSink {
         }
     }
 
+    /// Written and dropped frame counts, for progress reports.
+    public func counts(completion: @escaping (_ written: Int, _ dropped: Int) -> Void) {
+        queue.async { [self] in completion(framesWritten, framesDropped) }
+    }
+
+    /// A stalled writer reports no error and would otherwise record nothing until stopped.
+    private func checkForStall() {
+        guard config.realTime, sessionStarted, !failureReported,
+            Date().timeIntervalSince(lastWrite) > stallSeconds
+        else { return }
+        failureReported = true
+        let message = "Encoder stalled after \(framesWritten) frames: writer status \(writer.status.rawValue), "
+            + "video ready \(videoInput.isReadyForMoreMediaData), audio ready \(audioInput?.isReadyForMoreMediaData ?? false), "
+            + "audio samples \(audioSamples), dropped \(droppedNoBuffer) no buffer, \(droppedNotReady) not ready"
+        DispatchQueue.main.async { [self] in onFailure?(message) }
+    }
+
     private func reportFailure() {
         guard !failureReported, writer.status == .failed else { return }
         failureReported = true
@@ -215,6 +247,7 @@ public final class VideoEncoder: VideoFrameSink {
         return Result(
             file: config.url.lastPathComponent, preset: config.preset.label, width: config.size.width,
             height: config.size.height, framesWritten: framesWritten, framesDropped: framesDropped,
+            droppedNoBuffer: droppedNoBuffer, droppedNotReady: droppedNotReady,
             audioSamplesWritten: audioSamples, seconds: seconds,
             fps: seconds > 0 ? Double(framesWritten - 1) / seconds : 0, megabytes: megabytes,
             megabytesPerSecond: seconds > 0 ? megabytes / seconds : 0, failure: failure,
