@@ -80,8 +80,7 @@ struct ActionCell: View {
         .lineLimit(1)
         .minimumScaleFactor(0.7)
         .upright(hold, depth: 56)
-        .frame(maxWidth: .infinity)
-        .frame(height: 52)
+        .frame(width: 60, height: 52)
         .contentShape(Rectangle())
     }
 }

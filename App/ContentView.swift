@@ -29,6 +29,7 @@ struct CameraScreen: View {
     @State private var focusMark: CGPoint?
     @State private var hideFocusMark: Task<Void, Never>?
     @State private var biasAtDragStart: Float?
+    @State private var punchAtDragStart: CGPoint?
 
     var body: some View {
         GeometryReader { geometry in
@@ -84,14 +85,14 @@ struct CameraScreen: View {
     private func viewfinder(_ size: CGSize) -> some View {
         ZStack {
             SessionPreview(session: model.camera.session)
-            if let pipeline = model.pipeline, model.method.isPhoto,
-                model.processing.enabled, model.processing.monitor != .isp {
+            if let pipeline = model.pipeline, model.monitorIsProcessed {
                 ProcessedMonitor(pipeline: pipeline)
             }
             touchLayer
         }
         .frame(width: size.height * 3 / 4, height: size.height)
-        .scaleEffect(model.isOn(.punchIn) ? 3 : 1)
+        // The Metal monitor punches in by itself, with real pixels.
+        .scaleEffect(model.isOn(.punchIn) && !model.monitorIsProcessed ? 3 : 1)
         .frame(width: size.width, height: size.height)
         .clipped()
         .overlay {
@@ -134,7 +135,7 @@ struct CameraScreen: View {
                 Color.clear
                     .contentShape(Rectangle())
                     .gesture(SpatialTapGesture().onEnded { tap($0.location, in: geometry.size) })
-                    .simultaneousGesture(exposureDrag)
+                    .simultaneousGesture(pictureDrag(in: geometry.size))
                     .simultaneousGesture(lensPinch)
                 if let focusMark {
                     FocusMark(bias: model.exposureBias, showsBias: !model.exposureLocked)
@@ -149,8 +150,12 @@ struct CameraScreen: View {
 
     private func tap(_ location: CGPoint, in size: CGSize) {
         guard !model.isRecording else { return }
+        let share = model.pictureShare(
+            ofView: CGPoint(x: location.x / size.width, y: location.y / size.height))
         // The sensor's top left is the portrait view's top right.
-        model.focus(at: CGPoint(x: location.y / size.height, y: 1 - location.x / size.width))
+        model.focus(at: CGPoint(x: share.y, y: 1 - share.x))
+        // Punch-in opens on what was last focused.
+        if !model.isOn(.punchIn) { model.movePunch(to: share) }
         showFocusMark(at: location)
     }
 
@@ -163,10 +168,20 @@ struct CameraScreen: View {
         }
     }
 
-    /// Dragging after a tap sets exposure. Up means up as the phone is held.
-    private var exposureDrag: some Gesture {
+    /// Dragging moves the punch-in. Otherwise, dragging after a tap sets exposure, where up means
+    /// up as the phone is held.
+    private func pictureDrag(in size: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 12)
             .onChanged { drag in
+                if model.isOn(.punchIn), model.monitorIsProcessed {
+                    let start = punchAtDragStart ?? model.punchCenter
+                    punchAtDragStart = start
+                    let scale = AppModel.punchScale
+                    model.movePunch(to: CGPoint(
+                        x: start.x - drag.translation.width / size.width * scale,
+                        y: start.y - drag.translation.height / size.height * scale))
+                    return
+                }
                 guard let focusMark, !model.exposureLocked, !model.isRecording else { return }
                 let start = biasAtDragStart ?? model.exposureBias
                 biasAtDragStart = start
@@ -175,7 +190,10 @@ struct CameraScreen: View {
                 model.exposureBias = min(max(start + Float(up) / 100, -2), 2)
                 showFocusMark(at: focusMark)
             }
-            .onEnded { _ in biasAtDragStart = nil }
+            .onEnded { _ in
+                biasAtDragStart = nil
+                punchAtDragStart = nil
+            }
     }
 
     private var lensPinch: some Gesture {
@@ -196,6 +214,7 @@ struct CameraScreen: View {
 /// contents, so nothing moves onto the picture.
 struct CameraHUD: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var selectedDial: ControlDial?
     @Binding var showMonitor: Bool
     @Binding var showFormat: Bool
@@ -227,8 +246,10 @@ struct CameraHUD: View {
                     // One tray above the control bar, so nothing else moves.
                     if showMonitor, model.processing.monitor != .isp {
                         MonitorPanel(hold: hold)
+                            .transition(trayTransition)
                     } else if selectedDial == nil {
                         toolRow
+                            .transition(trayTransition)
                     }
                     ControlPanels(selected: $selectedDial, hold: hold)
                 }
@@ -240,20 +261,35 @@ struct CameraHUD: View {
             .padding(.trailing, max(insets.trailing, 12))
             StatusBlocks(hold: hold)
             if showFormat {
+                // Tapping the picture closes the panel.
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { setFormat(false) }
+                    .accessibilityHidden(true)
                 VStack(spacing: 0) {
-                    // Tapping the picture closes the panel.
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .onTapGesture { showFormat = false }
-                        .accessibilityHidden(true)
+                    Spacer(minLength: 0)
                     FormatPanel(hold: hold, bottomInset: max(insets.bottom, 10))
-                        .accessibilityAction(.escape) { showFormat = false }
+                        .accessibilityAction(.escape) { setFormat(false) }
                 }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .zIndex(1)
             }
         }
         .onChange(of: selectedDial) { _, dial in
             if dial != nil { showMonitor = false }
         }
+    }
+
+    private var motion: Animation? {
+        reduceMotion ? nil : .spring(duration: 0.35, bounce: 0.15)
+    }
+
+    private var trayTransition: AnyTransition {
+        .opacity.combined(with: .scale(scale: 0.96))
+    }
+
+    private func setFormat(_ isOpen: Bool) {
+        withAnimation(motion) { showFormat = isOpen }
     }
 
     /// Five columns, matching the bars above.
@@ -325,15 +361,15 @@ struct CameraHUD: View {
         }
     }
 
-    /// The take's health sits with its clock. Sideways, only the record row's depth is free, so
-    /// hours go until they're needed.
+    /// The take's health sits with its clock. Sideways, only the record row's depth is free.
     private var timecode: some View {
-        VStack(spacing: 1) {
-            Text(hold.isLandscape ? model.shortTimecodeLabel : model.timecodeLabel)
-                .font(hold.isLandscape ? Tokens.sidewaysClockFont : Tokens.clockFont)
+        let label = model.timecodeLabel
+        let width: CGFloat = hold.isLandscape ? CameraGeometry.recordDepth - 2 : 140
+        return VStack(spacing: 1) {
+            Text(label)
+                .font(Tokens.clockFont(digits: label.count, width: width))
                 .foregroundStyle(Tokens.recordText)
                 .lineLimit(1)
-                .minimumScaleFactor(0.7)
                 .accessibilityLabel("Recording, \(model.recordElapsed) seconds")
             StatusLine(text: "\(model.takeDrops) DROP", tint: Tokens.label, warns: model.takeDrops > 0)
         }
@@ -425,7 +461,12 @@ struct CameraHUD: View {
                 .accessibilityHint("Turns it off")
             }
             Spacer(minLength: 0)
-            lensPill
+            // Changing lens rebuilds the capture session, which would end a recording.
+            if !model.isRecording {
+                lensPill
+            } else if model.recordEncoded {
+                AudioMeter(peak: model.audioPeak)
+            }
         }
         .frame(height: CameraGeometry.trayDepth)
     }
@@ -470,10 +511,7 @@ struct CameraHUD: View {
                     .accessibilityAddTraits(selected ? .isSelected : [])
                 }
             }
-            // Changing lens rebuilds the capture session, which would end a recording.
-            .disabled(model.isRecording || model.isBusy != nil)
-            .opacity(model.isRecording ? 0 : 1)
-            .accessibilityHidden(model.isRecording)
+            .disabled(model.isBusy != nil)
         }
     }
 
@@ -482,7 +520,7 @@ struct CameraHUD: View {
             selectedDial = nil
             showMonitor = false
             model.fullView = false
-            showFormat = true
+            setFormat(true)
         } label: {
             ActionCell(title: "FORMAT", value: model.aspectLabel, tint: Tokens.value, hold: hold)
         }
@@ -513,7 +551,7 @@ struct CameraHUD: View {
         if model.processing.monitor != .isp {
             Button {
                 selectedDial = nil
-                showMonitor.toggle()
+                withAnimation(motion) { showMonitor.toggle() }
             } label: {
                 ActionCell(title: "MON", value: model.monitorLabel, tint: Tokens.value, hold: hold)
                     .background(
@@ -598,8 +636,8 @@ struct StatusBlocks: View {
         HStack(alignment: .top, spacing: 0) {
             block(.left) { alignment in
                 VStack(alignment: alignment, spacing: CameraGeometry.statusLineGap) {
-                    StatusLine(text: "\(model.codecLabel) \(Int(model.frameRate))P")
-                    StatusLine(text: model.curveLabel)
+                    StatusLine(text: model.codecLabel)
+                    StatusLine(text: "\(model.curveLabel) \(Int(model.frameRate))P")
                     StatusLine(text: model.outputLabel)
                 }
             }
@@ -633,6 +671,40 @@ struct StatusBlocks: View {
             .frame(width: CameraGeometry.statusLineWidth, alignment: Alignment(horizontal: lines, vertical: .center))
             .frame(width: CameraGeometry.statusSide, height: CameraGeometry.statusSide, alignment: outer)
             .turnedToHold()
+    }
+}
+
+/// How loud the last second was, on a 60 dB scale. It updates once a second, because faster
+/// interface updates have cost frames during a take.
+struct AudioMeter: View {
+    let peak: Float
+
+    private var share: CGFloat {
+        CGFloat(min(max((20 * log10(max(peak, 0.000_01)) + 60) / 60, 0), 1))
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("MIC")
+                .font(Tokens.labelFont)
+                .foregroundStyle(Tokens.label)
+                .fixedSize()
+                .turnedToHold()
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Rectangle()
+                        .fill(Tokens.surface)
+                    Rectangle()
+                        .fill(peak >= 0.99 ? Tokens.warning : Tokens.value)
+                        .frame(width: geometry.size.width * share)
+                }
+            }
+            .frame(height: 5)
+        }
+        .frame(width: 132)
+        .accessibilityElement()
+        .accessibilityLabel("Microphone level")
+        .accessibilityValue("\(Int(share * 100)) percent")
     }
 }
 
@@ -750,36 +822,131 @@ struct MonitorPanel: View {
     }
 }
 
-/// What gets recorded, over the control zone so the picture stays visible. Each cell turns in
-/// place with the hold.
+/// One setting as a column that slides under a fixed band, with the choice at its center. Sideways,
+/// the column runs across and each choice turns in place.
+struct FormatWheel<Value: Hashable>: View {
+    let title: String
+    let options: [Value]
+    @Binding var selection: Value
+    let label: (Value) -> String
+    let hold: Hold
+    @State private var centered: Value?
+
+    init(
+        title: String, options: [Value], selection: Binding<Value>, hold: Hold,
+        label: @escaping (Value) -> String
+    ) {
+        self.title = title
+        self.options = options
+        _selection = selection
+        self.hold = hold
+        self.label = label
+        _centered = State(initialValue: selection.wrappedValue)
+    }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Text(title)
+                .font(Tokens.labelFont)
+                .foregroundStyle(Tokens.label)
+                .fixedSize()
+                .turnedToHold()
+                .frame(height: hold.isLandscape ? 40 : 16)
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 0) {
+                    ForEach(options, id: \.self) { option in
+                        choice(option)
+                    }
+                }
+                .scrollTargetLayout()
+            }
+            .contentMargins(.vertical, FormatPanel.rowDepth, for: .scrollContent)
+            .scrollTargetBehavior(.viewAligned)
+            .scrollPosition(id: $centered, anchor: .center)
+            .frame(height: FormatPanel.rowDepth * 3)
+        }
+        .frame(maxWidth: .infinity)
+        .sensoryFeedback(.selection, trigger: centered)
+        .onChange(of: centered) { _, value in
+            if let value, value != selection { selection = value }
+        }
+        .onChange(of: selection) { _, value in
+            if value != centered { centered = value }
+        }
+    }
+
+    private func choice(_ option: Value) -> some View {
+        let isOn = option == centered
+        return Button {
+            withAnimation(.spring(duration: 0.3, bounce: 0.1)) { centered = option }
+        } label: {
+            Text(label(option))
+                .font(Tokens.statusFont)
+                .foregroundStyle(isOn ? Tokens.held : Tokens.value)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .upright(hold, depth: FormatPanel.rowDepth - 2)
+                .frame(maxWidth: .infinity)
+                .frame(height: FormatPanel.rowDepth)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .scrollTransition(.interactive.threshold(.centered), axis: .vertical) { content, phase in
+            content
+                .scaleEffect(1 - abs(phase.value) * 0.18)
+                .opacity(1 - abs(phase.value) * 0.6)
+        }
+        .accessibilityLabel("\(title) \(label(option))")
+        .accessibilityAddTraits(isOn ? .isSelected : [])
+    }
+}
+
+/// What gets recorded, over the control zone so the picture stays visible. A new setting or choice
+/// only needs another column or list entry.
 struct FormatPanel: View {
     @EnvironmentObject private var model: AppModel
     let hold: Hold
     let bottomInset: CGFloat
 
+    static let rowDepth: CGFloat = 44
+
+    private static func isHEVC(_ preset: EncoderPreset) -> Bool { preset.id.hasPrefix("hevc") }
+
+    private static func chromaLabel(_ preset: EncoderPreset) -> String {
+        switch preset.id {
+        case "hevc420": return "4:2:0"
+        case "hevc422", "prores422": return "4:2:2"
+        case "prores422hq": return "4:2:2 HQ"
+        case "hevc444", "prores4444": return "4:4:4"
+        default: return preset.shortLabel
+        }
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            row("CODEC") {
-                ForEach(codecChoices) { preset in
-                    option(preset.shortLabel, isOn: preset == model.encoderPreset) { pick(preset) }
-                }
+        HStack(alignment: .bottom, spacing: 0) {
+            FormatWheel(title: "CODEC", options: ["PRORES", "HEVC"], selection: family, hold: hold) { $0 }
+            FormatWheel(
+                title: "CHROMA", options: chromaChoices, selection: $model.encoderPreset, hold: hold,
+                label: Self.chromaLabel
+            )
+            // Each codec has its own list.
+            .id(Self.isHEVC(model.encoderPreset))
+            FormatWheel(title: "SIZE", options: EncoderSize.all, selection: $model.encoderSize, hold: hold) {
+                "\($0.width)"
             }
-            row("SIZE") {
-                ForEach(EncoderSize.all) { size in
-                    option("\(size.width)", isOn: size == model.encoderSize) { model.encoderSize = size }
-                }
+            FormatWheel(
+                title: "LOG", options: LogCurve.allCases, selection: $model.processing.curve, hold: hold
+            ) { $0.shortLabel }
+            FormatWheel(title: "ASPECT", options: [false, true], selection: $model.widescreen, hold: hold) {
+                $0 ? "16:9" : "4:3"
             }
-            row("LOG") {
-                ForEach(LogCurve.allCases) { curve in
-                    option(curve.shortLabel, isOn: curve == model.processing.curve) {
-                        model.processing.curve = curve
-                    }
-                }
-            }
-            row("ASPECT") {
-                option("4:3", isOn: !model.widescreen) { model.widescreen = false }
-                option("16:9", isOn: model.widescreen) { model.widescreen = true }
-            }
+        }
+        .background(alignment: .bottom) {
+            // The band every column's choice sits in.
+            RoundedRectangle(cornerRadius: Tokens.panelRadius)
+                .fill(Tokens.surface)
+                .frame(height: Self.rowDepth)
+                .padding(.bottom, Self.rowDepth)
         }
         .padding(.horizontal, 12)
         .padding(.top, 6)
@@ -789,59 +956,23 @@ struct FormatPanel: View {
             in: UnevenRoundedRectangle(topLeadingRadius: 14, topTrailingRadius: 14))
     }
 
-    private static func isHEVC(_ preset: EncoderPreset) -> Bool { preset.id.hasPrefix("hevc") }
-
-    /// HEVC shares one cell, showing the variant in use.
-    private var codecChoices: [EncoderPreset] {
-        let others = EncoderPreset.all.filter { !Self.isHEVC($0) }
-        let current = Self.isHEVC(model.encoderPreset) ? model.encoderPreset : nil
-        guard let hevc = current ?? EncoderPreset.all.first(where: Self.isHEVC) else { return others }
-        return others + [hevc]
+    private var chromaChoices: [EncoderPreset] {
+        let hevc = Self.isHEVC(model.encoderPreset)
+        return EncoderPreset.all.filter { Self.isHEVC($0) == hevc }
     }
 
-    /// Tapping the HEVC cell again steps through its variants.
-    private func pick(_ preset: EncoderPreset) {
-        guard preset == model.encoderPreset, Self.isHEVC(preset) else {
-            model.encoderPreset = preset
-            return
-        }
-        let variants = EncoderPreset.all.filter(Self.isHEVC)
-        let index = variants.firstIndex(of: preset) ?? 0
-        model.encoderPreset = variants[(index + 1) % variants.count]
-    }
-
-    private func row<Content: View>(
-        _ title: String, @ViewBuilder content: () -> Content
-    ) -> some View {
-        HStack(spacing: 4) {
-            Text(title)
-                .font(Tokens.labelFont)
-                .foregroundStyle(Tokens.label)
-                .upright(hold, depth: 42)
-                .frame(width: 52)
-            content()
-        }
-        .frame(height: 44)
-    }
-
-    private func option(_ text: String, isOn: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(text)
-                .font(Tokens.statusFont)
-                .foregroundStyle(isOn ? Tokens.held : Tokens.value)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .upright(hold, depth: 42)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(
-                    isOn ? Tokens.surface : Color.clear,
-                    in: RoundedRectangle(cornerRadius: Tokens.panelRadius)
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(text)
-        .accessibilityAddTraits(isOn ? .isSelected : [])
+    /// Switching codec keeps the chroma where the other codec has it.
+    private var family: Binding<String> {
+        Binding(
+            get: { Self.isHEVC(model.encoderPreset) ? "HEVC" : "PRORES" },
+            set: { name in
+                let current = model.encoderPreset
+                guard (name == "HEVC") != Self.isHEVC(current) else { return }
+                let keepsFull = current.id.hasSuffix("444")
+                let target = name == "HEVC"
+                    ? (keepsFull ? "hevc444" : "hevc422") : (keepsFull ? "prores4444" : "prores422hq")
+                model.encoderPreset = EncoderPreset.all.first { $0.id == target } ?? current
+            })
     }
 }
 

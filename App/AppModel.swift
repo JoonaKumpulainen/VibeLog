@@ -80,18 +80,28 @@ final class AppModel: ObservableObject {
     /// The best preset proven at full size on an iPhone 14 Pro at 30 fps.
     @Published var encoderPreset = EncoderPreset.all.first { $0.id == "prores422hq" } ?? EncoderPreset.all[0]
     @Published var encoderSize = EncoderSize.all[0]
-    @Published var widescreen = false { didSet { updateCrop() } }
+    @Published var widescreen = false {
+        didSet {
+            updateCrop()
+            movePunch(to: punchCenter)
+        }
+    }
     @Published var lutNames: [String] = []
     /// Empty selects the built-in Rec.709 LUT.
     @Published var selectedLUT = "" { didSet { if selectedLUT != oldValue { loadSelectedLUT() } } }
     @Published var recordElapsed = 0
+    /// The loudest the microphone reached in the last second of a take, from 0 to 1.
+    @Published var audioPeak: Float = 0
     /// Megabytes per second written so far in this recording.
     @Published var dataRate = 0.0
     @Published var showTelemetry = true
     @Published var mainsHz = 50
     @Published var toolbar: [Tool] = []
     @Published private(set) var activeTools: Set<Tool> = [] {
-        didSet { hold.tracksLevel = activeTools.contains(.level) }
+        didSet {
+            hold.tracksLevel = activeTools.contains(.level)
+            applyMonitorView()
+        }
     }
 
     /// Zero records until stopped.
@@ -228,6 +238,44 @@ final class AppModel: ObservableObject {
     var aspectLabel: String { widescreen ? "16:9" : "4:3" }
 
     var showsFullView: Bool { fullView && widescreen }
+
+    /// The Metal monitor is on screen, rather than the ISP preview.
+    var monitorIsProcessed: Bool {
+        method.isPhoto && processing.enabled && processing.monitor != .isp
+    }
+
+    /// Punch-in shows this share of the picture's width and height.
+    static let punchScale: CGFloat = 1.0 / 3
+
+    /// The middle of the punch-in, as a share of the portrait picture.
+    private(set) var punchCenter = CGPoint(x: 0.5, y: 0.5)
+
+    /// Stops at the edges of what gets recorded.
+    func movePunch(to center: CGPoint) {
+        let edge = Self.punchScale / 2
+        let reach = (widescreen ? 0.75 : 1) / 2 - edge
+        punchCenter = CGPoint(
+            x: min(max(center.x, 0.5 - reach), 0.5 + reach), y: min(max(center.y, edge), 1 - edge))
+        applyMonitorView()
+    }
+
+    /// Turns a share of the view on screen into a share of the whole picture.
+    func pictureShare(ofView share: CGPoint) -> CGPoint {
+        guard isOn(.punchIn), monitorIsProcessed else { return share }
+        let scale = Self.punchScale
+        return CGPoint(
+            x: punchCenter.x + (share.x - 0.5) * scale, y: punchCenter.y + (share.y - 0.5) * scale)
+    }
+
+    private func applyMonitorView() {
+        guard isOn(.punchIn) else {
+            pipeline?.setMonitorView(origin: SIMD2(0, 0), scale: 1)
+            return
+        }
+        let scale = Self.punchScale
+        let origin = SIMD2(Float(punchCenter.x - scale / 2), Float(punchCenter.y - scale / 2))
+        pipeline?.setMonitorView(origin: origin, scale: Float(scale))
+    }
 
     /// The shutter as a share of the frame time.
     var shutterAngleLabel: String { "\(Int((360 * frameRate / pow(2, shutterStops)).rounded()))°" }
@@ -385,15 +433,11 @@ final class AppModel: ObservableObject {
         return minutes >= 60 ? "\(minutes / 60)H \(minutes % 60)M" : "\(minutes)M"
     }
 
+    /// Only the digits in use, as in 0:07, 12:47 or 1:12:47.
     var timecodeLabel: String {
-        String(format: "%02d:%02d:%02d", recordElapsed / 3600, recordElapsed / 60 % 60, recordElapsed % 60)
-    }
-
-    /// Minutes and seconds, with hours only once they're needed.
-    var shortTimecodeLabel: String {
         let minutes = recordElapsed / 60 % 60
         let seconds = recordElapsed % 60
-        guard recordElapsed >= 3600 else { return String(format: "%02d:%02d", minutes, seconds) }
+        guard recordElapsed >= 3600 else { return String(format: "%d:%02d", minutes, seconds) }
         return String(format: "%d:%02d:%02d", recordElapsed / 3600, minutes, seconds)
     }
 
@@ -416,9 +460,9 @@ final class AppModel: ObservableObject {
     var takeDrops: Int { stats.captureDrops + stats.writerDrops + pipelineStats.dropped }
 
     private var takeWarning: String? {
-        if isHot { return "Phone is hot" }
-        if isStorageLow { return "Storage is low" }
-        if isBatteryLow { return "Battery is low" }
+        if isHot { return "Phone is hot, so the take may stop early" }
+        if isStorageLow { return "\(timeLeftLabel) of storage left" }
+        if isBatteryLow { return "Battery at \(batteryLabel), so the take may stall" }
         return nil
     }
 
@@ -562,7 +606,7 @@ final class AppModel: ObservableObject {
     private func takeStopped(_ reason: String) {
         fullView = false
         takeAlert = TakeAlert(
-            title: "Recording stopped", detail: "\(reason) Stopped at \(shortTimecodeLabel).")
+            title: "Recording stopped", detail: "\(reason) Stopped at \(timecodeLabel).")
     }
 
     /// Playing ProRes while the camera runs would add heat to the next take.
@@ -832,6 +876,7 @@ final class AppModel: ObservableObject {
                 url: url, preset: encoderPreset, size: outputSize, audio: true, metadata: metadata,
                 rotationDegrees: hold.hold.clipRotation))
             audio.onSample = { [weak encoder] sample in encoder?.appendAudio(sample) }
+            audioPeak = 0
             encoder.onFailure = { [weak self] message in
                 Log.shared.error("Recording stopped: \(message)")
                 DispatchQueue.main.async { self?.takeStopped("The encoder failed.") }
@@ -981,6 +1026,7 @@ final class AppModel: ObservableObject {
         pipelineStats = gpu
         if isRecording {
             recordElapsed = Int(Date().timeIntervalSince(recordStart))
+            audioPeak = audio.takePeak()
             if line.thermal == "CRITICAL" {
                 Log.shared.warn("Stopping at \(recordElapsed)s: thermal state is critical")
                 takeStopped("The phone is too hot.")

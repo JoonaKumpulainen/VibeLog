@@ -25,6 +25,8 @@ struct MonitorParams {
     float4 lutOffset;
     float4 bandsLow;  // Blue below, green from, green to, pink from.
     float4 bandsHigh;  // Pink to, yellow from, clip, size of the Rec.709 LUT.
+    float2 viewOrigin;  // Top left of the part shown, as a share of the portrait picture.
+    float viewScale;  // Share of the picture shown. Below 1 it reaches past the drawable's pixels.
 };
 
 struct CropParams {
@@ -240,7 +242,8 @@ fragment float4 monitorFragment(VertexOut in [[stage_in]],
                                 texture3d<float> custom [[texture(2)]],
                                 constant MonitorParams &m [[buffer(0)]]) {
     constexpr sampler linearSampler(filter::linear, address::clamp_to_edge);
-    float2 rotated = float2(in.uv.y, 1.0 - in.uv.x);
+    float2 shown = m.viewOrigin + in.uv * m.viewScale;
+    float2 rotated = float2(shown.y, 1.0 - shown.x);
     float3 logColor = image.sample(linearSampler, rotated).rgb;
     float3 color = logColor;
     if (m.useLUT == 1 || m.useLUT == 3) {

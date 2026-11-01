@@ -139,6 +139,8 @@ private struct MonitorParams {
     var lutOffset: SIMD4<Float>
     var bandsLow: SIMD4<Float>
     var bandsHigh: SIMD4<Float>
+    var viewOrigin: SIMD2<Float>
+    var viewScale: Float
 }
 
 private struct CropParams {
@@ -215,6 +217,8 @@ public final class ProcessingPipeline: NSObject {
     private var stillRequest: ((ProcessedStill?) -> Void)?
     private var sink: VideoFrameSink?
     private var hot = false
+    private var monitorOrigin = SIMD2<Float>(0, 0)
+    private var monitorScale: Float = 1
     private var drawCounter = 0
     private var loggedFailure = false
 
@@ -261,6 +265,16 @@ public final class ProcessingPipeline: NSObject {
         hot = isHot
         lock.unlock()
         if changed { Log.shared.warn("Reduced GPU load \(isHot ? "on" : "off")") }
+    }
+
+    /// The part of the portrait picture the monitor shows. This only moves where the same draw
+    /// samples, so it adds no GPU work, and in Maximum quality a third of the picture is close to
+    /// one sensor pixel per drawable pixel. Efficient has half that detail to show.
+    public func setMonitorView(origin: SIMD2<Float>, scale: Float) {
+        lock.lock()
+        defer { lock.unlock() }
+        monitorOrigin = origin
+        monitorScale = scale
     }
 
     /// Replaces the Rec.709 monitoring LUT, or restores it when nil.
@@ -766,6 +780,8 @@ extension ProcessingPipeline: MTKViewDelegate {
         let image = latest
         let current = settings
         let custom = customLUT
+        let viewOrigin = monitorOrigin
+        let viewScale = monitorScale
         lock.unlock()
         guard current.monitor != .isp, let image, let rec709 = currentLUT(curve: current.curve),
             let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
@@ -786,7 +802,8 @@ extension ProcessingPipeline: MTKViewDelegate {
             cropFraction: Float(current.cropFraction),
             lutScale: SIMD4(1 / (high - low), 0), lutOffset: SIMD4(low, 0),
             bandsLow: SIMD4(bands.blueBelow, bands.greenFrom, bands.greenTo, bands.pinkFrom),
-            bandsHigh: SIMD4(bands.pinkTo, bands.yellowFrom, bands.clip, Float(Self.lutSize)))
+            bandsHigh: SIMD4(bands.pinkTo, bands.yellowFrom, bands.clip, Float(Self.lutSize)),
+            viewOrigin: viewOrigin, viewScale: viewScale)
         encoder.setRenderPipelineState(monitorState)
         encoder.setFragmentTexture(image, index: 0)
         encoder.setFragmentTexture(rec709, index: 1)

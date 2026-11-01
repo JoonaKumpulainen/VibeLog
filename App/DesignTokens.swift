@@ -27,8 +27,11 @@ enum Tokens {
     static let lineFont = Font.system(size: 11, weight: .medium, design: .monospaced)
     static let statusFont = Font.system(size: 12, weight: .medium, design: .monospaced)
     static let markFont = Font.system(size: 9, weight: .medium, design: .monospaced)
-    static let clockFont = Font.system(size: 28, weight: .semibold, design: .monospaced)
-    static let sidewaysClockFont = Font.system(size: 22, weight: .semibold, design: .monospaced)
+    /// As large as the digits in use allow, so the clock starts big and makes room as hours appear.
+    static func clockFont(digits: Int, width: CGFloat) -> Font {
+        let size = min(40, (width / (CGFloat(digits) * 0.6)).rounded(.down))
+        return Font.system(size: size, weight: .semibold, design: .monospaced)
+    }
     static let noticeTitleFont = Font.title3.weight(.semibold)
     static let noticeFont = Font.subheadline
 }
@@ -48,7 +51,7 @@ struct CameraGeometry {
     static let statusDepth: CGFloat = 99
     /// Status blocks are square, so they fit in every hold.
     static let statusSide: CGFloat = 81
-    static let statusLineWidth: CGFloat = 72
+    static let statusLineWidth: CGFloat = 80
     static let statusLineGap: CGFloat = 3
     /// The most Full view keeps beneath the picture.
     static let fullViewDepth: CGFloat = 80
