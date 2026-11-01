@@ -20,12 +20,18 @@ A free Apple ID signature lasts 7 days, so repeat step 3 when the app stops open
 
 Turn the ring/silent switch to silent first. On iOS 17 the shutter sound is only removed with a workaround.
 
-| Button | What it does |
+The camera opens live. The red button records, the lens buttons switch camera, the eye menu sets the monitor and exposure tool, and the gear opens **Settings**. **Monitor** and **Exposure tool** can change during a recording. Everything else is locked until it stops.
+
+Long-press **Version** in Settings to open **Diagnostics**:
+
+| Tool | What it does |
 |---|---|
-| **Probe** | Logs every camera, format and RAW type, checks RAW availability for each session setup, tries Bayer formats on the video output, and scans AVCapture for RAW-related selectors. Saves `probes/probe_*.txt`. Takes up to a few minutes. |
-| **Stream** | Runs the selected method without saving, for the overlay and the small RAW monitor. |
-| **Record** | Records for the chosen duration to `clips/clip_*/`. Turn off **Write frames to disk** to measure capture speed alone. |
-| **Log** | Shows the log. **Copy** puts it on the clipboard, **Previous** opens the last session's log, which holds crash details. |
+| **Debug overlay** | Shows frame rate, GPU, drops, memory, heat and storage on the viewfinder. |
+| **Show log** | Shows the log. **Copy** puts it on the clipboard, **Previous** opens the last session's log, which holds crash details. |
+| **Run control test** | Records 46 seconds and changes focus, exposure and white balance on a schedule. Each change is logged with frame and failure counts. |
+| **Run probe** | Logs every camera, format and RAW type, checks RAW availability for each session setup, tries Bayer formats on the video output, and scans AVCapture for RAW-related selectors. Saves `probes/probe_*.txt`. Takes up to a few minutes. |
+| **Start stream** / **Stop stream** | Starts or stops the selected method without saving. |
+| **Encode video** | Off records a RAW dump to `clips/clip_*/`. Turn off **Write frames to disk** to measure capture speed alone. |
 
 Methods:
 
@@ -38,13 +44,13 @@ Methods:
 
 ## Processing
 
-Photo methods feed a GPU pipeline: black level, white balance, debayer, camera RAW to linear Rec.2020 using the DNG's color matrices, exposure, then a log curve. **Pipeline** is **Maximum quality** by default; **Efficient** does the same math with less GPU work, as described in the roadmap. **Monitor** shows the result through a Rec.709 LUT, as plain log, or switches back to the ISP preview. **Still** saves the next processed frame to `stills/`. The overlay's `gpu` line shows the time per frame and any frames the pipeline dropped.
+Photo methods feed a GPU pipeline: black level, white balance, debayer, camera RAW to linear Rec.2020 using the DNG's color matrices, exposure, then a log curve. **Pipeline** is **Maximum quality** by default; **Efficient** does the same math with less GPU work, as described in the roadmap. **Monitor** shows the result through a Rec.709 LUT, as plain log, or switches back to the ISP preview. **Save still** saves the next processed frame to `stills/`. The overlay's `gpu` line shows the time per frame and any frames the pipeline dropped.
 
 The log image is Rec.2020 with the chosen curve for all three curves, so S-Log3 and LogC3 here use their transfer functions but not S-Gamut3 or ARRI Wide Gamut. Curve constants match colour-science's implementations of the vendor formulas.
 
 ## Encoding
 
-With **Encode video** on, **Record** writes the log image to `videos/video_*.mov` with microphone audio, plus a `.json` sidecar naming the curve and gamut. **Run encoder test** benchmarks every codec and size on synthetic frames, without the camera, and saves `probes/encoders_*.txt`. Support differs by phone, so check that before trusting a preset.
+With **Encode video** on, recording writes the log image to `videos/video_*.mov` with microphone audio, plus a `.json` sidecar naming the curve and gamut. **Run encoder test** benchmarks every codec and size on synthetic frames, without the camera, and saves `probes/encoders_*.txt`. Support differs by phone, so check that before trusting a preset.
 
 The default is ProRes 422 HQ at 4032x3024. On an iPhone 14 Pro it recorded 60 seconds at about 30 fps, using about 160 MB/s or 9.5 GB per minute. HEVC only just reaches 30 fps at this size even with nothing else running.
 
@@ -52,7 +58,7 @@ The file is tagged Rec.2020, but its transfer tag is nominal. Apply the log curv
 
 ## Long recordings and monitoring
 
-**Duration** goes up to 30 minutes or **Until stopped**. Recording stops safely if the thermal state turns critical or less than 10 GB is free, because writes slow down on a nearly full phone. Files are written in 10-second fragments, so a killed app should lose only the last few seconds. **Monitor off while recording** freezes the preview to save power and heat. **Reduce load when hot** switches to the bilinear debayer and a slower monitor once the thermal state is serious.
+**Stop after** defaults to **Never** and goes up to 30 minutes. Recording stops safely if the thermal state turns critical or less than 10 GB is free, because writes slow down on a nearly full phone. Files are written in 10-second fragments, so a killed app should lose only the last few seconds. **Monitor off while recording** freezes the preview to save power and heat. **Reduce load when hot** switches to the bilinear debayer and a slower monitor once the thermal state is serious.
 
 On an iPhone 14 Pro, ProRes 422 HQ at full size with reduced load held 30 fps for over 8 minutes at serious thermal state. Without it, heat cut GPU speed and frames began to drop at 5 minutes. Recording near an empty battery can stall the encoder, so start with a good charge.
 

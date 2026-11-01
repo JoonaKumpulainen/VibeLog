@@ -9,7 +9,21 @@ final class FrameRouter {
     var pipeline: ProcessingPipeline?
     var onRecordingElapsed: (() -> Void)?
 
+    /// The camera's values when the newest frame arrived.
+    struct CaptureValues {
+        var exposureSeconds = 0.0
+        var iso: Float = 0
+        var gains: [Float] = []
+    }
+
+    var latestCapture: CaptureValues {
+        lock.lock()
+        defer { lock.unlock() }
+        return capture
+    }
+
     private let lock = NSLock()
+    private var capture = CaptureValues()
     private var recorder: RawRecorder?
     private var recordSeconds = 0.0
     private var recordStartPTS: Double?
@@ -37,6 +51,8 @@ final class FrameRouter {
         pipeline?.submit(frame)
 
         lock.lock()
+        capture = CaptureValues(
+            exposureSeconds: frame.exposureSeconds, iso: frame.iso, gains: frame.whiteBalanceGains)
         let active = recorder
         var elapsed = false
         if active != nil {

@@ -8,7 +8,7 @@
 | 2 | GPU debayer, color and log curves | Done |
 | 3 | ProRes and HEVC encoding with audio | Done: ProRes 422 HQ at 4032x3024 |
 | 4 | Heat, crop, exposure tools, LUT import | Done: 10 minutes at 30 fps |
-| 5 | Camera experience redesign | Planned |
+| 5 | Camera experience redesign | In progress |
 | 6 | Image quality and capture | Planned |
 | 7 | Shooting tools | Planned |
 | 8 | On-phone finishing | Planned |

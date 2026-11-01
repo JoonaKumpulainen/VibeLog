@@ -32,7 +32,8 @@ struct SessionPreview: UIViewRepresentable {
     }
 }
 
-/// The GPU pipeline's output, in log or through the Rec.709 monitoring LUT.
+/// The GPU pipeline's output, in log or through the Rec.709 monitoring LUT. The drawable
+/// keeps the size the 10-minute recording was proven with, so a larger viewfinder adds no GPU load.
 struct ProcessedMonitor: UIViewRepresentable {
     let pipeline: ProcessingPipeline
 
@@ -41,6 +42,8 @@ struct ProcessedMonitor: UIViewRepresentable {
         pipeline.attach(to: view)
         view.backgroundColor = .black
         view.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        view.autoResizeDrawable = false
+        view.drawableSize = CGSize(width: 972, height: 1296)
         return view
     }
 

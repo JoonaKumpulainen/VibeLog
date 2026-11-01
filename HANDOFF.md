@@ -63,11 +63,32 @@ Modules are dynamic frameworks. Swift is in Swift 5 mode.
 - False color ranges, which are my own choice.
 - S-Log3 and LogC3 use Rec.2020, not their native gamuts.
 
-## Next: Phase 5
+## Now: Phase 5
 
-Redesign the interface to first-party Apple camera standard, as described in the roadmap. The owner agreed to this phase but hasn't yet said to start it. Leave room for the tools in Phases 6 and 7, and keep the capture, processing and encoding code unchanged. The debug overlay, logs and benchmarks must stay reachable in a hidden diagnostics screen, because phone testing depends on them.
+The owner approved Phase 5, in stages with one `.ipa` each: camera screen and settings, direct control, shooting information and warnings, library, then presets, accessibility and a 10-minute test. Gyro logging to a Gyroflow `.gcsv` follows as its own change once that test passes. Direct control needs a small addition to `VLCapture`: focus and exposure points, exposure compensation, and reading live values. Other module code stays unchanged.
 
-Gyro logging to a Gyroflow `.gcsv` is small and cheap, so it's worth adding early.
+Diagnostics opens with a long press on **Version** in Settings.
+
+## Adjusting the camera while recording
+
+From reading the code, not yet measured. **Run control test** exists to measure the second list.
+
+Must stay locked during a take:
+
+- **Lens and capture settings:** any change rebuilds the session, which ends the recording.
+- **Curve, exposure offset, debayer, crop and pipeline:** these are baked in, and the clip's metadata is written at the start.
+- **Shutter slower than 1/30 s:** it can't keep 30 fps. Auto exposure in low light may do this itself.
+
+Unknown until tested on the phone:
+
+- **Focus, ISO, shutter and white balance changes:** the code allows them, but ZSL and the photo loop may lose frames or apply them late.
+- **Per-frame values:** ISO, shutter and white balance gains are read from the device when a photo arrives, not from that photo, so they can lag. White balance gains are baked into the debayer, so auto white balance drift or a late gain is recorded for good.
+- **Auto modes:** continuous focus, exposure and white balance keep running during a take. Only the locks stop them.
+- **Focus breathing:** the RAW frames have no correction for it.
+
+Safe during a take: **Monitor** (Rec.709 or log) and **Exposure tool**, which only affect drawing. The ISP monitor removes the Metal view, so it stays in Settings.
+
+Keep SwiftUI updates to about once a second while recording, and avoid continuous animations, because main-thread load has cost frames before.
 
 ## Known simulator limits
 

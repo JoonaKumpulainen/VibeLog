@@ -20,6 +20,8 @@ final class AppModel: ObservableObject {
     @Published var isRecording = false
     @Published var isBusy: String?
     @Published var lastResult: String?
+    /// Explains on the camera screen why a recording stopped or could not start.
+    @Published var notice: String?
     @Published var permissionDenied = false
     @Published var lastFrameLabel = "-"
 
@@ -47,7 +49,7 @@ final class AppModel: ObservableObject {
     @Published var recordElapsed = 0
 
     /// Zero records until stopped.
-    @Published var recordSeconds = 120.0
+    @Published var recordSeconds = 0.0
     @Published var writeFrames = true
 
     @Published var exposureLocked = false { didSet { applyExposure() } }
@@ -70,12 +72,16 @@ final class AppModel: ObservableObject {
         var battery = "?"
     }
 
-    private let router = FrameRouter()
+    let router = FrameRouter()
     private var timer: Timer?
     private var applyingOptions = false
     private var thermalObserver: NSObjectProtocol?
     private var recordDeadline: Date?
     private var started = false
+    /// The camera screen opens live, so the first configuration starts the stream.
+    private var startStreamAfterConfigure = true
+    private var resumeInForeground = false
+    private var hasReference = false
     private var ticksSinceReport = 0
     private var recordStart = Date()
     private var recordStarting = false
@@ -122,8 +128,17 @@ final class AppModel: ObservableObject {
 
     func enteredBackground() {
         if isRecording { stopRecording() }
+        resumeInForeground = isStreaming
         if isStreaming { toggleStream() }
     }
+
+    func enteredForeground() {
+        guard resumeInForeground else { return }
+        resumeInForeground = false
+        if !isStreaming { toggleStream() }
+    }
+
+    var outputLabel: String { outputSize.label }
 
     func toggleStream() {
         if isStreaming {
@@ -133,9 +148,14 @@ final class AppModel: ObservableObject {
         } else {
             router.stats.reset()
             pipeline?.resetStats()
+            hasReference = false
             if method.isPhoto { camera.requestReference() }
             camera.start()
             isStreaming = true
+            // The driver may only exist once the session runs, which loses the first request.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in
+                if isStreaming, method.isPhoto, !hasReference { camera.requestReference() }
+            }
         }
     }
 
@@ -149,6 +169,7 @@ final class AppModel: ObservableObject {
             }, completion: { [self] url in
                 isBusy = nil
                 lastResult = "Encoder test saved: probes/\(url.lastPathComponent)"
+                startStreamAfterConfigure = true
                 reconfigure()
             })
         }
@@ -218,6 +239,7 @@ final class AppModel: ObservableObject {
             }, completion: { [self] url in
                 isBusy = nil
                 lastResult = "Probe saved: probes/\(url.lastPathComponent)"
+                startStreamAfterConfigure = true
                 reconfigure()
             })
         }
@@ -269,7 +291,8 @@ final class AppModel: ObservableObject {
 
     private func reconfigure() {
         guard !applyingOptions, !lensID.isEmpty else { return }
-        let wasStreaming = isStreaming
+        let wasStreaming = isStreaming || startStreamAfterConfigure
+        startStreamAfterConfigure = false
         if isRecording { stopRecording() }
         isStreaming = false
         let config = CaptureConfig(
@@ -298,25 +321,27 @@ final class AppModel: ObservableObject {
         applyingOptions = false
     }
 
-    private func applyExposure() {
+    func applyExposure() {
         guard !applyingOptions else { return }
         camera.setExposure(exposureLocked ? .locked : .auto, seconds: 1 / pow(2, shutterStops), iso: iso)
     }
 
-    private func applyWhiteBalance() {
+    func applyWhiteBalance() {
         guard !applyingOptions else { return }
         camera.setWhiteBalance(whiteBalanceLocked ? .locked : .auto, temperature: temperature, tint: tint)
     }
 
-    private func applyFocus() {
+    func applyFocus() {
         guard !applyingOptions else { return }
         camera.setFocus(focusLocked ? .locked : .auto, lensPosition: lensPosition)
     }
 
     private func startRecording() {
         guard !isRecording, !recordStarting else { return }
-        let warmUp = !isStreaming
-        if warmUp { toggleStream() }
+        notice = nil
+        // A frame processed before the reference arrives has no calibration.
+        let warmUp = !isStreaming || !hasReference
+        if !isStreaming { toggleStream() }
         if recordEncoded {
             // The first frames after a stream starts are unreliable, so give it a moment.
             recordStarting = true
@@ -359,6 +384,7 @@ final class AppModel: ObservableObject {
     private func startEncoding() {
         guard let pipeline, processing.enabled, method.isPhoto else {
             Log.shared.error("Encoding needs a photo method and the GPU pipeline")
+            notice = "Recording needs a photo method and the GPU pipeline"
             return
         }
         let name = "video_\(Storage.timestamp())"
@@ -377,6 +403,7 @@ final class AppModel: ObservableObject {
             audio.onSample = { [weak encoder] sample in encoder?.appendAudio(sample) }
             encoder.onFailure = { [weak self] message in
                 Log.shared.error("Recording stopped: \(message)")
+                DispatchQueue.main.async { self?.notice = "Recording stopped: the encoder failed" }
                 self?.stopRecording()
             }
             audio.start { _ in }
@@ -395,6 +422,7 @@ final class AppModel: ObservableObject {
             }
         } catch {
             Log.shared.error("Cannot start \(encoderPreset.label) \(outputSize.label): \(error)")
+            notice = "Cannot start \(encoderPreset.label) \(outputSize.label)"
         }
     }
 
@@ -466,6 +494,7 @@ final class AppModel: ObservableObject {
             Log.shared.warn("Reference DNG missing or unreadable (\(data?.count ?? 0) bytes)")
         }
         DispatchQueue.main.async { [self] in
+            hasReference = true
             guard !pendingReferences.isEmpty else { return }
             let recorder = pendingReferences.removeFirst()
             DispatchQueue.global(qos: .utility).async {
@@ -496,10 +525,12 @@ final class AppModel: ObservableObject {
             recordElapsed = Int(Date().timeIntervalSince(recordStart))
             if line.thermal == "CRITICAL" {
                 Log.shared.warn("Stopping at \(recordElapsed)s: thermal state is critical")
+                notice = "Recording stopped: the phone is too hot"
                 stopRecording()
             } else if line.freeDiskGB < 10 {
                 // Encoder drops began at about 8 GB free in a 10-minute test.
                 Log.shared.warn("Stopping at \(recordElapsed)s: less than 10 GB free")
+                notice = "Recording stopped: less than 10 GB free"
                 stopRecording()
             }
         }
@@ -508,9 +539,11 @@ final class AppModel: ObservableObject {
             ticksSinceReport += 1
             if ticksSinceReport >= 5 {
                 ticksSinceReport = 0
+                let capture = router.latestCapture
                 let line = String(
-                    format: "Recording: %.2f fps now, n=%d, fail %d, writer drops %d, gpu %d done %d dropped %.1f recent %.1f max ms, mem %d MB, avail %d MB, thermal %@, free %d GB, battery %@",
+                    format: "Recording: %.2f fps now, n=%d, fail %d, writer drops %d, 1/%.0f s ISO %.0f, gpu %d done %d dropped %.1f recent %.1f max ms, mem %d MB, avail %d MB, thermal %@, free %d GB, battery %@",
                     stats.rollingFPS, stats.frames, stats.captureFailures, stats.writerDrops,
+                    capture.exposureSeconds > 0 ? 1 / capture.exposureSeconds : 0, capture.iso,
                     gpu.processed, gpu.dropped, gpu.gpuRecentMs, gpu.gpuMaxMs,
                     status.footprintMB, status.availableMB,
                     status.thermal, status.freeDiskGB, status.battery)
