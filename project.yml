@@ -1,0 +1,111 @@
+name: VibeLog
+
+options:
+  bundleIdPrefix: io.github.joonakumpulainen
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    TARGETED_DEVICE_FAMILY: "1"
+    CLANG_ENABLE_MODULES: YES
+    CLANG_ENABLE_OBJC_ARC: YES
+
+targetTemplates:
+  Module:
+    type: framework
+    platform: iOS
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        DEFINES_MODULE: YES
+        SKIP_INSTALL: YES
+
+targets:
+  ObjCGuard:
+    templates: [Module]
+    sources:
+      - path: Modules/ObjCGuard
+
+  VLCore:
+    templates: [Module]
+    sources:
+      - path: Modules/VLCore
+
+  VLCapture:
+    templates: [Module]
+    sources:
+      - path: Modules/VLCapture
+    dependencies:
+      - target: ObjCGuard
+      - target: VLCore
+
+  VLProcessing:
+    templates: [Module]
+    sources:
+      - path: Modules/VLProcessing
+    dependencies:
+      - target: VLCore
+
+  VLRecording:
+    templates: [Module]
+    sources:
+      - path: Modules/VLRecording
+    dependencies:
+      - target: VLCore
+
+  VibeLog:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+        excludes:
+          - Info.plist
+    dependencies:
+      - target: ObjCGuard
+      - target: VLCore
+      - target: VLCapture
+      - target: VLProcessing
+      - target: VLRecording
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.joonakumpulainen.vibelog
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: VibeLog
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSCameraUsageDescription: VibeLog reads the camera sensor to record RAW frames.
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        UILaunchScreen: {}
+        UIRequiresFullScreen: true
+        UIStatusBarHidden: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+
+  VLTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests/VLTests
+    dependencies:
+      - target: VLCore
+      - target: VLRecording
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  VibeLog:
+    build:
+      targets:
+        VibeLog: all
+    test:
+      targets:
+        - VLTests

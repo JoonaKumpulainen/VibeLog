@@ -1,0 +1,84 @@
+name: Build unsigned IPA
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Run unit tests on the simulator
+        run: |
+          set -o pipefail
+          SIM_ID=$(xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          devices = json.load(sys.stdin)['devices']
+          ids = [d['udid'] for runtime, items in sorted(devices.items(), reverse=True)
+                 if 'iOS' in runtime for d in items if d['name'].startswith('iPhone')]
+          print(ids[0])
+          ")
+          echo "Simulator: $SIM_ID"
+          xcodebuild test \
+            -project VibeLog.xcodeproj \
+            -scheme VibeLog \
+            -destination "id=$SIM_ID" \
+            -derivedDataPath build/test \
+            CODE_SIGNING_ALLOWED=NO \
+            | tail -n 60
+
+      - name: Build for device, unsigned
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project VibeLog.xcodeproj \
+            -scheme VibeLog \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/device \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            | tail -n 60
+
+      - name: Package IPA
+        run: |
+          APP=build/device/Build/Products/Release-iphoneos/VibeLog.app
+          mkdir -p dist/Payload
+          cp -R "$APP" dist/Payload/
+          (cd dist && zip -qry VibeLog-unsigned.ipa Payload)
+
+      - name: Check IPA contents
+        run: |
+          APP=dist/Payload/VibeLog.app
+          ls -la "$APP" "$APP/Frameworks"
+          plutil -p "$APP/Info.plist" | grep -E 'UIFileSharingEnabled|LSSupportsOpeningDocumentsInPlace|NSCameraUsageDescription|MinimumOSVersion'
+          lipo -info "$APP/VibeLog"
+          test -f "$APP/Frameworks/VLProcessing.framework/default.metallib"
+          for f in ObjCGuard VLCore VLCapture VLProcessing VLRecording; do
+            test -f "$APP/Frameworks/$f.framework/$f"
+          done
+          ls -la dist/VibeLog-unsigned.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VibeLog-unsigned-ipa
+          path: dist/VibeLog-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30

@@ -1,0 +1,376 @@
+import AVFoundation
+import ObjCGuard
+import VLCore
+
+/// Owns the capture session, device controls and the active capture driver.
+public final class CameraController: NSObject {
+    public let session = AVCaptureSession()
+
+    public var onFrame: ((RawFrame) -> Void)?
+    public var onCaptureDrop: ((String) -> Void)?
+    public var onCaptureFailure: ((String) -> Void)?
+    public var onReference: ((Data?, [String: Any]) -> Void)?
+
+    private let queue = DispatchQueue(label: "vibelog.session", qos: .userInitiated)
+    private var device: AVCaptureDevice?
+    private var input: AVCaptureDeviceInput?
+    private var photoOutput: AVCapturePhotoOutput?
+    private var videoOutput: AVCaptureVideoDataOutput?
+    private var photoDriver: PhotoRawDriver?
+    private var videoDriver: VideoDataDriver?
+    private var config: CaptureConfig?
+    private var observers: [NSObjectProtocol] = []
+    private var pressureObservation: NSKeyValueObservation?
+
+    public override init() {
+        super.init()
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(
+            forName: .AVCaptureSessionRuntimeError, object: session, queue: nil
+        ) { note in
+            let error = note.userInfo?[AVCaptureSessionErrorKey] as? NSError
+            Log.shared.error("Session runtime error: \(error?.localizedDescription ?? "?") code \(error?.code ?? 0)")
+        })
+        observers.append(center.addObserver(
+            forName: .AVCaptureSessionWasInterrupted, object: session, queue: nil
+        ) { note in
+            Log.shared.warn("Session interrupted: \(note.userInfo ?? [:])")
+        })
+    }
+
+    deinit {
+        observers.forEach { NotificationCenter.default.removeObserver($0) }
+    }
+
+    public static func lenses() -> [LensInfo] {
+        let wanted: [(AVCaptureDevice.DeviceType, String)] = [
+            (.builtInWideAngleCamera, "1x Main"),
+            (.builtInUltraWideCamera, "0.5x Ultra Wide"),
+            (.builtInTelephotoCamera, "3x Tele"),
+        ]
+        return wanted.compactMap { type, name in
+            AVCaptureDevice.default(type, for: .video, position: .back).map {
+                LensInfo(id: $0.uniqueID, name: name)
+            }
+        }
+    }
+
+    public static func formats(lensID: String) -> [FormatInfo] {
+        guard let device = AVCaptureDevice(uniqueID: lensID) else { return [] }
+        return device.formats.enumerated().map { index, format in
+            let size = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            let photo = format.photoSizes.map(\.width).max() ?? 0
+            let label = "\(format.fourCC) \(size.width)x\(size.height) "
+                + "\(Int(format.maxFPS))fps photo \(photo)w #\(index)"
+            return FormatInfo(
+                id: index, label: label, width: Int(size.width), height: Int(size.height),
+                subtype: format.fourCC, maxFPS: format.maxFPS, maxPhotoWidth: photo)
+        }
+    }
+
+    /// 12 MP 4:3 at its highest frame rate, the likeliest format for fast Bayer stills.
+    public static func defaultFormat(in formats: [FormatInfo]) -> FormatInfo? {
+        let photoFormats = formats.filter { $0.width == 4032 && $0.height == 3024 }
+        return photoFormats.max { $0.maxFPS < $1.maxFPS } ?? formats.last
+    }
+
+    /// Rebuilds the session. The completion runs on the main queue with what the
+    /// configuration really supports and the values it resolved to.
+    public func configure(_ requested: CaptureConfig, completion: @escaping (CaptureOptions?) -> Void) {
+        queue.async { [self] in
+            let options = applyConfiguration(requested)
+            DispatchQueue.main.async { completion(options) }
+        }
+    }
+
+    public func start() {
+        queue.async { [self] in
+            guard !session.isRunning else { return }
+            session.startRunning()
+            guard session.isRunning else {
+                Log.shared.error("Session did not start")
+                return
+            }
+            if let config { Log.shared.info("Streaming with \(config.method.label)") }
+            photoDriver?.start()
+        }
+    }
+
+    public func stop() {
+        queue.async { [self] in
+            photoDriver?.stop()
+            if session.isRunning { session.stopRunning() }
+        }
+    }
+
+    /// Releases the camera so the probe can use it.
+    public func teardown(completion: @escaping () -> Void) {
+        queue.async { [self] in
+            photoDriver?.stop()
+            if session.isRunning { session.stopRunning() }
+            removeAll()
+            DispatchQueue.main.async(execute: completion)
+        }
+    }
+
+    public func requestReference() {
+        queue.async { [self] in photoDriver?.requestReference() }
+    }
+
+    // MARK: Manual controls
+
+    public func setExposure(_ mode: ControlMode, seconds: Double, iso: Float) {
+        withLockedDevice { device in
+            switch mode {
+            case .auto:
+                if device.isExposureModeSupported(.continuousAutoExposure) {
+                    device.exposureMode = .continuousAutoExposure
+                }
+            case .locked:
+                let format = device.activeFormat
+                let low = CMTimeGetSeconds(format.minExposureDuration)
+                let high = CMTimeGetSeconds(format.maxExposureDuration)
+                let duration = CMTime(seconds: min(max(seconds, low), high), preferredTimescale: 1_000_000_000)
+                let clampedISO = min(max(iso, format.minISO), format.maxISO)
+                device.setExposureModeCustom(duration: duration, iso: clampedISO, completionHandler: nil)
+            }
+        }
+    }
+
+    public func setWhiteBalance(_ mode: ControlMode, temperature: Float, tint: Float) {
+        withLockedDevice { device in
+            switch mode {
+            case .auto:
+                if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
+                    device.whiteBalanceMode = .continuousAutoWhiteBalance
+                }
+            case .locked:
+                guard device.isLockingWhiteBalanceWithCustomDeviceGainsSupported else {
+                    Log.shared.warn("Custom white balance gains are not supported on this lens")
+                    return
+                }
+                var gains = device.deviceWhiteBalanceGains(
+                    for: AVCaptureDevice.WhiteBalanceTemperatureAndTintValues(
+                        temperature: temperature, tint: tint))
+                let limit = device.maxWhiteBalanceGain
+                gains.redGain = min(max(gains.redGain, 1), limit)
+                gains.greenGain = min(max(gains.greenGain, 1), limit)
+                gains.blueGain = min(max(gains.blueGain, 1), limit)
+                device.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
+            }
+        }
+    }
+
+    public func setFocus(_ mode: ControlMode, lensPosition: Float) {
+        withLockedDevice { device in
+            switch mode {
+            case .auto:
+                if device.isFocusModeSupported(.continuousAutoFocus) {
+                    device.focusMode = .continuousAutoFocus
+                }
+            case .locked:
+                guard device.isLockingFocusWithCustomLensPositionSupported else {
+                    Log.shared.warn("Manual focus is not supported on this lens")
+                    return
+                }
+                device.setFocusModeLocked(lensPosition: min(max(lensPosition, 0), 1), completionHandler: nil)
+            }
+        }
+    }
+
+    private func withLockedDevice(_ body: @escaping (AVCaptureDevice) -> Void) {
+        queue.async { [self] in
+            guard let device else { return }
+            do {
+                try device.lockForConfiguration()
+                if let exception = VLTryCatch({ body(device) }) {
+                    Log.shared.error("Device control raised: \(exception.reason ?? exception.name.rawValue)")
+                }
+                device.unlockForConfiguration()
+            } catch {
+                Log.shared.error("lockForConfiguration failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    // MARK: Configuration
+
+    private func removeAll() {
+        photoDriver = nil
+        videoDriver = nil
+        session.beginConfiguration()
+        session.inputs.forEach(session.removeInput)
+        session.outputs.forEach(session.removeOutput)
+        session.commitConfiguration()
+        input = nil
+        photoOutput = nil
+        videoOutput = nil
+        device = nil
+    }
+
+    private func applyConfiguration(_ requested: CaptureConfig) -> CaptureOptions? {
+        photoDriver?.stop()
+        if session.isRunning { session.stopRunning() }
+        removeAll()
+
+        guard let device = AVCaptureDevice(uniqueID: requested.lensID),
+            device.formats.indices.contains(requested.formatIndex)
+        else {
+            Log.shared.error("Lens or format is not available")
+            return nil
+        }
+        let format = device.formats[requested.formatIndex]
+
+        do {
+            let input = try AVCaptureDeviceInput(device: device)
+            session.beginConfiguration()
+            defer { session.commitConfiguration() }
+            guard session.canAddInput(input) else {
+                Log.shared.error("Cannot add camera input")
+                return nil
+            }
+            session.addInput(input)
+            self.input = input
+            self.device = device
+
+            if requested.method.isPhoto {
+                let output = AVCapturePhotoOutput()
+                guard session.canAddOutput(output) else {
+                    Log.shared.error("Cannot add photo output")
+                    return nil
+                }
+                session.addOutput(output)
+                photoOutput = output
+            } else {
+                let output = AVCaptureVideoDataOutput()
+                output.alwaysDiscardsLateVideoFrames = true
+                guard session.canAddOutput(output) else {
+                    Log.shared.error("Cannot add video data output")
+                    return nil
+                }
+                session.addOutput(output)
+                videoOutput = output
+            }
+
+            session.sessionPreset = .inputPriority
+            try device.lockForConfiguration()
+            device.activeFormat = format
+            device.unlockForConfiguration()
+        } catch {
+            Log.shared.error("Configure failed: \(error.localizedDescription)")
+            return nil
+        }
+
+        var options = CaptureOptions(config: requested)
+        options.formatDescription = format.description
+        options.isoRange = format.minISO...format.maxISO
+        options.shutterRange = CMTimeGetSeconds(format.minExposureDuration)...CMTimeGetSeconds(format.maxExposureDuration)
+        options.maxWhiteBalanceGain = device.maxWhiteBalanceGain
+        options.photoSizes = format.photoSizes
+
+        Log.shared.info("Format: \(format.description)")
+        if requested.method.isPhoto {
+            configurePhoto(device: device, options: &options)
+        } else {
+            configureVideo(device: device, format: format, options: &options)
+        }
+        config = options.config
+        return options
+    }
+
+    private func configurePhoto(device: AVCaptureDevice, options: inout CaptureOptions) {
+        guard let output = photoOutput else { return }
+        output.isAppleProRAWEnabled = false
+        let bayer = output.availableRawPhotoPixelFormatTypes.filter(AVCapturePhotoOutput.isBayerRAWPixelFormat)
+        options.rawPhotoTypes = bayer
+        options.maxBracketCount = output.maxBracketedCapturePhotoCount
+
+        let size = options.config.photoSize.flatMap { options.photoSizes.contains($0) ? $0 : nil }
+            ?? options.photoSizes.first { $0.width <= 4032 && $0.width > 2000 }
+            ?? options.photoSizes.last
+        guard let size else {
+            Log.shared.error("Format reports no photo dimensions")
+            return
+        }
+        options.config.photoSize = size
+
+        guard let raw = options.config.rawPixelFormat.flatMap({ bayer.contains($0) ? $0 : nil }) ?? bayer.first else {
+            Log.shared.error("No Bayer RAW photo format on this configuration. All RAW types: "
+                + output.availableRawPhotoPixelFormatTypes.map(PixelFormats.fourCC).joined(separator: " "))
+            return
+        }
+        options.config.rawPixelFormat = raw
+        options.config.bracketCount = max(1, min(options.config.bracketCount, output.maxBracketedCapturePhotoCount))
+
+        let exception = VLTryCatch {
+            output.maxPhotoDimensions = CMVideoDimensions(
+                width: Int32(size.width), height: Int32(size.height))
+            output.maxPhotoQualityPrioritization = .speed
+            let wantsFast = options.config.method == .photoReadiness
+            if output.isZeroShutterLagSupported {
+                output.isZeroShutterLagEnabled = wantsFast
+            }
+            if output.isResponsiveCaptureSupported {
+                output.isResponsiveCaptureEnabled = wantsFast
+            }
+            if output.isFastCapturePrioritizationSupported {
+                output.isFastCapturePrioritizationEnabled = wantsFast
+            }
+        }
+        if let exception {
+            Log.shared.error("Photo output setup raised: \(exception.reason ?? exception.name.rawValue)")
+        }
+
+        Log.shared.info(
+            "Photo output: raw=\(PixelFormats.fourCC(raw)) size=\(size.label) "
+                + "bayerTypes=[\(bayer.map(PixelFormats.fourCC).joined(separator: " "))] "
+                + "ZSL=\(output.isZeroShutterLagSupported)/\(output.isZeroShutterLagEnabled) "
+                + "responsive=\(output.isResponsiveCaptureSupported)/\(output.isResponsiveCaptureEnabled) "
+                + "fastPrio=\(output.isFastCapturePrioritizationSupported)/\(output.isFastCapturePrioritizationEnabled) "
+                + "maxBracket=\(output.maxBracketedCapturePhotoCount)")
+
+        let driver = PhotoRawDriver(
+            output: output, device: device, method: options.config.method, rawFormat: raw,
+            size: size, bracketCount: options.config.bracketCount)
+        driver.onFrame = { [weak self] in self?.onFrame?($0) }
+        driver.onFailure = { [weak self] message in
+            Log.shared.error(message)
+            self?.onCaptureFailure?(message)
+        }
+        driver.onReference = { [weak self] data, metadata in self?.onReference?(data, metadata) }
+        photoDriver = driver
+    }
+
+    private func configureVideo(device: AVCaptureDevice, format: AVCaptureDevice.Format, options: inout CaptureOptions) {
+        guard let output = videoOutput else { return }
+        options.videoTypes = output.availableVideoPixelFormatTypes
+        Log.shared.info("Video output types: \(options.videoTypes.map(PixelFormats.fourCC).joined(separator: " "))")
+
+        if let pixelFormat = options.config.videoPixelFormat ?? options.videoTypes.first {
+            options.config.videoPixelFormat = pixelFormat
+            let exception = VLTryCatch {
+                output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: pixelFormat]
+            }
+            if let exception {
+                Log.shared.error("Video format \(PixelFormats.fourCC(pixelFormat)) rejected: \(exception.reason ?? "")")
+            }
+        }
+
+        let fps = min(options.config.videoFPS, format.maxFPS)
+        do {
+            try device.lockForConfiguration()
+            let duration = CMTime(value: 1000, timescale: CMTimeScale(fps * 1000))
+            device.activeVideoMinFrameDuration = duration
+            device.activeVideoMaxFrameDuration = duration
+            device.unlockForConfiguration()
+        } catch {
+            Log.shared.error("Frame rate setup failed: \(error.localizedDescription)")
+        }
+
+        let driver = VideoDataDriver(device: device)
+        driver.onFrame = { [weak self] in self?.onFrame?($0) }
+        driver.onDrop = { [weak self] in self?.onCaptureDrop?($0) }
+        output.setSampleBufferDelegate(driver, queue: driver.queue)
+        videoDriver = driver
+    }
+}
