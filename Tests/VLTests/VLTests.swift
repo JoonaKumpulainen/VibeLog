@@ -951,6 +951,18 @@ final class GamutTests: XCTestCase {
         XCTAssertEqual(settings.gamut, .rec2020)
     }
 
+    func testChoosingAGamutSetsItsCurve() {
+        var settings = ProcessingSettings()
+        settings.gamut = .arriWideGamut3
+        XCTAssertEqual(settings.curve, .logC3)
+        XCTAssertEqual(settings.gamut, .arriWideGamut3)
+        settings.gamut = .sGamut3
+        XCTAssertEqual(settings.curve, .sLog3)
+        settings.gamut = .rec2020
+        XCTAssertEqual(settings.curve, .sLog3)
+        XCTAssertEqual(settings.gamut, .rec2020)
+    }
+
     func testMonitorKeepsGrayInEveryGamut() {
         let curve = LogCurve.sLog3
         let log = SIMD3<Double>(repeating: curve.encode(0.18))

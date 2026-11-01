@@ -64,6 +64,24 @@ public enum Gamut: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// The curve this gamut belongs to. Rec.2020 goes with any curve.
+    public var curve: LogCurve? {
+        switch self {
+        case .rec2020: return nil
+        case .sGamut3: return .sLog3
+        case .arriWideGamut3: return .logC3
+        }
+    }
+
+    /// The gamut with what it pairs with, so a list shows which curves have their own.
+    public var pairedLabel: String {
+        switch self {
+        case .rec2020: return "Rec.2020 · any curve"
+        case .sGamut3: return "S-Gamut3 · S-Log3"
+        case .arriWideGamut3: return "ARRI Wide Gamut 3 · LogC3"
+        }
+    }
+
     /// Red, green and blue as CIE xy.
     private var primaries: (red: SIMD2<Double>, green: SIMD2<Double>, blue: SIMD2<Double>)? {
         switch self {

@@ -52,7 +52,7 @@ Methods:
 
 Photo methods feed a GPU pipeline: black level, white balance, debayer, camera RAW to linear Rec.2020 using the DNG's color matrices, exposure, then a log curve. **Pipeline** is **Maximum quality** by default; **Efficient** does the same math with less GPU work, as described in the roadmap. **Monitor** shows the result through a Rec.709 LUT, as plain log, or switches back to the ISP preview. **Save still** saves the next processed frame to `stills/`. The overlay's `gpu` line shows the time per frame and any frames the pipeline dropped.
 
-The log image is Rec.2020 with the chosen curve by default. **Native gamut** in Settings records S-Gamut3 for S-Log3 and ARRI Wide Gamut 3 for LogC3 instead, and the sidecar names the gamut. Curve constants match colour-science's implementations of the vendor formulas.
+The log image is Rec.2020 with the chosen curve by default. **Color space** in Settings can record S-Gamut3 or ARRI Wide Gamut 3 instead, which also sets the matching curve, and the sidecar names the gamut. Curve constants match colour-science's implementations of the vendor formulas.
 
 ## Encoding
 

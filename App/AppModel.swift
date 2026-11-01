@@ -152,7 +152,9 @@ final class AppModel: ObservableObject {
     @Published var frameRate = 30.0 {
         didSet {
             guard frameRate != oldValue, !applyingOptions else { return }
-            shutterStops = max(shutterStops, log2(frameRate))
+            // A 180 degree shutter stays one at the new rate.
+            let wasHalfAngle = exposureLocked && abs(pow(2, shutterStops) / (oldValue * 2) - 1) < 0.01
+            shutterStops = wasHalfAngle ? log2(frameRate * 2) : max(shutterStops, log2(frameRate))
             pendingRateChange?.cancel()
             let change = DispatchWorkItem { [weak self] in
                 self?.pendingRateChange = nil

@@ -1,6 +1,6 @@
 # VibeLog handoff
 
-For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of early Phase 6. Phase 5 is built, and only a few phone checks remain. The latest build is `d20531f`, which passed CI with 72 tests. It hasn't been tested on the phone, and the last logged session came from `9f9a456`.
+For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of early Phase 6. Phase 5 is built, and only a few phone checks remain. The latest build, from the `Keep 180 degrees across frame rates and make color space a picker` commit, passed CI with 73 tests if the next line of history shows it. It hasn't been tested on the phone, and the last logged session came from `9f9a456`.
 
 ## What this is
 
@@ -31,7 +31,7 @@ An iPhone camera app that records full-sensor RAW frames, processes them on the 
 | `Modules/VLProcessing` | Log curves, color math, monitor LUT, `.cube` parser, Metal pipeline, still export, `Shaders.metal` |
 | `Modules/VLRecording` | RAW dump writer, `VideoEncoder`, encoder presets, encoder benchmark, `TakeLibrary` |
 | `Modules/ObjCGuard` | Catches Objective-C exceptions from AVFoundation, runtime scan |
-| `Tests/VLTests` | 72 tests, including real GPU tests on the simulator |
+| `Tests/VLTests` | 73 tests, including real GPU tests on the simulator |
 | `tools/inspect_clip.py` | Summarizes a RAW clip and exports a frame |
 
 Modules are dynamic frameworks. Swift is in Swift 5 mode.
@@ -72,7 +72,7 @@ Modules are dynamic frameworks. Swift is in Swift 5 mode.
 - Crash recovery from the 10-second file fragments.
 - What `-12686` and `-16800` mean. In one session, nearly every one was the single failure right after a session rebuild, and none came mid-take after the first seconds.
 - False color ranges, which are my own choice.
-- Whether **Native gamut** matches real S-Gamut3 and AWG3 footage. Its matrices come from published primaries.
+- Whether the **Color space** choices match real S-Gamut3 and AWG3 footage. Its matrices come from published primaries.
 
 ## Now: end of Phase 5, start of Phase 6
 
@@ -89,9 +89,9 @@ Run these in order. The owner has limited time, so short tests come first, and t
 5. **Gyroflow:** load a handheld clip with its `.gcsv` and check the picture steadies instead of shaking more. The orientation `yXZ` is derived from the sensor's layout, because Gyroflow's docs only define it in a figure, and my reading of its axes is from memory. If it shakes more, Gyroflow's **IMU Orientation** field tries others without a new build. Report which works, so `GyroLog.orientation` can change.
 6. **Gyro cost:** does a 2-minute take with **Save gyro data** on show the same `DROP` as one with it off?
 7. **Decimal frame rates:** does a 2-minute take at 23.98 and at 29.97 show no `DROP`? The `Frame timing:` log line shows what the sensor accepted, and the take's **Details** shows the measured rate. Files use each frame's real capture time, not a fixed grid, so check what an editor reports for them.
-8. **180° button:** on the shutter dial. It sets twice the frame rate and locks exposure.
+8. **180° button:** on the shutter dial. It sets twice the frame rate and locks exposure. Change **FPS** afterward and the shutter should follow.
 9. **Uncompressed audio:** does a 2-minute take have clean sound and no `DROP`? The writer converts the microphone to 24-bit, 48 kHz.
-10. **Native gamut:** with S-Log3 or LogC3 and **Native gamut** on, does the viewfinder look unchanged while the file reads correctly when graded as S-Gamut3 or AWG3?
+10. **Color space:** in Settings under Image, pick S-Gamut3 or ARRI Wide Gamut 3. Does the curve change to match, does the viewfinder look unchanged, and does the file read correctly when graded that way? Choosing Apple Log in the format panel should show Rec.2020 here.
 11. **10-minute test:** switch **Pipeline** to **Maximum quality**, then record 10 minutes at 30 fps, hands-off. Check `missed` and `gap` on the result line.
 
 For vignette correction, also ask for a short RAW clip's `reference.dng` and `reference_metadata.json`. Turn off **Encode video** in Diagnostics to record one.
@@ -99,7 +99,7 @@ For vignette correction, also ask for a short RAW clip's `reference.dng` and `re
 ### Phase 6 so far
 
 - **Built:** frame rates, gyro logging, the 180° button, PCM audio and native gamuts.
-- **Native gamut:** `Gamut.fromRec2020` builds each matrix from published primaries, and the pipeline multiplies it after the DNG matrix, which adds no GPU work. The Rec.709 monitor LUT and still export follow the setting. Sidecars and `still.json` name the gamut, and the file's own tag stays nominal Rec.2020 because it can't name these gamuts. The `.cube` conversion LUTs receive the recorded gamut, and stills keep the file name `log_rec2020.png` either way.
+- **Color space:** a picker in Settings under Image, always shown. Each choice names what it pairs with, so Apple Log's lack of a gamut of its own shows by omission. Choosing a gamut other than Rec.2020 sets its curve. The saved `nativeGamut` setting then follows the curve: Apple Log falls back to Rec.2020, and S-Log3 or LogC3 return to their own gamut. `Gamut.fromRec2020` builds each matrix from published primaries, and the pipeline multiplies it after the DNG matrix, which adds no GPU work. The Rec.709 monitor LUT and still export follow the setting. Sidecars and `still.json` name the gamut, and the file's own tag stays nominal Rec.2020 because it can't name these gamuts. The `.cube` conversion LUTs receive the recorded gamut, and stills keep the file name `log_rec2020.png` either way.
 - **Needs samples first:** vignette correction needs a real `reference.dng` to find the `FixVignetteRadial` values, and highlight reconstruction needs clips with clipped highlights. Color accuracy needs a chart. Any real-time GPU work then needs a frame-cost test.
 - **Needs the phone:** lens tests, the stabilization check and focus while recording.
 - **Not started:** shutter priority, which needs an ISO loop during capture and its own frame-cost test, auto exposure with an EV slider, external microphones and file tagging options.
@@ -122,7 +122,7 @@ For vignette correction, also ask for a short RAW clip's `reference.dng` and `re
 - **Focus peaking:** a `Tool` that marks fine detail in cyan on the monitor, with four extra texture reads per drawable pixel while it's on. Its neighbors are fixed at about three sensor pixels, so punching in doesn't weaken it.
 - **Mic meter:** the bar moves about twelve times a second by writing to Core Animation layers from the audio queue, so it skips the main thread. Its dB number updates once a second. Green runs to -12 dB, yellow to -3 dB, then red.
 - **Gyro log:** with **Save gyro data** on, which is the default, each encoded take gets a `.gcsv` of the same name in `videos/`, from `CMDeviceMotion` at 100 Hz, the most the phone delivered when asked for 200, on its own utility queue. A 5-second sample was evenly spaced with sensible units, but began 0.14 seconds after the first frame, because motion updates take that long to start, so a take's first frames have no gyro data. Time zero is the first frame, on the same clock as frame timestamps, and the file is flushed once a second. Rotation is CoreMotion's bias-corrected rate. RAW dumps get none. Share sends it with the video, and delete removes it.
-- **Settings:** one searchable page ordered by use, shown as a sheet. Format changes link to the panel. Presets save every format column plus pipeline, debayer, exposure offset and native gamut, inside `VibeLog.config.json`. **Uncompressed audio** records 24-bit PCM instead of AAC, which stays the default until it's tested. The volume buttons toggle recording on iOS 18 and later.
+- **Settings:** one searchable page ordered by use, shown as a sheet. Format changes link to the panel. Presets save every format column plus pipeline, debayer, exposure offset and color space, inside `VibeLog.config.json`. **Uncompressed audio** records 24-bit PCM instead of AAC, which stays the default until it's tested. The volume buttons toggle recording on iOS 18 and later.
 
 Diagnostics opens with a long press on **Version** in Settings.
 

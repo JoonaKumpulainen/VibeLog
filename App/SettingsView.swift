@@ -79,8 +79,9 @@ struct SettingsView: View {
     private static let pauseTerms = "pause viewfinder monitor off gpu recording"
     private static let viewfinderTerms = [lookTerms, lutTerms, pauseTerms].joined(separator: " ")
     private static let offsetTerms = "exposure offset stops brightness baked"
-    private static let processingTerms = "pipeline debayer demosaic color space gamut native s-gamut3 arri wide rec.2020 quality processing"
-    private static let imageTerms = offsetTerms + " " + processingTerms
+    private static let gamutTerms = "color colour space gamut native s-gamut3 s-log3 arri wide logc3 awg3 rec.2020"
+    private static let processingTerms = "pipeline debayer demosaic quality processing"
+    private static let imageTerms = [offsetTerms, gamutTerms, processingTerms].joined(separator: " ")
 
     /// Every word typed has to appear, so a phrase can come in any order.
     private func matches(_ terms: String) -> Bool {
@@ -248,6 +249,13 @@ struct SettingsView: View {
         }
     }
 
+    private var gamutDetail: String {
+        guard let curve = model.processing.gamut.curve else {
+            return "Every log curve can record this. Other gamuts need their own curve."
+        }
+        return "Sets the log curve to \(curve.label), which this gamut belongs to."
+    }
+
     private var imageSection: some View {
         Section("Image") {
             if matches(Self.offsetTerms) {
@@ -258,6 +266,13 @@ struct SettingsView: View {
                     Slider(value: $model.processing.exposureStops, in: -3...3, step: 0.1)
                         .accessibilityLabel("Exposure offset")
                         .accessibilityValue(String(format: "%+.1f stops", model.processing.exposureStops))
+                }
+            }
+            if matches(Self.gamutTerms) {
+                Picker(selection: $model.processing.gamut) {
+                    ForEach(Gamut.allCases) { Text($0.pairedLabel).tag($0) }
+                } label: {
+                    explained("Color space", gamutDetail)
                 }
             }
             if matches(Self.processingTerms) {
@@ -275,12 +290,6 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var processingRows: some View {
-        LabeledContent("Color space", value: model.processing.gamut.label)
-        if model.processing.curve.nativeGamut != .rec2020 {
-            Toggle(isOn: $model.processing.nativeGamut) {
-                explained("Native gamut", "Records \(model.processing.curve.nativeGamut.label) to match the curve's own cameras.")
-            }
-        }
         Picker(selection: $model.processing.pipeline) {
             ForEach(PipelineMode.allCases) { Text($0.label).tag($0) }
         } label: {

@@ -95,7 +95,7 @@ The rule for this phase: anything that adds to real-time GPU load must prove it 
 - **Exposure modes:** a 180-degree button, lock at start and auto during a take are in. Shutter priority and auto exposure with an EV slider are left.
 - **Focus while recording:** test whether focus can change during capture.
 - **Audio:** PCM recording and level meters are in, with PCM untested. External microphones are left.
-- **Native gamuts:** S-Gamut3 and ARRI Wide Gamut 3 are in, as a setting. Options for how the file is tagged are left.
+- **Native gamuts:** S-Gamut3 and ARRI Wide Gamut 3 are in, as a color space picker that sets the curve. Options for how the file is tagged are left.
 - **Color accuracy:** measure against a chart, and confirm the exposure default.
 - **Lenses:** test recording on the ultra wide and tele, each with its own calibration.
 

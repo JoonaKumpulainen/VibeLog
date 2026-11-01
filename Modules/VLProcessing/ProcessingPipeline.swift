@@ -77,7 +77,7 @@ public struct ProcessingSettings: Equatable, Sendable {
     /// Look LUTs expect Rec.709; conversion LUTs expect the log image.
     public var lutExpectsRec709 = false
     public var curve = LogCurve.appleLog
-    /// Records the curve's own gamut instead of Rec.2020.
+    /// Records the curve's own gamut, when it has one, instead of Rec.2020.
     public var nativeGamut = false
     public var demosaic = DemosaicMethod.malvar
     public var monitor = MonitorMode.rec709
@@ -85,7 +85,14 @@ public struct ProcessingSettings: Equatable, Sendable {
     /// so -0.5 stops places it near 0.18. This is from a single measurement.
     public var exposureStops = -0.5
 
-    public var gamut: Gamut { nativeGamut ? curve.nativeGamut : .rec2020 }
+    /// Choosing a gamut other than Rec.2020 also chooses its curve.
+    public var gamut: Gamut {
+        get { nativeGamut ? curve.nativeGamut : .rec2020 }
+        set {
+            nativeGamut = newValue != .rec2020
+            if let paired = newValue.curve { curve = paired }
+        }
+    }
 
     public init() {}
 }
