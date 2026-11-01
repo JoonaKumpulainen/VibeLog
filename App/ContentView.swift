@@ -1,4 +1,3 @@
-import AVKit
 import SwiftUI
 import VLCapture
 import VLProcessing
@@ -78,7 +77,7 @@ struct CameraScreen: View {
             set: { if !$0 { model.closeLastTake() } }
         )) {
             if let url = model.playingTake {
-                TakePlayer(url: url)
+                TakeCover(url: url)
             }
         }
     }
@@ -140,6 +139,10 @@ struct CameraScreen: View {
                     .gesture(SpatialTapGesture().onEnded { tap($0.location, in: geometry.size) })
                     .simultaneousGesture(pictureDrag(in: geometry.size))
                     .simultaneousGesture(lensPinch)
+                    .accessibilityElement()
+                    .accessibilityLabel("Viewfinder")
+                    .accessibilityHint("Tap to focus and meter")
+                    .accessibilityAddTraits(.allowsDirectInteraction)
                 if let focusMark {
                     FocusMark(bias: model.exposureBias, showsBias: !model.exposureLocked)
                         .turnedToHold()
@@ -414,6 +417,7 @@ struct CameraHUD: View {
             .buttonStyle(.plain)
             .disabled(model.isBusy != nil)
             .accessibilityLabel("Play last take")
+            .accessibilityHint("Opens the takes")
         } else {
             Color.clear
         }
@@ -799,6 +803,7 @@ struct FormatWheel<Value: Hashable>: View {
     @Binding var selection: Value
     let label: (Value) -> String
     let hold: Hold
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var centered: Value?
 
     init(
@@ -847,7 +852,7 @@ struct FormatWheel<Value: Hashable>: View {
     private func choice(_ option: Value) -> some View {
         let isOn = option == centered
         return Button {
-            withAnimation(.spring(duration: 0.3, bounce: 0.1)) { centered = option }
+            withAnimation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.1)) { centered = option }
         } label: {
             Text(label(option))
                 .font(Tokens.statusFont)
@@ -909,6 +914,9 @@ struct FormatPanel: View {
             FormatWheel(title: "ASPECT", options: [false, true], selection: $model.widescreen, hold: hold) {
                 $0 ? "16:9" : "4:3"
             }
+            FormatWheel(title: "FPS", options: AppModel.frameRates, selection: $model.frameRate, hold: hold) {
+                "\(Int($0))"
+            }
         }
         .background(alignment: .bottom) {
             // The band every column's choice sits in.
@@ -945,32 +953,6 @@ struct FormatPanel: View {
     }
 }
 
-/// Plays a take full screen. The clip carries its own rotation.
-struct TakePlayer: View {
-    @Environment(\.dismiss) private var dismiss
-    @State private var player: AVPlayer
-
-    init(url: URL) {
-        _player = State(initialValue: AVPlayer(url: url))
-    }
-
-    var body: some View {
-        VideoPlayer(player: player)
-            .ignoresSafeArea()
-            .overlay(alignment: .topLeading) {
-                Button("Done") { dismiss() }
-                    .font(Tokens.valueFont)
-                    .foregroundStyle(Tokens.value)
-                    .frame(minWidth: 64, minHeight: 44)
-                    .background(Tokens.opaquePanel, in: RoundedRectangle(cornerRadius: Tokens.panelRadius))
-                    .padding(12)
-            }
-            .background(Color.black)
-            .onAppear { player.play() }
-            .onDisappear { player.pause() }
-    }
-}
-
 struct FocusMark: View {
     let bias: Float
     let showsBias: Bool
@@ -991,6 +973,7 @@ struct FocusMark: View {
 }
 
 struct RecordButton: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let isRecording: Bool
     let action: () -> Void
 
@@ -1005,7 +988,7 @@ struct RecordButton: View {
             }
             .frame(width: CameraGeometry.recordDepth, height: CameraGeometry.recordDepth)
             .contentShape(Circle())
-            .animation(.easeOut(duration: 0.15), value: isRecording)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isRecording)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(isRecording ? "Stop recording" : "Record")

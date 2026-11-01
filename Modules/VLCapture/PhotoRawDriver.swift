@@ -19,8 +19,8 @@ final class PhotoRawDriver: NSObject {
     private let bracketCount: Int
     private let queue = DispatchQueue(label: "vibelog.photo-loop", qos: .userInitiated)
     private let maxInFlight = 4
-    /// Keeps requests from outrunning the 30 fps sensor when several events trigger one.
-    private let minimumRequestInterval = 0.030
+    /// Keeps requests from outrunning the sensor when several events trigger one.
+    private let minimumRequestInterval: Double
 
     private var running = false
     private var inFlight = 0
@@ -34,7 +34,7 @@ final class PhotoRawDriver: NSObject {
 
     init(
         output: AVCapturePhotoOutput, device: AVCaptureDevice, method: CaptureMethod,
-        rawFormat: OSType, size: PhotoSize, bracketCount: Int
+        rawFormat: OSType, size: PhotoSize, bracketCount: Int, frameRate: Double
     ) {
         self.output = output
         self.device = device
@@ -42,6 +42,7 @@ final class PhotoRawDriver: NSObject {
         self.rawFormat = rawFormat
         self.size = size
         self.bracketCount = bracketCount
+        minimumRequestInterval = 0.9 / frameRate
     }
 
     func start() {

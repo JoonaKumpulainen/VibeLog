@@ -56,6 +56,8 @@ public struct CaptureConfig: Sendable {
     public var photoSize: PhotoSize?
     public var videoPixelFormat: OSType?
     public var videoFPS: Double
+    /// Photo methods only: the sensor's rate.
+    public var frameRate: Double
     public var bracketCount: Int
     /// Photo methods only: lets the Photo preset pick the format and ignores `formatIndex`.
     public var usePhotoPreset: Bool
@@ -63,7 +65,7 @@ public struct CaptureConfig: Sendable {
     public init(
         lensID: String, formatIndex: Int, method: CaptureMethod, rawPixelFormat: OSType? = nil,
         photoSize: PhotoSize? = nil, videoPixelFormat: OSType? = nil, videoFPS: Double = 30,
-        bracketCount: Int = 3, usePhotoPreset: Bool = true
+        frameRate: Double = 30, bracketCount: Int = 3, usePhotoPreset: Bool = true
     ) {
         self.lensID = lensID
         self.formatIndex = formatIndex
@@ -72,6 +74,7 @@ public struct CaptureConfig: Sendable {
         self.photoSize = photoSize
         self.videoPixelFormat = videoPixelFormat
         self.videoFPS = videoFPS
+        self.frameRate = frameRate
         self.bracketCount = bracketCount
         self.usePhotoPreset = usePhotoPreset
     }
@@ -88,6 +91,8 @@ public struct CaptureOptions: Sendable {
     public var isoRange: ClosedRange<Float> = 1...1
     public var shutterRange: ClosedRange<Double> = 1 / 8000...1
     public var maxWhiteBalanceGain: Float = 1
+    /// The requested rate wasn't on offer, so the session stayed at 30 fps.
+    public var frameRateUnavailable = false
 }
 
 /// What the camera is doing now, so the interface can show it and lock to it.

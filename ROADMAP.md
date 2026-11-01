@@ -8,7 +8,7 @@
 | 2 | GPU debayer, color and log curves | Done |
 | 3 | ProRes and HEVC encoding with audio | Done: ProRes 422 HQ at 4032x3024 |
 | 4 | Heat, crop, exposure tools, LUT import | Done: 10 minutes at 30 fps |
-| 5 | Camera experience redesign | In progress |
+| 5 | Camera experience redesign | Built, phone tests remaining |
 | 6 | Image quality and capture | Planned |
 | 7 | Shooting tools | Planned |
 | 8 | On-phone finishing | Planned |
@@ -87,12 +87,12 @@ The screen design should leave room for the tools in Phases 6 and 7.
 
 The rule for this phase: anything that adds to real-time GPU load must prove it doesn't cost frames or shorten recording.
 
-- **24 and 25 fps:** test whether the sensor mode runs at these rates under the Photo preset. RAW Cam offers 18, 24, 25 and 30 fps.
+- **24 and 25 fps:** added to the format panel, not yet proven on the phone under the Photo preset. RAW Cam offers 18, 24, 25 and 30 fps.
 - **Highlight reconstruction:** rebuild clipped green from red and blue, which still hold data above the point where green saturates. This could recover some highlight range that is currently clipped.
 - **Vignette correction:** apply the `FixVignetteRadial` values already found in the photo metadata.
 - **Gyro logging:** record CoreMotion data at high rate and save a Gyroflow `.gcsv` next to each clip. This costs little and can land early.
 - **Stabilization check:** find out whether optical stabilization is active during RAW capture, and how it affects gyro stabilization.
-- **Exposure modes:** 180-degree shutter, shutter priority, auto exposure with an EV slider, and lock at start.
+- **Exposure modes:** 180-degree shutter, shutter priority and auto exposure with an EV slider. Lock at start, or auto during a take, is a setting.
 - **Focus while recording:** test whether focus can change during capture.
 - **Audio:** PCM recording, level meters and external microphones.
 - **Native gamuts:** S-Gamut3 and ARRI Wide Gamut for S-Log3 and LogC3, plus options for how the file is tagged.

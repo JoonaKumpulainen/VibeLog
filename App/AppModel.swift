@@ -126,13 +126,24 @@ final class AppModel: ObservableObject {
     @Published private(set) var focusHeldForTake = false
     @Published private(set) var exposureHeldForTake = false
     @Published private(set) var whiteBalanceHeldForTake = false
-    /// Freezes exposure and white balance as a take starts. Focus always holds.
+    /// Freezes exposure and white balance as a take starts. Off, auto keeps running during the
+    /// take. Focus always holds.
     @Published var lockAtRoll = true
+    @Published var presets: [FormatPreset] = []
 
     var shutterLabel: String { "1/\(Int(pow(2, shutterStops).rounded()))" }
 
-    /// The capture rate. Only 30 fps is proven so far.
-    let frameRate = 30.0
+    static let frameRates = [24.0, 25.0, 30.0]
+
+    /// The capture rate. Only 30 fps is proven so far. A slower shutter than one frame can't last
+    /// past a change.
+    @Published var frameRate = 30.0 {
+        didSet {
+            guard frameRate != oldValue else { return }
+            shutterStops = max(shutterStops, log2(frameRate))
+            reconfigure()
+        }
+    }
 
     private enum Control { case exposure, bias, whiteBalance, focus }
 
@@ -322,6 +333,7 @@ final class AppModel: ObservableObject {
         config.codec = encoderPreset.id
         config.size = encoderSize.label
         config.widescreen = widescreen
+        config.frameRate = frameRate
         config.stopAfterSeconds = recordSeconds
         config.logCurve = processing.curve.label
         config.pipeline = processing.pipeline.rawValue
@@ -337,6 +349,7 @@ final class AppModel: ObservableObject {
         config.mainsHz = mainsHz
         config.toolbar = toolbar.map(\.rawValue)
         config.activeTools = activeTools.map(\.rawValue).sorted()
+        config.presets = presets
         return config
     }
 
@@ -355,6 +368,7 @@ final class AppModel: ObservableObject {
         encoderPreset = EncoderPreset.all.first { $0.id == loaded.codec } ?? encoderPreset
         encoderSize = EncoderSize.all.first { $0.label == loaded.size } ?? encoderSize
         widescreen = loaded.widescreen
+        frameRate = Self.frameRates.contains(loaded.frameRate) ? loaded.frameRate : frameRate
         recordSeconds = loaded.stopAfterSeconds
         processing.curve = LogCurve.allCases.first { $0.label == loaded.logCurve } ?? processing.curve
         processing.pipeline = PipelineMode(rawValue: loaded.pipeline) ?? processing.pipeline
@@ -370,7 +384,42 @@ final class AppModel: ObservableObject {
         mainsHz = loaded.mainsHz
         toolbar = loaded.toolbar.compactMap(Tool.init(rawValue:))
         activeTools = Set(loaded.activeTools.compactMap(Tool.init(rawValue:)))
+        presets = loaded.presets
         savedConfig = config
+    }
+
+    private func preset(named name: String) -> FormatPreset {
+        FormatPreset(
+            name: name, codec: encoderPreset.id, size: encoderSize.label, widescreen: widescreen,
+            frameRate: frameRate, logCurve: processing.curve.label,
+            pipeline: processing.pipeline.rawValue, debayer: processing.demosaic.label,
+            exposureOffset: processing.exposureStops)
+    }
+
+    /// A name already in use takes the new choices.
+    func savePreset(named name: String) {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        if let index = presets.firstIndex(where: { $0.name == name }) {
+            presets[index] = preset(named: name)
+        } else {
+            presets.append(preset(named: name))
+        }
+    }
+
+    func isCurrent(_ saved: FormatPreset) -> Bool { saved == preset(named: saved.name) }
+
+    /// A choice this version no longer has stays as it is.
+    func apply(_ saved: FormatPreset) {
+        guard !isRecording else { return }
+        encoderPreset = EncoderPreset.all.first { $0.id == saved.codec } ?? encoderPreset
+        encoderSize = EncoderSize.all.first { $0.label == saved.size } ?? encoderSize
+        widescreen = saved.widescreen
+        if Self.frameRates.contains(saved.frameRate) { frameRate = saved.frameRate }
+        processing.curve = LogCurve.allCases.first { $0.label == saved.logCurve } ?? processing.curve
+        processing.pipeline = PipelineMode(rawValue: saved.pipeline) ?? processing.pipeline
+        processing.demosaic = DemosaicMethod.allCases.first { $0.label == saved.debayer } ?? processing.demosaic
+        processing.exposureStops = saved.exposureOffset
     }
 
     /// Writes only after a change, and never during a take.
@@ -425,7 +474,7 @@ final class AppModel: ObservableObject {
     private var minutesLeft: Int? {
         let measured = ["prores422hq": 167.0, "prores4444": 240.0][encoderPreset.id]
         guard let measured else { return nil }
-        let share = Double(outputSize.width * outputSize.height) / (4032 * 3024)
+        let share = Double(outputSize.width * outputSize.height) / (4032 * 3024) * frameRate / 30
         return Int(Double(usableGB) * 1000 / (measured * share) / 60)
     }
 
@@ -470,6 +519,7 @@ final class AppModel: ObservableObject {
     /// A short message over the controls, gone after a few seconds.
     func showNotice(_ text: String, seconds: Double = 3) {
         notice = text
+        UIAccessibility.post(notification: .announcement, argument: text)
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
             if self?.notice == text { self?.notice = nil }
         }
@@ -608,6 +658,7 @@ final class AppModel: ObservableObject {
         fullView = false
         takeAlert = TakeAlert(
             title: "Recording stopped", detail: "\(reason) Stopped at \(timecodeLabel).")
+        UIAccessibility.post(notification: .announcement, argument: "Recording stopped. \(reason)")
     }
 
     /// Playing ProRes while the camera runs would add heat to the next take.
@@ -628,6 +679,18 @@ final class AppModel: ObservableObject {
         guard resumeAfterPlayback else { return }
         resumeAfterPlayback = false
         if !isStreaming { toggleStream() }
+    }
+
+    func delete(_ take: Take) {
+        do {
+            try TakeLibrary.delete(take)
+            Log.shared.info("Deleted \(take.url.lastPathComponent)")
+        } catch {
+            Log.shared.error("Cannot delete \(take.url.lastPathComponent): \(error)")
+        }
+        guard lastTake?.url == take.url else { return }
+        lastTake = nil
+        loadLastTake()
     }
 
     /// Names sort by time.
@@ -727,7 +790,7 @@ final class AppModel: ObservableObject {
             lensID: lensID, formatIndex: formatIndex, method: method,
             rawPixelFormat: rawFormat == 0 ? nil : rawFormat, photoSize: photoSize,
             videoPixelFormat: videoFormat == 0 ? nil : videoFormat, videoFPS: videoFPS,
-            bracketCount: bracketCount, usePhotoPreset: usePhotoPreset)
+            frameRate: frameRate, bracketCount: bracketCount, usePhotoPreset: usePhotoPreset)
         camera.configure(config) { [self] options in
             guard let options else { return }
             adopt(options)
@@ -748,6 +811,10 @@ final class AppModel: ObservableObject {
         videoFormat = options.config.videoPixelFormat ?? 0
         bracketCount = options.config.bracketCount
         iso = min(max(iso, options.isoRange.lowerBound), options.isoRange.upperBound)
+        if options.frameRateUnavailable, options.config.frameRate != frameRate {
+            showNotice("\(Int(frameRate)) fps isn't available on this lens", seconds: 4)
+            frameRate = options.config.frameRate
+        }
         applyingOptions = false
     }
 
@@ -772,7 +839,7 @@ final class AppModel: ObservableObject {
     }
 
     /// Refocusing during a take can cost frames, and white balance is baked into the file. Values
-    /// the owner set are already still.
+    /// the owner set are already still. Auto exposure and white balance are the owner's choice.
     private func holdForTake() {
         if !focusLocked, !focusTapped {
             focusHeldForTake = true
@@ -862,10 +929,13 @@ final class AppModel: ObservableObject {
         }
         let name = "video_\(Storage.timestamp())"
         let url = Storage.videos.appendingPathComponent(name + ".mov")
-        let metadata = [
+        let metadata: [String: String] = [
             "curve": processing.curve.label, "gamut": "Rec.2020",
             "matrix": "Rec.2020 non-constant luminance, video range",
             "exposureStops": String(processing.exposureStops),
+            "frameRate": String(Int(frameRate)),
+            "exposureDuringTake": exposureLocked ? "manual" : lockAtRoll ? "frozen at start" : "auto",
+            "whiteBalanceDuringTake": whiteBalanceLocked ? "manual" : lockAtRoll ? "frozen at start" : "auto",
             "aspect": widescreen ? "16:9 center crop" : "4:3 open gate",
             "pipeline": processing.pipeline.label,
             "orientation": hold.hold.label,
@@ -874,7 +944,8 @@ final class AppModel: ObservableObject {
         ]
         do {
             let encoder = try VideoEncoder(config: .init(
-                url: url, preset: encoderPreset, size: outputSize, audio: true, metadata: metadata,
+                url: url, preset: encoderPreset, size: outputSize, frameRate: frameRate, audio: true,
+                metadata: metadata,
                 rotationDegrees: hold.hold.clipRotation))
             audio.onSample = { [weak encoder] sample in encoder?.appendAudio(sample) }
             audioPeak = 0
@@ -900,7 +971,7 @@ final class AppModel: ObservableObject {
             recordingFile = url
             isRecording = true
             let seconds = recordSeconds
-            Log.shared.info("Encoding \(name): \(encoderPreset.label) \(outputSize.label), \(processing.curve.label), \(processing.pipeline.label) pipeline, \(seconds > 0 ? "\(seconds)s" : "until stopped"), battery \(SystemStatus.batteryText), thermal \(SystemStatus.thermalName), free \(SystemStatus.freeDisk / 1_000_000_000) GB")
+            Log.shared.info("Encoding \(name): \(encoderPreset.label) \(outputSize.label) at \(Int(frameRate)) fps, exposure \(metadata["exposureDuringTake"] ?? "?"), white balance \(metadata["whiteBalanceDuringTake"] ?? "?"), \(processing.curve.label), \(processing.pipeline.label) pipeline, \(seconds > 0 ? "\(seconds)s" : "until stopped"), battery \(SystemStatus.batteryText), thermal \(SystemStatus.thermalName), free \(SystemStatus.freeDisk / 1_000_000_000) GB")
             guard seconds > 0 else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self, weak encoder] in
                 guard let self, let encoder, self.activeEncoder === encoder else { return }
@@ -1047,9 +1118,10 @@ final class AppModel: ObservableObject {
                 ticksSinceReport = 0
                 let capture = router.latestCapture
                 let line = String(
-                    format: "Recording: %.2f fps now, n=%d, fail %d, writer drops %d, 1/%.0f s ISO %.0f, gpu %d done %d dropped %.1f recent %.1f max ms, mem %d MB, avail %d MB, thermal %@, free %d GB, battery %@",
+                    format: "Recording: %.2f fps now, n=%d, fail %d, writer drops %d, 1/%.0f s ISO %.0f, gains %@, gpu %d done %d dropped %.1f recent %.1f max ms, mem %d MB, avail %d MB, thermal %@, free %d GB, battery %@",
                     stats.rollingFPS, stats.frames, stats.captureFailures, stats.writerDrops,
                     capture.exposureSeconds > 0 ? 1 / capture.exposureSeconds : 0, capture.iso,
+                    capture.gains.map { String(format: "%.2f", $0) }.joined(separator: "/"),
                     gpu.processed, gpu.dropped, gpu.gpuRecentMs, gpu.gpuMaxMs,
                     status.footprintMB, status.availableMB,
                     status.thermal, status.freeDiskGB, status.battery)

@@ -89,6 +89,7 @@ struct ActionCell: View {
 struct ControlPanels: View {
     @EnvironmentObject private var model: AppModel
     @AppStorage("fineDial") private var fine = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsTint = false
     @Binding var selected: ControlDial?
     let hold: Hold
@@ -131,7 +132,7 @@ struct ControlPanels: View {
             return
         }
         showsTint = false
-        withAnimation(.easeOut(duration: 0.15)) {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) {
             selected = selected == control ? nil : control
         }
     }
@@ -213,14 +214,15 @@ struct ControlPanels: View {
 
     private func dialPanel(_ control: ControlDial) -> some View {
         let tinted = isShowingTint(control)
+        // One tap here would return to auto mid-shot, unless auto is allowed during a take.
+        let hidesAuto = model.isRecording && model.lockAtRoll
         return HStack(spacing: 4) {
             trayButton("AUTO", isOn: !isHeld(control), label: "Auto \(name(control))") {
                 toggleLock(control)
             }
-            // One tap here would return to auto mid-shot.
-            .disabled(model.isRecording)
-            .opacity(model.isRecording ? 0 : 1)
-            .accessibilityHidden(model.isRecording)
+            .disabled(hidesAuto)
+            .opacity(hidesAuto ? 0 : 1)
+            .accessibilityHidden(hidesAuto)
             Dial(
                 stops: tinted ? tintStops : stops(control),
                 value: tinted ? tintBinding : binding(control), labelAngle: hold.angle,

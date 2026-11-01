@@ -35,7 +35,7 @@ public struct EncoderPreset: Identifiable, Hashable, Sendable {
             pixelFormat: kCVPixelFormatType_444YpCbCr10BiPlanarVideoRange, profile: nil, bitrate: nil),
     ]
 
-    func outputSettings(width: Int, height: Int) -> [String: Any] {
+    func outputSettings(width: Int, height: Int, frameRate: Double = 30) -> [String: Any] {
         var settings: [String: Any] = [
             AVVideoCodecKey: codec,
             AVVideoWidthKey: width,
@@ -50,7 +50,7 @@ public struct EncoderPreset: Identifiable, Hashable, Sendable {
         if let bitrate {
             var compression: [String: Any] = [
                 AVVideoAverageBitRateKey: bitrate,
-                AVVideoExpectedSourceFrameRateKey: 30,
+                AVVideoExpectedSourceFrameRateKey: frameRate,
                 AVVideoAllowFrameReorderingKey: false,
             ]
             if let profile { compression[AVVideoProfileLevelKey] = profile }

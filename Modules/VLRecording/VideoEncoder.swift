@@ -9,6 +9,8 @@ public final class VideoEncoder: VideoFrameSink {
         public var url: URL
         public var preset: EncoderPreset
         public var size: EncoderSize
+        /// The rate the codec plans for. Timing comes from each frame's own timestamp.
+        public var frameRate: Double
         public var audio: Bool
         /// Real-time mode drops frames when busy; benchmarks turn it off and wait instead.
         public var realTime: Bool
@@ -17,12 +19,13 @@ public final class VideoEncoder: VideoFrameSink {
         public var rotationDegrees: Int
 
         public init(
-            url: URL, preset: EncoderPreset, size: EncoderSize, audio: Bool, realTime: Bool = true,
-            metadata: [String: String] = [:], rotationDegrees: Int = 0
+            url: URL, preset: EncoderPreset, size: EncoderSize, frameRate: Double = 30, audio: Bool,
+            realTime: Bool = true, metadata: [String: String] = [:], rotationDegrees: Int = 0
         ) {
             self.url = url
             self.preset = preset
             self.size = size
+            self.frameRate = frameRate
             self.audio = audio
             self.realTime = realTime
             self.metadata = metadata
@@ -88,7 +91,8 @@ public final class VideoEncoder: VideoFrameSink {
         // Long recordings stay playable up to the last fragment if the app is killed.
         writer.movieFragmentInterval = CMTime(seconds: 10, preferredTimescale: 600)
 
-        let settings = config.preset.outputSettings(width: config.size.width, height: config.size.height)
+        let settings = config.preset.outputSettings(
+            width: config.size.width, height: config.size.height, frameRate: config.frameRate)
         guard writer.canApply(outputSettings: settings, forMediaType: .video) else {
             throw Failure.unsupportedSettings
         }

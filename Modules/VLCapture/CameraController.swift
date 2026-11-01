@@ -95,6 +95,10 @@ public final class CameraController: NSObject {
             }
             if var options, let device {
                 Log.shared.info("Streaming with \(options.config.method.label)")
+                Log.shared.info(
+                    "Frame timing: \(CMTimeGetSeconds(device.activeVideoMinFrameDuration)) to "
+                        + "\(CMTimeGetSeconds(device.activeVideoMaxFrameDuration)) s, "
+                        + "auto exposure limit \(CMTimeGetSeconds(device.activeMaxExposureDuration)) s")
                 if options.config.method.isPhoto, photoDriver == nil {
                     configurePhoto(device: device, options: &options)
                     self.options = options
@@ -361,6 +365,7 @@ public final class CameraController: NSObject {
 
         Log.shared.info("Format: \(format.description)")
         if requested.method.isPhoto {
+            applyFrameRate(device: device, format: format, options: &options)
             configurePhoto(device: device, options: &options)
         } else {
             configureVideo(device: device, format: format, options: &options)
@@ -374,6 +379,41 @@ public final class CameraController: NSObject {
         pressureObservation = device.observe(\.systemPressureState, options: [.new]) { device, _ in
             let state = device.systemPressureState
             Log.shared.warn("Camera pressure \(state.level.rawValue), factors \(state.factors.rawValue)")
+        }
+    }
+
+    /// Keeps auto exposure inside one frame time, so a dark scene can't slow a take. 30 fps leaves
+    /// the rest of the sensor's timing as the long runs proved it.
+    private func applyFrameRate(
+        device: AVCaptureDevice, format: AVCaptureDevice.Format, options: inout CaptureOptions
+    ) {
+        let wanted = options.config.frameRate
+        let isOffered = format.videoSupportedFrameRateRanges.contains {
+            $0.minFrameRate <= wanted && wanted <= $0.maxFrameRate
+        }
+        let fps = isOffered ? wanted : 30
+        if !isOffered {
+            Log.shared.warn("\(wanted) fps is not offered by this format")
+            options.frameRateUnavailable = true
+        }
+        options.config.frameRate = fps
+        let frameTime = CMTime(value: 1000, timescale: CMTimeScale(fps * 1000))
+        do {
+            try device.lockForConfiguration()
+            // The longest duration goes first, because the shortest can't pass it.
+            let exception = VLTryCatch {
+                if fps < 30 {
+                    device.activeVideoMaxFrameDuration = frameTime
+                    device.activeVideoMinFrameDuration = frameTime
+                }
+                device.activeMaxExposureDuration = frameTime
+            }
+            device.unlockForConfiguration()
+            if let exception {
+                Log.shared.error("Frame rate \(fps) rejected: \(exception.reason ?? exception.name.rawValue)")
+            }
+        } catch {
+            Log.shared.error("Frame rate setup failed: \(error.localizedDescription)")
         }
     }
 
@@ -438,7 +478,8 @@ public final class CameraController: NSObject {
 
         let driver = PhotoRawDriver(
             output: output, device: device, method: options.config.method, rawFormat: raw,
-            size: size, bracketCount: options.config.bracketCount)
+            size: size, bracketCount: options.config.bracketCount,
+            frameRate: options.config.frameRate)
         driver.onFrame = { [weak self] in self?.onFrame?($0) }
         driver.onFailure = { [weak self] message, shouldLog in
             if shouldLog { Log.shared.error(message) }

@@ -1,6 +1,13 @@
 import SwiftUI
 
 enum Tokens {
+    /// Lifts a quiet white when Increase Contrast is on.
+    private static func quiet(_ normal: CGFloat, raised: CGFloat) -> Color {
+        Color(uiColor: UIColor { traits in
+            UIColor(white: 1, alpha: traits.accessibilityContrast == .high ? raised : normal)
+        })
+    }
+
     /// Marks values the user is holding.
     static let held = Color(red: 1, green: 0.71, blue: 0.28)
     /// Something that can end or spoil a take.
@@ -9,9 +16,9 @@ enum Tokens {
     static let record = Color(red: 0.91, green: 0.21, blue: 0.17)
     /// The record color, lifted to read as text on black.
     static let recordText = Color(red: 1, green: 0.35, blue: 0.31)
-    static let label = Color.white.opacity(0.62)
+    static let label = quiet(0.62, raised: 0.85)
     static let value = Color(white: 0.95)
-    static let hairline = Color.white.opacity(0.22)
+    static let hairline = quiet(0.22, raised: 0.6)
     static let opaquePanel = Color(white: 0.09)
     /// Behind whatever is selected.
     static let surface = Color(white: 0.16)

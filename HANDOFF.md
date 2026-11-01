@@ -1,6 +1,6 @@
 # VibeLog handoff
 
-For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of the end of Phase 4.
+For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of the end of Phase 5's build work: the library, presets, frame rates and auto during a take are written and need their first phone test.
 
 ## What this is
 
@@ -13,7 +13,7 @@ An iPhone camera app that records full-sensor RAW frames, processes them on the 
 
 - **No Mac:** the owner cannot build locally, and this Linux machine has no Swift or Xcode. Every build runs on GitHub Actions (`macos-26`), and pushes to `main` trigger it. `.md` changes don't build.
 - **Project file:** XcodeGen generates it from `project.yml`. Never hand-write a `.pbxproj`.
-- **After each code change:** push, wait for CI with `gh run watch`, and read the logs until it's green. Then download the artifact with `gh run download` and send the `.ipa` to the owner.
+- **After each code change:** ask the owner before committing, pushing or starting a build. Once they say so, push, wait for CI with `gh run watch`, and read the logs until it's green. Then download the artifact with `gh run download` and send the `.ipa` to the owner.
 - **Reading CI logs:** the test step only keeps its last 60 lines. Use `gh run view <id> --log-failed` and look under `Testing failed:`. The `Executed N tests` line shows totals, including skips.
 - **Install:** the owner sideloads the unsigned `.ipa` with a free Apple ID, using Sideloadly. Don't add anything needing a paid account or special entitlements.
 - **Evidence:** camera behavior is only proven by the phone. Results come back as `logs/session_*.log`, JSON sidecars, screenshots and the owner's observations. Say exactly what to test and what to send. Never claim camera behavior works from CI alone.
@@ -24,13 +24,13 @@ An iPhone camera app that records full-sensor RAW frames, processes them on the 
 
 | Path | Role |
 |---|---|
-| `App/` | SwiftUI UI, `AppModel`, `FrameRouter`, overlay, control panel |
+| `App/` | SwiftUI UI, `AppModel`, `FrameRouter`, camera screen, format panel, library, Settings, Diagnostics, `DesignTokens` |
 | `Modules/VLCore` | Frames, stats, DNG reader, RAW levels, logging, storage, device status, `VideoFrameSink` |
 | `Modules/VLCapture` | Session, photo RAW driver, video driver, manual controls, audio, probe |
 | `Modules/VLProcessing` | Log curves, color math, monitor LUT, `.cube` parser, Metal pipeline, still export, `Shaders.metal` |
-| `Modules/VLRecording` | RAW dump writer, `VideoEncoder`, encoder presets, encoder benchmark |
+| `Modules/VLRecording` | RAW dump writer, `VideoEncoder`, encoder presets, encoder benchmark, `TakeLibrary` |
 | `Modules/ObjCGuard` | Catches Objective-C exceptions from AVFoundation, runtime scan |
-| `Tests/VLTests` | 47 tests, including real GPU tests on the simulator |
+| `Tests/VLTests` | 61 tests, including real GPU tests on the simulator |
 | `tools/inspect_clip.py` | Summarizes a RAW clip and exports a frame |
 
 Modules are dynamic frameworks. Swift is in Swift 5 mode.
@@ -50,6 +50,8 @@ Modules are dynamic frameworks. Swift is in Swift 5 mode.
 - **Storage:** full RAW dumps need 732 MB/s, but the phone sustains about 420 MB/s after about 8 GB. Encoder drops began at about 8 GB free, so recording stops at 10 GB free. Free space must use `volumeAvailableCapacityKey`; the important-usage figure counts purgeable data.
 - **Pipelines:** **Maximum quality** is the default. **Efficient** matches it within one 10-bit code in tests and looked identical to the owner, but one run showed no clear gain, plus more failed photos and memory. It isn't proven better.
 - **Features confirmed:** synced audio, 16:9 crop, zebras, false color and `.cube` import with **LUT made for**.
+- **Redesign:** the owner approved the camera screen after phone testing, apart from the fixes listed under Phase 5. Switching **Full view** five times during a take dropped no frames, and a recording with focus peaking on dropped none.
+- **Mic meter:** the bar reacts to sound, and a take with it showing dropped no frames.
 
 ## Not verified
 
@@ -65,7 +67,44 @@ Modules are dynamic frameworks. Swift is in Swift 5 mode.
 
 ## Now: Phase 5
 
-The owner chose the precision instrument layout from `7f836af` as the base: monospaced values around the picture. Every control keeps its portrait position in every hold and only its contents turn, so nothing covers the picture, and 16:9 narrows the picture inside the 4:3 frame unless **Full view** is on. Controls no longer sit in panels or glass: nothing was ever behind the glass except black, so it added cost and no look. Done so far: layout, orientation tagging, snapping dials with a fine mode, and a saved config. The tray above the control bar shows the tools and lenses, a dial or the **MON** tools, so the control bar always stays. **FORMAT** opens a panel of slidable columns over the control zone, for codec, chroma, size, log curve and aspect, and the slider button opens Settings. The config's `toolbar` and `telemetry` fields are no longer used by the app. Takes freeze focus, and exposure and white balance unless **Freeze exposure at start** is off. Status sits in two mirrored three-line blocks beside the Dynamic Island, each square so it can turn, keeping to its outer corner in every hold. Warnings are filled orange chips. In the control bar, amber means set by the user, an A badge means auto and a lock means frozen for the take. Short notices cover the tool row and control bar for a few seconds, and a take that ends early leaves an orange card until dismissed. The clock and drop count take the two columns right of record in every hold, and the clock shows only the digits in use at the largest size that fits. A persistent EV reading shows beside the tools and taps to reset. The thumbnail left of record plays the newest video and stops the stream while it plays. At 16:9 the tool row offers **Full view**, a 699x393 picture that leaves the 4:3 frame with only a strip beneath it; a stopped take leaves it. Switching it five times during a take dropped no frames on the phone. The WB dial also sets tint, and the focus dial has a punch-in button. Punch-in moves where the existing monitor draw samples, so it adds no GPU work: a third of the picture from the full-size image, close to one sensor pixel per drawable pixel in Maximum quality and half that in Efficient. It opens on the last focus point and drags, including during a take. Focus peaking is a `Tool` that marks fine detail in cyan on the monitor, from four extra texture reads per drawable pixel while it's on. Its neighbors are fixed at about three sensor pixels, so punching in doesn't weaken it. Its threshold of 0.1 on log luma is my own choice and its cost during a take isn't measured. Settings is one searchable page ordered by use, with format changes linking to the panel. New additions follow the design rules in [ROADMAP.md](ROADMAP.md). The tray shows a microphone meter during a take. Its bar moves about twelve times a second by writing to Core Animation layers from the audio queue, so it skips the main thread, and its dB number updates once a second. Green runs to -12 dB, yellow to -3 dB, then red. The audio format is logged at the first take after launch. The bar's cost during a take needs a phone test. The volume buttons toggle recording on iOS 18 and later. `CameraGeometry.topShare` sets the picture's top and bottom edges. That share is an estimate of the Camera app's split, not a measurement. Still to do: 24 and 25 fps, library, accessibility and a 10-minute test. Gyro logging to a Gyroflow `.gcsv` follows as its own change once that test passes. Stage 1 is confirmed on the phone. `VLCapture` gained focus and exposure points, exposure compensation and live values for direct control. Other module code is unchanged.
+New additions follow the design rules in [ROADMAP.md](ROADMAP.md). `CameraGeometry.topShare` sets the picture's top and bottom edges, and that share is an estimate of the Camera app's split, not a measurement. The config's `toolbar` and `telemetry` fields are no longer used by the app.
+
+### Waiting on the phone
+
+None of this has run on a phone, so its first build needs these answers:
+
+- **Frame rates:** does a 2-minute take at 24 and at 25 write that rate with no `DROP`? The `Frame timing:` log line shows what the sensor accepted, and the take's **Details** shows the measured rate. Frame timing below 30 is the first use of `activeVideoMinFrameDuration` under the Photo preset, so check that zero shutter lag and RAW still work there. Also confirm 30 still holds, because auto exposure now has a limit of one frame time at every rate.
+- **Auto during a take:** with the setting on, record 2 minutes while moving between bright and dark. Does `DROP` stay at 0, does the shutter stay at or above the frame rate, and do the file's exposure and color follow the scene smoothly? `Recording:` log lines carry shutter, ISO and gains. Gains are read as each photo arrives, so color may lag exposure by a frame or more.
+- **Library:** browse, play, share and delete. Thumbnails of ProRes at full size may be slow.
+- **Presets:** save, apply, overwrite and swipe to delete, then reopen the app to check they persist.
+- **Accessibility:** a pass with VoiceOver, Increase Contrast and Reduce Motion on.
+- **10-minute test:** 10 minutes in Maximum quality at 30 fps, hands-off. Send the session log and sidecar. It's the last gate before gyro logging.
+- **Peaking:** still unanswered: is it as sensitive punched in as at full view, and does noise make it flicker at high ISO? Its threshold of 0.1 on log luma is my own choice.
+
+### How the camera screen works
+
+- **Layout:** monospaced values around the picture. Every control keeps its portrait position in every hold and only its contents turn. The owner's earlier glass panels are gone: only black was ever behind them, so they added cost and no look.
+- **Status:** two mirrored three-line blocks beside the Dynamic Island. Each is square so it can turn, and keeps to its outer corner in every hold. Warnings are filled orange chips.
+- **Control bar:** ISO, shutter, white balance and focus. Amber means set by the user, an A badge means auto and a lock means frozen for the take.
+- **Tray:** above the control bar, it shows the tools and lenses, a dial or the **MON** tools, so the control bar always stays. During a take the mic meter replaces the lenses.
+- **Dials:** they have **AUTO** and **FINE**. The white balance dial also sets tint, and the focus dial has **PUNCH** and **PEAK**. Shutter angle shows while the shutter dial is open.
+- **Format:** **FORMAT** opens slidable columns for codec, chroma, size, log curve, aspect and frame rate. ProRes has no 4:2:0. Changing frame rate rebuilds the session, unlike the other columns.
+- **Clock:** with the drop count, it takes the two columns right of record in every hold. It shows only the digits in use, at the largest size that fits.
+- **Notices:** short notices cover the tray and control bar for a few seconds, and a tap clears them. A take that ends early leaves an orange card until dismissed.
+- **EV:** an offset stays visible in the tool row, and a tap resets it.
+- **Last take:** the thumbnail left of record plays the newest video and stops the stream until the screen closes. Sound follows the silent switch, because audio session settings were left alone to protect recording.
+- **Library:** back from that player is every take in `videos/`, newest first, with drops marked. Each has **Details** from its sidecar, **Share** and **Delete**, which also removes the sidecar. RAW dumps stay in the Files app.
+- **Full view:** at 16:9 the tool row offers a 699x393 picture that leaves the 4:3 frame with only a strip beneath it. A take that stops early leaves it.
+- **Punch-in:** it moves where the existing monitor draw samples, so it adds no GPU work. It shows a third of the picture, close to one sensor pixel per drawable pixel in Maximum quality and half that in Efficient. It opens on the last focus point and drags, including during a take.
+- **Focus peaking:** a `Tool` that marks fine detail in cyan on the monitor, with four extra texture reads per drawable pixel while it's on. Its neighbors are fixed at about three sensor pixels, so punching in doesn't weaken it.
+- **Mic meter:** the bar moves about twelve times a second by writing to Core Animation layers from the audio queue, so it skips the main thread. Its dB number updates once a second. Green runs to -12 dB, yellow to -3 dB, then red.
+- **Settings:** one searchable page ordered by use, shown as a sheet. Format changes link to the panel. Presets save every format column plus pipeline, debayer and exposure offset, inside `VibeLog.config.json`. The volume buttons toggle recording on iOS 18 and later.
+
+### Still to do
+
+Only the phone tests above. Gyro logging to a Gyroflow `.gcsv` follows as its own change once the 10-minute test passes.
+
+`VLCapture` gained focus and exposure points, exposure compensation, live values and audio peak measurement. `VLProcessing` gained the monitor view and peaking. Other module code is unchanged.
 
 Diagnostics opens with a long press on **Version** in Settings.
 
@@ -83,13 +122,13 @@ From two 46-second control tests at 30 fps. The first ran at nominal heat, the s
 | Exposure steps and return to auto | 120, 120, 120, 60, 119 | 120, 120, 120, 60, 120 | Clean |
 | White balance steps and return to auto | 120, 120, 120 | 120 | Clean |
 
-- **Allowed during a take:** ISO, shutter and white balance dials, and monitor tools.
+- **Allowed during a take:** ISO, shutter, white balance and tint dials, monitor tools, punch-in and Full view. With **Auto exposure and white balance during a take** on, **AUTO** on those dials also works.
 - **Blocked during a take:** every focus change, and exposure drag, because bias was cut short by the writer failure.
-- **Must stay locked:** lens and capture settings, because any change rebuilds the session. Curve, exposure offset, debayer, crop and pipeline, because they're baked in and the clip's metadata is written at the start.
-- **Holds during a take:** focus, exposure and white balance freeze where they are as a take starts and resume when it ends. The cost of those mode changes hasn't been measured on the phone. If reduced load starts during a take, only the log and the popup show it; the clip's metadata records the state at the start.
+- **Must stay locked:** lens, frame rate and capture settings, because any change rebuilds the session. Curve, exposure offset, debayer, crop and pipeline, because they're baked in and the clip's metadata is written at the start.
+- **Holds during a take:** focus always freezes as a take starts and resumes when it ends. Exposure and white balance do the same unless **Auto exposure and white balance during a take** is on, which is off by default until its control test passes; values set by hand stay either way. The sidecar records which happened. The cost of those mode changes hasn't been measured on the phone. If reduced load starts during a take, only the log and the popup show it; the clip's metadata records the state at the start.
 - **Not settled:** Per-frame ISO, shutter and white balance values are read when a photo arrives, so they can lag the frame. White balance gains are baked into the debayer. The RAW frames have no focus breathing correction.
 
-The ISP monitor removes the Metal view, so it stays in Settings. Keep SwiftUI updates to about once a second while recording, and avoid continuous animations, because main-thread load has cost frames before.
+The ISP monitor removes the Metal view, so it stays in Settings. Keep SwiftUI updates to about once a second while recording, and avoid continuous animations, because main-thread load has cost frames before. A faster reading draws on its own layers from its own queue, as the mic bar does.
 
 ## Encoder failures
 

@@ -651,6 +651,13 @@ final class VideoEncoderTests: XCTestCase {
         XCTAssertTrue(EncoderPreset.all.allSatisfy { formats.contains($0.pixelFormat) })
     }
 
+    func testExpectedFrameRateFollowsTheTake() throws {
+        let preset = try XCTUnwrap(EncoderPreset.all.first { $0.id == "hevc420" })
+        let settings = preset.outputSettings(width: 1920, height: 1440, frameRate: 24)
+        let compression = try XCTUnwrap(settings[AVVideoCompressionPropertiesKey] as? [String: Any])
+        XCTAssertEqual(compression[AVVideoExpectedSourceFrameRateKey] as? Double, 24)
+    }
+
     func testWritesAPlayableFile() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
         let preset = EncoderPreset.all[0]
@@ -801,6 +808,15 @@ final class ExposureScalesTests: XCTestCase {
         XCTAssertEqual(ExposureScales.shutterStops(fps: 30, mains: 50).first?.value, 30)
     }
 
+    func testShutterFollowsSlowerFrameRates() {
+        let cinema = ExposureScales.shutterStops(fps: 24, mains: 50).map(\.value)
+        XCTAssertEqual(cinema.first, 24)
+        XCTAssertTrue(cinema.contains(48))
+        let pal = ExposureScales.shutterStops(fps: 25, mains: 50).map(\.value)
+        XCTAssertEqual(pal.first, 25)
+        XCTAssertTrue(pal.contains(50))
+    }
+
     func testShutterHasNoStopBelowFrameRateAndHasHalfAngle() {
         let values = ExposureScales.shutterStops(fps: 30, mains: 50).map(\.value)
         XCTAssertTrue(values.allSatisfy { $0 >= 30 })
@@ -855,6 +871,64 @@ final class AppConfigTests: XCTestCase {
         XCTAssertEqual(config.codec, "hevc420")
         XCTAssertEqual(config.mainsHz, 50)
         XCTAssertEqual(config.telemetry, true)
+    }
+
+    func testFrameRateAndPresetsRoundTrip() throws {
+        var config = AppConfig()
+        config.frameRate = 24
+        config.presets = [FormatPreset(
+            name: "Night", codec: "prores4444", size: "2880x2160", widescreen: true, frameRate: 25,
+            logCurve: "S-Log3", pipeline: "efficient", debayer: "Bilinear", exposureOffset: 0.3)]
+        let data = try JSONEncoder().encode(config)
+        XCTAssertEqual(try JSONDecoder().decode(AppConfig.self, from: data), config)
+    }
+
+    func testOlderFilesKeepThirtyFramesAndNoPresets() throws {
+        let config = try JSONDecoder().decode(AppConfig.self, from: Data("{}".utf8))
+        XCTAssertEqual(config.frameRate, 30)
+        XCTAssertTrue(config.presets.isEmpty)
+    }
+}
+
+final class TakeLibraryTests: XCTestCase {
+    private var folder: URL!
+
+    override func setUpWithError() throws {
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try FileManager.default.removeItem(at: folder)
+    }
+
+    private func makeTake(_ name: String, sidecar: Bool) throws -> URL {
+        let url = folder.appendingPathComponent(name)
+        try Data(count: 10).write(to: url)
+        guard sidecar else { return url }
+        let result = VideoEncoder.Result(
+            file: name, preset: "ProRes 422 HQ", width: 4032, height: 3024, framesWritten: 240,
+            framesDropped: 2, droppedNoBuffer: 2, droppedNotReady: 0, audioSamplesWritten: 10,
+            seconds: 10, fps: 24, megabytes: 1600, megabytesPerSecond: 160, failure: nil,
+            metadata: ["frameRate": "24"])
+        try JSONEncoder().encode(result).write(to: TakeLibrary.sidecar(for: url))
+        return url
+    }
+
+    func testListsNewestFirstWithSidecars() throws {
+        _ = try makeTake("video_20260101_100000.mov", sidecar: false)
+        _ = try makeTake("video_20260102_100000.mov", sidecar: true)
+        let takes = TakeLibrary.takes(in: folder)
+        XCTAssertEqual(takes.map(\.url.lastPathComponent), ["video_20260102_100000.mov", "video_20260101_100000.mov"])
+        XCTAssertEqual(takes[0].info?.metadata["frameRate"], "24")
+        XCTAssertEqual(takes[0].bytes, 10)
+        XCTAssertNil(takes[1].info)
+    }
+
+    func testDeleteRemovesTheSidecarToo() throws {
+        let url = try makeTake("video_20260102_100000.mov", sidecar: true)
+        try TakeLibrary.delete(TakeLibrary.take(at: url))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path), [])
     }
 }
 

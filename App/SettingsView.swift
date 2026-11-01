@@ -12,13 +12,18 @@ struct SettingsView: View {
     @State private var showDiagnostics = false
     @State private var search = ""
     @State private var showsProcessing = false
+    @State private var namingPreset = false
+    @State private var presetName = ""
     let openFormat: () -> Void
 
     var body: some View {
         NavigationStack {
             Form {
-                if matches("format codec size resolution log curve aspect chroma") {
+                if matches(Self.formatTerms) {
                     formatSection
+                }
+                if matches(Self.presetTerms) {
+                    presetSection
                 }
                 if matches(Self.recordingTerms) {
                     recordingSection
@@ -60,11 +65,13 @@ struct SettingsView: View {
         }
     }
 
+    private static let formatTerms = "format codec size resolution frame rate fps log curve aspect chroma"
+    private static let presetTerms = "preset save saved recall format"
     private static let stopTerms = "stop after limit duration time timer"
-    private static let freezeTerms = "freeze lock exposure white balance start roll"
+    private static let autoTerms = "auto exposure shutter iso white balance during take recording freeze lock start roll"
     private static let heatTerms = "hot heat thermal cool long takes debayer"
     private static let mainsTerms = "flicker mains lights hz power frequency shutter"
-    private static let recordingTerms = [stopTerms, freezeTerms, heatTerms, mainsTerms].joined(separator: " ")
+    private static let recordingTerms = [stopTerms, autoTerms, heatTerms, mainsTerms].joined(separator: " ")
     private static let lookTerms = "look monitor rec.709 log preview isp viewfinder"
     private static let lutTerms = "lut cube import look monitor input"
     private static let pauseTerms = "pause viewfinder monitor off gpu recording"
@@ -79,7 +86,7 @@ struct SettingsView: View {
     }
 
     private var hasResults: Bool {
-        matches("format codec size resolution log curve aspect chroma") || matches(Self.recordingTerms)
+        matches(Self.formatTerms) || matches(Self.presetTerms) || matches(Self.recordingTerms)
             || matches(Self.viewfinderTerms) || matches(Self.imageTerms)
             || matches("about version saved config file diagnostics")
     }
@@ -108,7 +115,7 @@ struct SettingsView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Change format")
-                        Text("\(model.codecLabel) · \(model.curveLabel) · \(model.outputLabel)")
+                        Text("\(model.codecLabel) · \(model.curveLabel) · \(model.outputLabel) · \(Int(model.frameRate)) fps")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -118,6 +125,39 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+        }
+    }
+
+    /// Tapping one applies it, and a swipe removes it.
+    private var presetSection: some View {
+        Section("Presets") {
+            ForEach(model.presets) { preset in
+                Button {
+                    model.apply(preset)
+                } label: {
+                    HStack {
+                        Text(preset.name)
+                            .foregroundStyle(Tokens.value)
+                        Spacer()
+                        if model.isCurrent(preset) {
+                            Image(systemName: "checkmark")
+                                .accessibilityLabel("In use")
+                        }
+                    }
+                }
+            }
+            .onDelete { model.presets.remove(atOffsets: $0) }
+            Button("Save current format") {
+                presetName = ""
+                namingPreset = true
+            }
+        }
+        .alert("Save preset", isPresented: $namingPreset) {
+            TextField("Name", text: $presetName)
+            Button("Save") { model.savePreset(named: presetName) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Keeps the codec, size, aspect, frame rate, log curve, pipeline, debayer and exposure offset. A name in use is replaced.")
         }
     }
 
@@ -135,9 +175,11 @@ struct SettingsView: View {
                     Text("30 minutes").tag(1800.0)
                 }
             }
-            if matches(Self.freezeTerms) {
-                Toggle(isOn: $model.lockAtRoll) {
-                    explained("Freeze exposure at start", "Holds exposure and white balance during a take. Focus always holds.")
+            if matches(Self.autoTerms) {
+                Toggle(isOn: autoDuringTake) {
+                    explained(
+                        "Auto exposure and white balance during a take",
+                        "Shutter, ISO and white balance keep following the scene. Off freezes them at the start. Values you set stay, and focus always holds.")
                 }
             }
             if matches(Self.heatTerms) {
@@ -154,6 +196,10 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    private var autoDuringTake: Binding<Bool> {
+        Binding(get: { !model.lockAtRoll }, set: { model.lockAtRoll = !$0 })
     }
 
     private var viewfinderSection: some View {
@@ -199,6 +245,7 @@ struct SettingsView: View {
                         "Baked into the file, in stops.")
                     Slider(value: $model.processing.exposureStops, in: -3...3, step: 0.1)
                         .accessibilityLabel("Exposure offset")
+                        .accessibilityValue(String(format: "%+.1f stops", model.processing.exposureStops))
                 }
             }
             if matches(Self.processingTerms) {
