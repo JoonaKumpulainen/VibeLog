@@ -7,6 +7,19 @@ import VLCore
 import VLProcessing
 import VLRecording
 
+/// Why a take ended early or couldn't start. It stays until dismissed, because it's often read
+/// after the fact.
+struct TakeAlert: Equatable {
+    let title: String
+    let detail: String
+}
+
+/// The newest recording, for the button beside record.
+struct LastTake {
+    let url: URL
+    let thumbnail: UIImage
+}
+
 final class AppModel: ObservableObject {
     let camera = CameraController()
     let pipeline = ProcessingPipeline()
@@ -21,8 +34,13 @@ final class AppModel: ObservableObject {
     @Published var isRecording = false
     @Published var isBusy: String?
     @Published var lastResult: String?
-    /// Explains on the camera screen why a recording stopped or could not start.
+    /// A short message on the camera screen. Tapping it clears it.
     @Published var notice: String?
+    @Published var takeAlert: TakeAlert?
+    @Published private(set) var lastTake: LastTake?
+    @Published private(set) var playingTake: URL?
+    /// Only applies at 16:9. See `showsFullView`.
+    @Published var fullView = false
     @Published var permissionDenied = false
     @Published var lastFrameLabel = "-"
 
@@ -121,6 +139,7 @@ final class AppModel: ObservableObject {
         SystemStatus.enableBatteryMonitoring()
         refreshLUTs()
         loadConfig()
+        loadLastTake()
         router.onRecordingElapsed = { [weak self] in
             DispatchQueue.main.async { self?.stopRecording() }
         }
@@ -186,6 +205,10 @@ final class AppModel: ObservableObject {
     }
 
     var outputLabel: String { outputSize.label }
+
+    var aspectLabel: String { widescreen ? "16:9" : "4:3" }
+
+    var showsFullView: Bool { fullView && widescreen }
 
     var isoRange: ClosedRange<Double> {
         let range = options?.isoRange ?? 57...12768
@@ -316,8 +339,26 @@ final class AppModel: ObservableObject {
             .uppercased()
     }
 
-    var megapixelLabel: String {
-        "\(Int((Double(outputSize.width * outputSize.height) / 1_000_000).rounded()))MP"
+    /// What the monitor shows. A LUT replaces Rec.709, so it takes that label.
+    var monitorLabel: String {
+        switch processing.monitor {
+        case .log: return "LOG"
+        case .isp: return "ISP"
+        case .rec709:
+            guard !selectedLUT.isEmpty else { return "709" }
+            return String((selectedLUT as NSString).deletingPathExtension.prefix(6)).uppercased()
+        }
+    }
+
+    var monitorName: String {
+        processing.monitor == .rec709 && !selectedLUT.isEmpty ? selectedLUT : processing.monitor.label
+    }
+
+    /// The offset auto exposure is following, to a tenth of a stop. Nil at zero or when locked.
+    var exposureOffsetLabel: String? {
+        let tenths = (exposureBias * 10).rounded()
+        guard tenths != 0, !exposureLocked else { return nil }
+        return String(format: "%+.1f", Double(tenths) / 10)
     }
 
     private var usableGB: Int { max(status.freeDiskGB - 10, 0) }
@@ -338,6 +379,17 @@ final class AppModel: ObservableObject {
     var timecodeLabel: String {
         String(format: "%02d:%02d:%02d", recordElapsed / 3600, recordElapsed / 60 % 60, recordElapsed % 60)
     }
+
+    /// Minutes and seconds, with hours only once they're needed.
+    var shortTimecodeLabel: String {
+        let minutes = recordElapsed / 60 % 60
+        let seconds = recordElapsed % 60
+        guard recordElapsed >= 3600 else { return String(format: "%02d:%02d", minutes, seconds) }
+        return String(format: "%d:%02d:%02d", recordElapsed / 3600, minutes, seconds)
+    }
+
+    /// Only said when it isn't normal.
+    var showsHeat: Bool { status.thermal != "NOMINAL" && status.thermal != "-" }
 
     var heatLabel: String {
         switch status.thermal {
@@ -363,7 +415,7 @@ final class AppModel: ObservableObject {
         return nil
     }
 
-    /// A short message beside the record button, gone after a few seconds.
+    /// A short message over the controls, gone after a few seconds.
     func showNotice(_ text: String, seconds: Double = 3) {
         notice = text
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
@@ -497,6 +549,60 @@ final class AppModel: ObservableObject {
 
     func toggleRecord() {
         isRecording ? stopRecording() : startRecording()
+    }
+
+    /// The controls come back, so the reason can't be missed.
+    private func takeStopped(_ reason: String) {
+        fullView = false
+        takeAlert = TakeAlert(
+            title: "Recording stopped", detail: "\(reason) Stopped at \(shortTimecodeLabel).")
+    }
+
+    /// Playing ProRes while the camera runs would add heat to the next take.
+    func openLastTake() {
+        guard let take = lastTake, !isRecording, isBusy == nil else { return }
+        guard FileManager.default.fileExists(atPath: take.url.path) else {
+            lastTake = nil
+            loadLastTake()
+            return
+        }
+        resumeAfterPlayback = isStreaming
+        if isStreaming { toggleStream() }
+        playingTake = take.url
+    }
+
+    func closeLastTake() {
+        playingTake = nil
+        guard resumeAfterPlayback else { return }
+        resumeAfterPlayback = false
+        if !isStreaming { toggleStream() }
+    }
+
+    /// Names sort by time.
+    private func loadLastTake() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let files = (try? FileManager.default.contentsOfDirectory(
+                at: Storage.videos, includingPropertiesForKeys: nil)) ?? []
+            let newest = files.filter { $0.pathExtension == "mov" }
+                .max { $0.lastPathComponent < $1.lastPathComponent }
+            guard let newest else { return }
+            DispatchQueue.main.async { self?.makeThumbnail(for: newest) }
+        }
+    }
+
+    private func makeThumbnail(for url: URL) {
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 156, height: 156)
+        thumbnailGenerator = generator
+        generator.generateCGImageAsynchronously(for: .zero) { [weak self] image, _, error in
+            guard let image else {
+                Log.shared.warn("No thumbnail for \(url.lastPathComponent): \(String(describing: error))")
+                return
+            }
+            let take = LastTake(url: url, thumbnail: UIImage(cgImage: image))
+            DispatchQueue.main.async { self?.lastTake = take }
+        }
     }
 
     func runProbe() {
@@ -649,6 +755,7 @@ final class AppModel: ObservableObject {
     private func startRecording() {
         guard !isRecording, !recordStarting else { return }
         notice = nil
+        takeAlert = nil
         if let takeWarning { showNotice(takeWarning, seconds: 4) }
         // A frame processed before the reference arrives has no calibration.
         let warmUp = !isStreaming || !hasReference
@@ -683,6 +790,7 @@ final class AppModel: ObservableObject {
             router.beginRecording(recorder, seconds: rawDumpSeconds)
             recordDeadline = Date().addingTimeInterval(rawDumpSeconds + 5)
             recordStart = Date()
+            recordElapsed = 0
             isRecording = true
             Log.shared.info("Recording \(name) for \(rawDumpSeconds)s, write=\(writeFrames), budget \(budget / 1_000_000) MB")
         } catch {
@@ -696,7 +804,8 @@ final class AppModel: ObservableObject {
     private func startEncoding() {
         guard let pipeline, processing.enabled, method.isPhoto else {
             Log.shared.error("Encoding needs a photo method and the GPU pipeline")
-            notice = "Recording needs a photo method and the GPU pipeline"
+            takeAlert = TakeAlert(
+                title: "Can't record", detail: "Recording needs a photo method and the GPU pipeline.")
             return
         }
         let name = "video_\(Storage.timestamp())"
@@ -718,7 +827,7 @@ final class AppModel: ObservableObject {
             audio.onSample = { [weak encoder] sample in encoder?.appendAudio(sample) }
             encoder.onFailure = { [weak self] message in
                 Log.shared.error("Recording stopped: \(message)")
-                DispatchQueue.main.async { self?.notice = "Recording stopped: the encoder failed" }
+                DispatchQueue.main.async { self?.takeStopped("The encoder failed.") }
                 self?.stopRecording()
             }
             audio.start { [weak self] ready in
@@ -733,6 +842,7 @@ final class AppModel: ObservableObject {
             pipeline.resetStats()
             pipeline.setSink(encoder)
             recordStart = Date()
+            recordElapsed = 0
             recordingFile = url
             isRecording = true
             let seconds = recordSeconds
@@ -744,7 +854,8 @@ final class AppModel: ObservableObject {
             }
         } catch {
             Log.shared.error("Cannot start \(encoderPreset.label) \(outputSize.label): \(error)")
-            notice = "Cannot start \(encoderPreset.label) \(outputSize.label)"
+            takeAlert = TakeAlert(
+                title: "Can't record", detail: "\(encoderPreset.label) \(outputSize.label) wouldn't start.")
         }
     }
 
@@ -770,6 +881,7 @@ final class AppModel: ObservableObject {
             Log.shared.info("VIDEO RESULT \(result.file): \(summary)")
             lastResult = summary
             guard result.framesWritten > 0 else { return }
+            makeThumbnail(for: Storage.videos.appendingPathComponent(result.file))
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let sidecar = Storage.videos.appendingPathComponent(result.file + ".json")
@@ -799,6 +911,8 @@ final class AppModel: ObservableObject {
     }
 
     private var loadReduced = false
+    private var resumeAfterPlayback = false
+    private var thumbnailGenerator: AVAssetImageGenerator?
     private var pendingReferences: [RawRecorder] = []
     private let audio = AudioCapture()
     private var activeEncoder: VideoEncoder?
@@ -862,12 +976,12 @@ final class AppModel: ObservableObject {
             recordElapsed = Int(Date().timeIntervalSince(recordStart))
             if line.thermal == "CRITICAL" {
                 Log.shared.warn("Stopping at \(recordElapsed)s: thermal state is critical")
-                notice = "Recording stopped: the phone is too hot"
+                takeStopped("The phone is too hot.")
                 stopRecording()
             } else if line.freeDiskGB < 10 {
                 // Encoder drops began at about 8 GB free in a 10-minute test.
                 Log.shared.warn("Stopping at \(recordElapsed)s: less than 10 GB free")
-                notice = "Recording stopped: less than 10 GB free"
+                takeStopped("Less than 10 GB free.")
                 stopRecording()
             }
         }

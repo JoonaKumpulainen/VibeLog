@@ -7,20 +7,29 @@ enum ControlDial: CaseIterable, Identifiable {
     var id: Self { self }
 }
 
+/// How a value is being set, in a form that doesn't depend on color.
+enum CellMark {
+    case plain, auto, frozen
+}
+
 /// A title over a value, turned in place to the hold. Sideways, the bar's depth is how wide it
 /// can be.
 struct InstrumentCell: View {
     let title: String
     let value: String
     let tint: Color
+    var mark = CellMark.plain
     let hold: Hold
     let depth: CGFloat
 
     var body: some View {
         VStack(alignment: hold.isLandscape ? .center : .leading, spacing: 1) {
-            Text(title)
-                .font(Tokens.labelFont)
-                .foregroundStyle(Tokens.label)
+            HStack(spacing: 3) {
+                Text(title)
+                    .font(Tokens.labelFont)
+                    .foregroundStyle(Tokens.label)
+                markView
+            }
             Text(value)
                 .font(Tokens.valueFont)
                 .foregroundStyle(tint)
@@ -32,6 +41,24 @@ struct InstrumentCell: View {
         .frame(
             maxWidth: .infinity, maxHeight: .infinity,
             alignment: hold.isLandscape ? .center : .leading)
+    }
+
+    @ViewBuilder
+    private var markView: some View {
+        switch mark {
+        case .plain:
+            EmptyView()
+        case .auto:
+            Text("A")
+                .font(Tokens.markFont)
+                .foregroundStyle(Tokens.label)
+                .padding(.horizontal, 2)
+                .overlay(RoundedRectangle(cornerRadius: 2).strokeBorder(Tokens.label, lineWidth: 0.5))
+        case .frozen:
+            Image(systemName: "lock.fill")
+                .font(.system(size: 8))
+                .foregroundStyle(Tokens.label)
+        }
     }
 }
 
@@ -49,19 +76,21 @@ struct ControlPanels: View {
                     .transition(.opacity)
             }
             HStack(spacing: 0) {
-                cell(title: "FPS", value: "\(Int(model.frameRate))", held: false)
+                cell(title: "FPS", value: "\(Int(model.frameRate))", manual: false, mark: .plain)
                 ForEach(ControlDial.allCases) { control in
                     divider
                     Button {
                         select(control)
                     } label: {
-                        cell(title: title(control), value: value(control), held: isHeld(control))
+                        cell(
+                            title: title(control), value: value(control), manual: isManual(control),
+                            mark: mark(control))
                             .background(selected == control ? Tokens.hairline : Color.clear)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(name(control))
-                    .accessibilityValue(value(control))
+                    .accessibilityValue("\(value(control)), \(stateName(control))")
                 }
             }
             .frame(height: CameraGeometry.controlBarDepth)
@@ -84,10 +113,10 @@ struct ControlPanels: View {
         Rectangle().fill(Tokens.hairline).frame(width: 0.5)
     }
 
-    private func cell(title: String, value: String, held: Bool) -> some View {
+    private func cell(title: String, value: String, manual: Bool, mark: CellMark) -> some View {
         InstrumentCell(
-            title: title, value: value, tint: held ? Tokens.held : Tokens.value, hold: hold,
-            depth: CameraGeometry.controlBarDepth)
+            title: title, value: value, tint: manual ? Tokens.held : Tokens.value, mark: mark,
+            hold: hold, depth: CameraGeometry.controlBarDepth)
     }
 
     private func title(_ control: ControlDial) -> String {
@@ -129,6 +158,36 @@ struct ControlPanels: View {
         }
     }
 
+    /// Set by the user, as opposed to following the camera or frozen for a take.
+    private func isManual(_ control: ControlDial) -> Bool {
+        switch control {
+        case .iso, .shutter: return model.exposureLocked
+        case .whiteBalance: return model.whiteBalanceLocked
+        case .focus: return model.focusLocked || model.focusTapped
+        }
+    }
+
+    private func isFrozen(_ control: ControlDial) -> Bool {
+        switch control {
+        case .iso, .shutter: return model.exposureHeldForTake
+        case .whiteBalance: return model.whiteBalanceHeldForTake
+        case .focus: return model.isRecording
+        }
+    }
+
+    private func mark(_ control: ControlDial) -> CellMark {
+        if isFrozen(control) { return .frozen }
+        return isManual(control) ? .plain : .auto
+    }
+
+    private func stateName(_ control: ControlDial) -> String {
+        switch mark(control) {
+        case .plain: return "manual"
+        case .auto: return "auto"
+        case .frozen: return "frozen for the take"
+        }
+    }
+
     private func dialPanel(_ control: ControlDial) -> some View {
         HStack(spacing: 8) {
             smallButton(isHeld(control) ? "lock" : "lock.open", isOn: isHeld(control),
@@ -149,7 +208,7 @@ struct ControlPanels: View {
                         Spacer()
                         Text(value(control))
                             .font(Tokens.valueFont)
-                            .foregroundStyle(isHeld(control) ? Tokens.held : Tokens.value)
+                            .foregroundStyle(isManual(control) ? Tokens.held : Tokens.value)
                     }
                 }
                 Dial(

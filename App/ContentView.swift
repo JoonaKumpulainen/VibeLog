@@ -35,14 +35,16 @@ struct CameraScreen: View {
                 width: geometry.size.width + insets.leading + insets.trailing,
                 height: geometry.size.height + insets.top + insets.bottom)
             let layout = CameraGeometry(
-                screen: screen, top: insets.top, bottom: insets.bottom, widescreen: model.widescreen)
+                screen: screen, top: insets.top, bottom: insets.bottom, widescreen: model.widescreen,
+                fullView: model.showsFullView)
             ZStack {
                 Color.black
                 viewfinder(layout.picture.size)
                     .position(x: layout.picture.midX, y: layout.picture.midY)
                 CameraHUD(
                     selectedDial: $selectedDial, showMonitor: $showMonitor, hold: hold.hold,
-                    insets: insets, openSettings: { showSettings = true })
+                    insets: insets, stripDepth: screen.height - layout.picture.maxY,
+                    openSettings: { showSettings = true })
             }
             .environment(\.heldTurn, hold.turn)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: hold.turn)
@@ -53,8 +55,9 @@ struct CameraScreen: View {
         .persistentSystemOverlays(.hidden)
         .sensoryFeedback(.impact(weight: .medium), trigger: model.isRecording)
         .sensoryFeedback(.selection, trigger: model.lensID)
+        .sensoryFeedback(.warning, trigger: model.takeAlert) { _, alert in alert != nil }
         .modifier(VolumeRecord {
-            if !showSettings, model.isBusy == nil { model.toggleRecord() }
+            if !showSettings, model.playingTake == nil, model.isBusy == nil { model.toggleRecord() }
         })
         .onChange(of: model.isRecording) { _, recording in
             // Any focus change during a take costs frames.
@@ -62,6 +65,14 @@ struct CameraScreen: View {
         }
         .fullScreenCover(isPresented: $showSettings) {
             SettingsView()
+        }
+        .fullScreenCover(isPresented: Binding(
+            get: { model.playingTake != nil },
+            set: { if !$0 { model.closeLastTake() } }
+        )) {
+            if let url = model.playingTake {
+                TakePlayer(url: url)
+            }
         }
     }
 
@@ -99,7 +110,7 @@ struct CameraScreen: View {
         }
     }
 
-    /// Tools for testing. Notices stay off the picture, beside the record button.
+    /// Tools for testing. Notices stay off the picture, over the controls.
     private var messages: some View {
         VStack(spacing: 8) {
             if showDebugOverlay {
@@ -189,86 +200,198 @@ struct CameraHUD: View {
     @Binding var showMonitor: Bool
     let hold: Hold
     let insets: EdgeInsets
+    /// What's left beneath the picture.
+    let stripDepth: CGFloat
     let openSettings: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            TopBar(hold: hold)
-            Spacer(minLength: 0)
+        if model.showsFullView {
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                fullViewRow
+                    .padding(.bottom, (stripDepth - CameraGeometry.recordDepth) / 2)
+            }
+            .padding(.leading, max(insets.leading, 12))
+            .padding(.trailing, max(insets.trailing, 12))
+        } else {
+            controls
+        }
+    }
+
+    private var controls: some View {
+        ZStack(alignment: .top) {
             VStack(spacing: 8) {
-                if showMonitor, model.processing.monitor != .isp {
-                    MonitorPanel(hold: hold)
-                } else {
-                    // An open dial takes this row's place, which keeps both off the picture.
-                    if selectedDial == nil { toolRow }
+                Spacer(minLength: 0)
+                VStack(spacing: 8) {
+                    if showMonitor, model.processing.monitor != .isp {
+                        MonitorPanel(hold: hold)
+                    } else if selectedDial == nil {
+                        // An open dial takes this row's place, which keeps both off the picture.
+                        toolRow
+                    }
                     ControlPanels(selected: $selectedDial, hold: hold)
                 }
+                .overlay { noticeCard }
                 actionRow
             }
+            .padding(.bottom, max(insets.bottom, 10))
+            .padding(.leading, max(insets.leading, 12))
+            .padding(.trailing, max(insets.trailing, 12))
+            StatusBlocks(hold: hold)
         }
-        .padding(.top, max(insets.top, 10))
-        .padding(.bottom, max(insets.bottom, 10))
-        .padding(.leading, max(insets.leading, 12))
-        .padding(.trailing, max(insets.trailing, 12))
+        .onChange(of: selectedDial) { _, dial in
+            if dial != nil { showMonitor = false }
+        }
     }
 
     /// Five columns, matching the bars above.
+    private func columns<Content: View>(
+        @ViewBuilder content: @escaping (CGFloat) -> Content
+    ) -> some View {
+        GeometryReader { geometry in
+            content(geometry.size.width / 5)
+        }
+        .frame(height: CameraGeometry.recordDepth)
+    }
+
     private var actionRow: some View {
-        HStack(spacing: 0) {
-            monitorButton
-                .frame(maxWidth: .infinity)
+        columns { column in
+            HStack(spacing: 0) {
+                lastTakeSlot
+                    .frame(width: column)
+                monitorButton
+                    .frame(width: column)
+                recordButton
+                    .frame(width: column)
+                trailingSlots(column)
+            }
+        }
+    }
+
+    /// All that's left in Full view, in the same columns.
+    private var fullViewRow: some View {
+        columns { column in
+            HStack(spacing: 0) {
+                if let notice = model.notice {
+                    Text(notice)
+                        .font(Tokens.statusFont)
+                        .foregroundStyle(Tokens.value)
+                        .lineLimit(4)
+                        .minimumScaleFactor(0.7)
+                        .upright(hold, depth: CameraGeometry.recordDepth - 2)
+                        .frame(width: column * 2)
+                } else {
+                    RemainingLines(alignment: .leading)
+                        .upright(hold, depth: CameraGeometry.recordDepth - 2)
+                        .frame(width: column)
+                    fullViewButton
+                        .frame(width: column)
+                }
+                recordButton
+                    .frame(width: column)
+                trailingSlots(column)
+            }
+        }
+    }
+
+    private var recordButton: some View {
+        RecordButton(isRecording: model.isRecording) { model.toggleRecord() }
+            .disabled(model.isBusy != nil)
+    }
+
+    /// The clock takes both columns, in the same place in every hold.
+    @ViewBuilder
+    private func trailingSlots(_ column: CGFloat) -> some View {
+        if model.isRecording {
+            timecode
+                .frame(width: column * 2)
+        } else {
             Color.clear
-                .frame(maxWidth: .infinity)
-            RecordButton(isRecording: model.isRecording) { model.toggleRecord() }
-                .disabled(model.isBusy != nil)
-                .frame(maxWidth: .infinity)
-            noticeSlot
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .allowsHitTesting(false)
-            formatSlot
-                .frame(maxWidth: .infinity)
-        }
-        .frame(height: 68)
-    }
-
-    @ViewBuilder
-    private var noticeSlot: some View {
-        if let notice = model.notice {
-            Text(notice)
-                .font(Tokens.labelFont)
-                .foregroundStyle(Tokens.value)
-                .multilineTextAlignment(.center)
-                .lineLimit(5)
-                .minimumScaleFactor(0.7)
-                .upright(hold, depth: 64)
-                .padding(2)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(
-                    Tokens.opaquePanel, in: RoundedRectangle(cornerRadius: Tokens.panelRadius)
-                )
-                .padding(.horizontal, 2)
-        }
-    }
-
-    /// Sideways, the top bar's cells are too narrow for the clock during a take.
-    @ViewBuilder
-    private var formatSlot: some View {
-        if !model.isRecording {
+                .frame(width: column)
             formatButton
-        } else if hold.isLandscape {
-            Text(model.timecodeLabel)
-                .font(Tokens.clockFont)
-                .foregroundStyle(Tokens.record)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .upright(hold, depth: 66)
-                .accessibilityLabel("Recording, \(model.recordElapsed) seconds")
+                .frame(width: column)
         }
     }
 
-    /// The monitoring tools that are on, then the lenses.
+    /// Sideways, only the record row's depth is free, so hours go until they're needed.
+    private var timecode: some View {
+        Text(hold.isLandscape ? model.shortTimecodeLabel : model.timecodeLabel)
+            .font(hold.isLandscape ? Tokens.sidewaysClockFont : Tokens.clockFont)
+            .foregroundStyle(Tokens.recordText)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .upright(hold, depth: CameraGeometry.recordDepth)
+            .accessibilityLabel("Recording, \(model.recordElapsed) seconds")
+    }
+
+    /// A take that ended outranks a passing message.
+    @ViewBuilder
+    private var noticeCard: some View {
+        if let alert = model.takeAlert {
+            NoticeCard(title: alert.title, detail: alert.detail, isUrgent: true, hold: hold) {
+                model.takeAlert = nil
+            }
+        } else if let notice = model.notice {
+            NoticeCard(title: notice, detail: nil, isUrgent: false, hold: hold) {
+                model.notice = nil
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var lastTakeSlot: some View {
+        if let take = model.lastTake, !model.isRecording {
+            Button {
+                model.openLastTake()
+            } label: {
+                Image(uiImage: take.thumbnail)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 52, height: 52)
+                    .clipShape(RoundedRectangle(cornerRadius: Tokens.panelRadius))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Tokens.panelRadius)
+                            .strokeBorder(Tokens.hairline, lineWidth: 0.5)
+                    )
+                    .turnedToHold()
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(model.isBusy != nil)
+            .accessibilityLabel("Play last take")
+        } else {
+            Color.clear
+        }
+    }
+
+    /// The offset, the monitoring tools that are on, then the lenses.
     private var toolRow: some View {
         HStack(spacing: 0) {
+            if model.widescreen {
+                fullViewButton
+            }
+            if let offset = model.exposureOffsetLabel {
+                Button {
+                    model.exposureBias = 0
+                } label: {
+                    VStack(spacing: 0) {
+                        Text("EV")
+                            .font(Tokens.labelFont)
+                            .foregroundStyle(Tokens.label)
+                        Text(offset)
+                            .font(Tokens.lineFont)
+                            .foregroundStyle(Tokens.held)
+                    }
+                    .turnedToHold()
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                // A bias change was cut short by the writer failure, so it stays off during a take.
+                .disabled(model.isRecording)
+                .accessibilityLabel("Exposure offset \(offset) stops")
+                .accessibilityHint(model.isRecording ? "" : "Resets to zero")
+            }
             ForEach(Tool.allCases.filter(model.isOn)) { tool in
                 Image(systemName: tool.symbol)
                     .font(.system(size: 14))
@@ -280,6 +403,23 @@ struct CameraHUD: View {
             Spacer(minLength: 0)
             lensPill
         }
+    }
+
+    private var fullViewButton: some View {
+        Button {
+            model.fullView.toggle()
+        } label: {
+            Image(systemName: model.fullView
+                ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                .font(.system(size: 14))
+                .foregroundStyle(Tokens.value)
+                .turnedToHold()
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(model.isBusy != nil)
+        .accessibilityLabel(model.fullView ? "Show all controls" : "Full view")
     }
 
     @ViewBuilder
@@ -315,7 +455,7 @@ struct CameraHUD: View {
     private var formatButton: some View {
         Button(action: openSettings) {
             InstrumentCell(
-                title: "FMT", value: model.widescreen ? "16:9" : "4:3", tint: Tokens.value, hold: hold,
+                title: "FMT", value: model.aspectLabel, tint: Tokens.value, hold: hold,
                 depth: CameraGeometry.controlBarDepth
             )
             .frame(height: CameraGeometry.controlBarDepth)
@@ -338,7 +478,7 @@ struct CameraHUD: View {
                 withAnimation(.easeOut(duration: 0.15)) { showMonitor.toggle() }
             } label: {
                 InstrumentCell(
-                    title: "MON", value: model.processing.monitor == .log ? "LOG" : "709",
+                    title: "MON", value: model.monitorLabel,
                     tint: isActive ? Tokens.held : Tokens.value, hold: hold,
                     depth: CameraGeometry.controlBarDepth
                 )
@@ -348,7 +488,7 @@ struct CameraHUD: View {
             .buttonStyle(.plain)
             .instrumentPanel()
             .accessibilityLabel("Monitoring tools")
-            .accessibilityValue(model.processing.monitor.label)
+            .accessibilityValue(model.monitorName)
             .accessibilityAddTraits(showMonitor ? .isSelected : [])
         } else {
             Color.clear.frame(height: CameraGeometry.controlBarDepth)
@@ -372,115 +512,175 @@ private struct VolumeRecord: ViewModifier {
     }
 }
 
-/// The format and how long it can run, or the state of the take. Its columns line up with the
-/// control bar beneath the picture.
-struct TopBar: View {
+/// One status line. A warning is a filled chip, so it stands apart from held values without
+/// relying on telling amber from orange.
+struct StatusLine: View {
+    let text: String
+    var tint = Tokens.value
+    var warns = false
+
+    var body: some View {
+        Text(text)
+            .font(Tokens.statusFont)
+            .foregroundStyle(warns ? Color.black : tint)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .padding(.horizontal, warns ? 4 : 0)
+            .background(
+                warns ? Tokens.warning : Color.clear, in: RoundedRectangle(cornerRadius: 3))
+    }
+}
+
+/// What's left to shoot on, and how the take is going.
+struct RemainingLines: View {
+    @EnvironmentObject private var model: AppModel
+    let alignment: HorizontalAlignment
+
+    var body: some View {
+        VStack(alignment: alignment, spacing: 1) {
+            StatusLine(text: "\(model.timeLeftLabel) LEFT", warns: model.isStorageLow)
+            StatusLine(text: "BATT \(model.batteryLabel)", warns: model.isBatteryLow)
+            if model.showsHeat {
+                StatusLine(text: "HEAT \(model.heatLabel)", warns: model.isHot)
+            }
+            if model.isRecording {
+                StatusLine(text: "\(model.takeDrops) DROP", warns: model.takeDrops > 0)
+            }
+        }
+    }
+}
+
+/// The format and what's left, in the corners beside the Dynamic Island. Each block turns as a
+/// square, which leaves its lines the same width sideways.
+struct StatusBlocks: View {
     @EnvironmentObject private var model: AppModel
     let hold: Hold
 
     var body: some View {
-        HStack(spacing: 0) {
-            if model.isRecording {
-                // Sideways, the clock takes the format button's place.
-                reading("REC", hold.isLandscape ? "●" : model.timecodeLabel, tint: Tokens.record)
-                divider
-                timeLeft
-                divider
-                battery
-                divider
-                heat
-                divider
-                reading(
-                    "DROP", "\(model.takeDrops)", tint: model.takeDrops > 0 ? Tokens.warning : Tokens.value)
-            } else {
-                reading("CODEC", model.codecLabel)
-                divider
-                reading("LOG", model.curveLabel)
-                divider
-                if model.isHot {
-                    heat
-                } else {
-                    reading("SIZE", hold.isLandscape ? model.megapixelLabel : model.outputLabel)
+        HStack(alignment: .top, spacing: 0) {
+            block(.topLeading) {
+                VStack(alignment: .leading, spacing: 1) {
+                    StatusLine(text: model.codecLabel, tint: Tokens.label)
+                    StatusLine(text: model.curveLabel, tint: Tokens.label)
+                    StatusLine(text: model.outputLabel, tint: Tokens.label)
+                    StatusLine(
+                        text: "\(model.aspectLabel) · \(Int(model.frameRate))", tint: Tokens.label)
                 }
-                divider
-                timeLeft
-                divider
-                battery
+            }
+            Spacer(minLength: 0)
+            block(hold.isLandscape ? .topLeading : .topTrailing) {
+                RemainingLines(alignment: hold.isLandscape ? .leading : .trailing)
             }
         }
-        .frame(height: CameraGeometry.topBarDepth)
-        .instrumentPanel()
+        .padding(.horizontal, 24)
+        .padding(.top, CameraGeometry.statusTop)
+        .allowsHitTesting(false)
         .accessibilityElement(children: .combine)
     }
 
-    private var timeLeft: some View {
-        reading("LEFT", model.timeLeftLabel, tint: model.isStorageLow ? Tokens.warning : Tokens.value)
-    }
-
-    private var battery: some View {
-        reading("BATT", model.batteryLabel, tint: model.isBatteryLow ? Tokens.warning : Tokens.value)
-    }
-
-    private var heat: some View {
-        reading("HEAT", model.heatLabel, tint: model.isHot ? Tokens.warning : Tokens.value)
-    }
-
-    private var divider: some View {
-        Rectangle().fill(Tokens.hairline).frame(width: 0.5)
-    }
-
-    private func reading(_ title: String, _ value: String, tint: Color = Tokens.value) -> some View {
-        InstrumentCell(
-            title: title, value: value, tint: tint, hold: hold, depth: CameraGeometry.topBarDepth)
+    private func block<Content: View>(
+        _ alignment: Alignment, @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
+            .frame(
+                width: CameraGeometry.statusSide, height: CameraGeometry.statusSide,
+                alignment: alignment
+            )
+            .turnedToHold()
     }
 }
 
-/// An opaque panel in the controls' place, so the tools can be judged on the whole picture.
+/// A message over the tool row and control bar, large enough to read at arm's length. Tapping it
+/// clears it.
+struct NoticeCard: View {
+    let title: String
+    let detail: String?
+    let isUrgent: Bool
+    let hold: Hold
+    let dismiss: () -> Void
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Tokens.panelRadius)
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(isUrgent ? Tokens.noticeTitleFont : Tokens.noticeFont)
+                if let detail {
+                    Text(detail)
+                        .font(Tokens.noticeFont)
+                }
+            }
+            .foregroundStyle(isUrgent ? Color.black : Tokens.value)
+            .multilineTextAlignment(.leading)
+            // Sideways the lines run along the card, past the height it offers.
+            .fixedSize(horizontal: false, vertical: true)
+            .upright(hold, depth: CameraGeometry.noticeDepth - 12)
+            .frame(maxWidth: .infinity, alignment: hold.isLandscape ? .center : .leading)
+            if isUrgent {
+                Button(action: dismiss) {
+                    Text("OK")
+                        .font(Tokens.valueFont)
+                        .foregroundStyle(Tokens.value)
+                        .turnedToHold()
+                        .frame(width: 56, height: 44)
+                        .background(Color.black, in: RoundedRectangle(cornerRadius: Tokens.panelRadius))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss")
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(isUrgent ? Tokens.warning : Tokens.opaquePanel, in: shape)
+        .overlay(shape.strokeBorder(Tokens.hairline, lineWidth: 0.5))
+        .contentShape(shape)
+        .onTapGesture(perform: dismiss)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// The monitor look and tools, in the dial's place, so exposure stays reachable while judging it.
 struct MonitorPanel: View {
     @EnvironmentObject private var model: AppModel
     let hold: Hold
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Tokens.panelRadius)
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                ForEach([MonitorMode.rec709, .log]) { mode in
-                    modeButton(mode)
-                }
+        HStack(spacing: 0) {
+            lookButton
+            ForEach(Tool.allCases) { tool in
+                toolButton(tool)
             }
-            .frame(height: 44)
-            Rectangle().fill(Tokens.hairline).frame(height: 0.5)
-            HStack(spacing: 0) {
-                ForEach(Tool.allCases) { tool in
-                    toolButton(tool)
-                }
-            }
-            .frame(maxHeight: .infinity)
         }
-        .frame(height: CameraGeometry.monitorDepth)
+        .frame(height: CameraGeometry.trayDepth)
         .background(Tokens.opaquePanel, in: shape)
         .overlay(shape.strokeBorder(Tokens.hairline, lineWidth: 0.5))
         .contentShape(shape)
     }
 
-    private func modeButton(_ mode: MonitorMode) -> some View {
-        let selected = model.processing.monitor == mode
-        return Button {
-            model.processing.monitor = mode
+    private var lookButton: some View {
+        Button {
+            model.processing.monitor = model.processing.monitor == .log ? .rec709 : .log
         } label: {
-            Text(mode.label)
-                .font(Tokens.lineFont)
-                .foregroundStyle(selected ? Tokens.held : Tokens.value)
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
-                .upright(hold, depth: 42)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(selected ? Tokens.hairline : Color.clear)
-                .contentShape(Rectangle())
+            VStack(spacing: 3) {
+                Text(model.monitorLabel)
+                    .font(Tokens.lineFont)
+                    .foregroundStyle(Tokens.held)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text("LOOK")
+                    .font(Tokens.labelFont)
+                    .foregroundStyle(Tokens.label)
+            }
+            .upright(hold, depth: 46)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Tokens.hairline)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Monitor \(mode.label)")
-        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityLabel("Monitor look")
+        .accessibilityValue(model.monitorName)
     }
 
     private func toolButton(_ tool: Tool) -> some View {
@@ -496,13 +696,39 @@ struct MonitorPanel: View {
                     .minimumScaleFactor(0.7)
             }
             .foregroundStyle(model.isOn(tool) ? Tokens.held : Tokens.value)
-            .upright(hold, depth: 52)
+            .upright(hold, depth: 46)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(tool.title)
         .accessibilityAddTraits(model.isOn(tool) ? .isSelected : [])
+    }
+}
+
+/// Plays a take full screen. The clip carries its own rotation.
+struct TakePlayer: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var player: AVPlayer
+
+    init(url: URL) {
+        _player = State(initialValue: AVPlayer(url: url))
+    }
+
+    var body: some View {
+        VideoPlayer(player: player)
+            .ignoresSafeArea()
+            .overlay(alignment: .topLeading) {
+                Button("Done") { dismiss() }
+                    .font(Tokens.valueFont)
+                    .foregroundStyle(Tokens.value)
+                    .frame(minWidth: 64, minHeight: 44)
+                    .background(Tokens.opaquePanel, in: RoundedRectangle(cornerRadius: Tokens.panelRadius))
+                    .padding(12)
+            }
+            .background(Color.black)
+            .onAppear { player.play() }
+            .onDisappear { player.pause() }
     }
 }
 

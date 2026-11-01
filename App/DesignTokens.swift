@@ -7,6 +7,8 @@ enum Tokens {
     static let warning = Color(red: 1, green: 0.45, blue: 0.15)
     /// Used only for recording.
     static let record = Color(red: 0.91, green: 0.21, blue: 0.17)
+    /// The record color, lifted to read as text on black.
+    static let recordText = Color(red: 1, green: 0.35, blue: 0.31)
     static let label = Color.white.opacity(0.62)
     static let value = Color(white: 0.95)
     static let hairline = Color.white.opacity(0.22)
@@ -16,26 +18,46 @@ enum Tokens {
     static let labelFont = Font.system(size: 10, weight: .medium, design: .monospaced)
     static let valueFont = Font.system(size: 14, weight: .medium, design: .monospaced)
     static let lineFont = Font.system(size: 11, weight: .medium, design: .monospaced)
-    static let clockFont = Font.system(size: 13, weight: .medium, design: .monospaced)
+    static let statusFont = Font.system(size: 12, weight: .medium, design: .monospaced)
+    static let markFont = Font.system(size: 9, weight: .medium, design: .monospaced)
+    static let clockFont = Font.system(size: 28, weight: .semibold, design: .monospaced)
+    static let sidewaysClockFont = Font.system(size: 22, weight: .semibold, design: .monospaced)
+    static let noticeTitleFont = Font.system(size: 19, weight: .semibold)
+    static let noticeFont = Font.system(size: 14)
 }
 
 /// Where the picture sits, in portrait screen coordinates. Nothing overlaps it in any hold. Its
-/// top and bottom edges come from the 4:3 frame, so 16:9 only narrows the picture.
+/// top and bottom edges come from the 4:3 frame, so 16:9 only narrows the picture until Full view.
 struct CameraGeometry {
     let picture: CGRect
 
-    static let topBarDepth: CGFloat = 36
     static let controlBarDepth: CGFloat = 46
-    static let monitorDepth: CGFloat = 104
+    static let recordDepth: CGFloat = 68
+    /// The row above the control bar: a dial or the monitor tools.
+    static let trayDepth: CGFloat = 58
+    /// The tool row and control bar, which a notice covers.
+    static let noticeDepth: CGFloat = 44 + 8 + controlBarDepth
+    /// The status blocks beside the Dynamic Island are square, so they fit in every hold.
+    static let statusTop: CGFloat = 14
+    static let statusSide: CGFloat = 81
+    /// The most Full view keeps beneath the picture.
+    static let fullViewDepth: CGFloat = 76
 
     /// Share of the spare height above the picture. Estimated, not measured from the Camera app.
     private static let topShare: CGFloat = 0.3
-    private static let smallestTop = topBarDepth + 4
-    /// Record row, the control bar and an open dial.
-    private static let smallestBottom: CGFloat = 68 + 8 + controlBarDepth + 6 + 58 + 6
+    private static let smallestTop = statusTop + statusSide + 4
+    /// Record row, the control bar and an open tray.
+    private static let smallestBottom: CGFloat = recordDepth + 8 + controlBarDepth + 8 + trayDepth + 4
 
-    init(screen: CGSize, top: CGFloat, bottom: CGFloat, widescreen: Bool) {
-        let upper = top + Self.smallestTop
+    /// Full view leaves the 4:3 frame and fills the width, with only a strip beneath the picture.
+    init(screen: CGSize, top: CGFloat, bottom: CGFloat, widescreen: Bool, fullView: Bool) {
+        if fullView {
+            let height = min(screen.width * 16 / 9, screen.height - top - Self.fullViewDepth)
+            let width = height * 9 / 16
+            picture = CGRect(x: (screen.width - width) / 2, y: top, width: width, height: height)
+            return
+        }
+        let upper = max(top + 4, Self.smallestTop)
         let lower = bottom + Self.smallestBottom
         let height = min(screen.width * 4 / 3, screen.height - upper - lower)
         let spare = screen.height - height
