@@ -20,6 +20,8 @@ struct CameraScreen: View {
     @AppStorage("debugOverlay") private var showDebugOverlay = false
     @ObservedObject var hold: HoldTracker
     @State private var showSettings = false
+    @State private var selectedDial = ControlDial.shutter
+    @State private var showTools = false
     @State private var focusMark: CGPoint?
     @State private var hideFocusMark: Task<Void, Never>?
     @State private var biasAtDragStart: Float?
@@ -37,16 +39,28 @@ struct CameraScreen: View {
                 viewfinder(layout.picture.size)
                     .offset(x: layout.picture.minX, y: layout.picture.minY)
                 HeldLayout(
+                    hold: hold.hold, screen: layout.topBand.size,
+                    insets: EdgeInsets(top: insets.top, leading: 0, bottom: 0, trailing: 0)
+                ) { heldInsets in
+                    StatusLine(hold: hold.hold)
+                        .padding(heldInsets)
+                }
+                .id("status \(hold.hold.label)")
+                .transition(.opacity)
+                HeldLayout(
                     hold: hold.hold, screen: layout.band.size,
                     insets: EdgeInsets(top: 0, leading: 0, bottom: insets.bottom, trailing: 0)
                 ) { heldInsets in
                     ControlBand(
-                        hold: hold.hold, isCompact: layout.isCompact, insets: heldInsets,
-                        openSettings: { showSettings = true })
+                        selected: $selectedDial, showTools: $showTools, hold: hold.hold,
+                        insets: heldInsets, openSettings: { showSettings = true })
                 }
                 .id(hold.hold.label)
                 .transition(.opacity)
                 .offset(y: layout.band.minY)
+                RecordButton(isRecording: model.isRecording) { model.toggleRecord() }
+                    .disabled(model.isBusy != nil)
+                    .position(layout.recordCenter)
             }
             .animation(.easeOut(duration: 0.15), value: hold.hold)
             .frame(width: screen.width, height: screen.height)
@@ -56,6 +70,10 @@ struct CameraScreen: View {
         .persistentSystemOverlays(.hidden)
         .sensoryFeedback(.impact(weight: .medium), trigger: model.isRecording)
         .sensoryFeedback(.selection, trigger: model.lensID)
+        .onChange(of: model.isRecording) { _, recording in
+            // The dial stays live, and any focus change during a take costs frames.
+            if recording, selectedDial == .focus { selectedDial = .shutter }
+        }
         .sheet(isPresented: $showSettings) {
             SettingsView()
         }

@@ -15,23 +15,35 @@ enum Tokens {
     static let icon = Font.system(size: 19, weight: .regular)
 }
 
-/// Where the picture and the controls sit, in portrait screen coordinates. Nothing overlaps: the
-/// picture takes the largest fit that leaves room for the controls beneath it.
+/// Where the picture and the controls sit, in portrait screen coordinates. Nothing overlaps. The
+/// picture's top and bottom edges come from the 4:3 frame and split the spare height as the Camera
+/// app does, so 16:9 only narrows the picture and the controls never move.
 struct CameraGeometry {
     let picture: CGRect
+    let topBand: CGRect
     let band: CGRect
-    /// The band is too short for the toolbar and status line.
-    let isCompact: Bool
+    /// Stays put in every hold and aspect, so the thumb always finds it.
+    let recordCenter: CGPoint
 
-    private static let smallestBand: CGFloat = 132
+    /// The record button's row, measured in from the phone's bottom edge.
+    static let actionDepth: CGFloat = 92
+
+    /// Share of the spare height above the picture. Estimated, not measured from the Camera app.
+    private static let topShare: CGFloat = 0.3
+    private static let statusDepth: CGFloat = 36
+    private static let controlDepth: CGFloat = actionDepth + 98
 
     init(screen: CGSize, top: CGFloat, bottom: CGFloat, widescreen: Bool) {
         let aspect: CGFloat = widescreen ? 16.0 / 9 : 4.0 / 3
-        let room = screen.height - top - bottom - Self.smallestBand
-        let height = min(screen.width * aspect, room)
+        let smallestTop = top + Self.statusDepth
+        let smallestBottom = bottom + Self.controlDepth
+        let height = min(screen.width * 4 / 3, screen.height - smallestTop - smallestBottom)
+        let spare = screen.height - height
+        let y = min(max(spare * Self.topShare, smallestTop), spare - smallestBottom)
         let width = height / aspect
-        picture = CGRect(x: (screen.width - width) / 2, y: top, width: width, height: height)
-        band = CGRect(x: 0, y: top + height, width: screen.width, height: screen.height - top - height)
-        isCompact = band.height - bottom < 210
+        picture = CGRect(x: (screen.width - width) / 2, y: y, width: width, height: height)
+        topBand = CGRect(x: 0, y: 0, width: screen.width, height: y)
+        band = CGRect(x: 0, y: y + height, width: screen.width, height: screen.height - y - height)
+        recordCenter = CGPoint(x: screen.width / 2, y: screen.height - bottom - Self.actionDepth / 2)
     }
 }

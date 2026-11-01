@@ -7,14 +7,13 @@ enum ControlDial: CaseIterable, Identifiable {
     var id: Self { self }
 }
 
-/// All controls, on black beneath the picture. Rows and columns divide their space evenly, so
-/// every layout stays symmetric.
+/// All controls, on black beneath the picture. The record button sits above this band in one
+/// fixed place, so the band leaves a gap for it in every hold.
 struct ControlBand: View {
     @EnvironmentObject private var model: AppModel
-    @State private var selected: ControlDial?
-    @State private var showToolsInCompact = false
+    @Binding var selected: ControlDial
+    @Binding var showTools: Bool
     let hold: Hold
-    let isCompact: Bool
     let insets: EdgeInsets
     let openSettings: () -> Void
 
@@ -32,97 +31,75 @@ struct ControlBand: View {
         .padding(.trailing, insets.trailing)
     }
 
+    /// The action row stays on the phone's bottom edge, which is the top when upside down.
     private var portrait: some View {
         VStack(spacing: 0) {
-            if !isCompact {
-                evenly { StatusLine() }
-                evenly { ToolRow(axis: .horizontal) }
-            }
-            evenly {
-                if isCompact && showToolsInCompact {
-                    ToolRow(axis: .horizontal)
-                } else {
-                    ControlPanel(selected: $selected, axis: .horizontal)
-                }
-            }
-            evenly { actionRow }
+            if hold == .upsideDown { actionRow }
+            panel(.horizontal)
+                .frame(maxHeight: .infinity)
+            if hold != .upsideDown { actionRow }
         }
-        .padding(.horizontal, 12)
     }
 
-    private func evenly<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        content().frame(maxHeight: .infinity)
-    }
-
-    /// The record column stays on the outer edge, under the thumb.
     private var landscape: some View {
         HStack(spacing: 0) {
             if hold == .landscapeRight { actionColumn }
-            if !isCompact {
-                ToolRow(axis: .vertical)
-                    .frame(width: 48)
-            }
-            ControlPanel(selected: $selected, axis: .vertical)
+            panel(.vertical)
                 .frame(maxWidth: .infinity)
             if hold == .landscapeLeft { actionColumn }
         }
-        .padding(.vertical, 12)
+    }
+
+    @ViewBuilder
+    private func panel(_ axis: Axis) -> some View {
+        if showTools {
+            ToolDrawer(axis: axis, openSettings: openSettings)
+                .transition(.opacity)
+        } else {
+            ControlPanel(selected: $selected, axis: axis)
+                .transition(.opacity)
+        }
     }
 
     private var actionRow: some View {
         HStack(spacing: 0) {
-            leadingActions
-            recordButton.frame(maxWidth: .infinity)
-            trailingActions
+            lensSlot
+            Color.clear.frame(width: CameraGeometry.actionDepth)
+            toolsButton
         }
+        .frame(height: CameraGeometry.actionDepth)
     }
 
     private var actionColumn: some View {
         VStack(spacing: 0) {
-            trailingActions
-            recordButton.frame(maxHeight: .infinity)
-            leadingActions
+            toolsButton
+            Color.clear.frame(height: CameraGeometry.actionDepth)
+            lensSlot
         }
-        .frame(width: 76)
+        .frame(width: CameraGeometry.actionDepth)
     }
 
     @ViewBuilder
-    private var leadingActions: some View {
+    private var lensSlot: some View {
         if model.isRecording {
             RecordingClock().frame(maxWidth: .infinity, maxHeight: .infinity)
-            Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            lensButton.frame(maxWidth: .infinity, maxHeight: .infinity)
-            if isCompact {
-                iconButton("slider.horizontal.3", label: "Tools", isOn: showToolsInCompact) {
-                    showToolsInCompact.toggle()
-                }
-            } else {
-                aspectButton
-            }
+            lensButton
         }
     }
 
-    @ViewBuilder
-    private var trailingActions: some View {
-        if model.isRecording {
-            if isCompact {
-                iconButton("slider.horizontal.3", label: "Tools", isOn: showToolsInCompact) {
-                    showToolsInCompact.toggle()
-                }
-            } else {
-                monitorButton
-            }
-            Telemetry().frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            monitorButton
-            iconButton("gearshape", label: "Settings", isOn: false, action: openSettings)
+    private var toolsButton: some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.12)) { showTools.toggle() }
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(Tokens.icon)
+                .foregroundStyle(showTools ? Tokens.held : Tokens.value)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
         }
-    }
-
-    private var recordButton: some View {
-        RecordButton(isRecording: model.isRecording) { model.toggleRecord() }
-            .disabled(model.isBusy != nil)
+        .buttonStyle(.plain)
+        .accessibilityLabel(showTools ? "Show dials" : "Show tools")
     }
 
     private var lensButton: some View {
@@ -138,6 +115,30 @@ struct ControlBand: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Change lens")
         .disabled(model.isBusy != nil)
+    }
+}
+
+/// Everything that isn't a dial, in the dials' place so it never covers the picture.
+struct ToolDrawer: View {
+    @EnvironmentObject private var model: AppModel
+    let axis: Axis
+    let openSettings: () -> Void
+
+    var body: some View {
+        let lines = axis == .horizontal
+            ? AnyLayout(VStackLayout(spacing: 0)) : AnyLayout(HStackLayout(spacing: 0))
+        let line = axis == .horizontal
+            ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
+        lines {
+            ToolRow(axis: axis)
+            line {
+                if !model.isRecording { aspectButton }
+                monitorButton
+                if !model.isRecording {
+                    iconButton("gearshape", label: "Settings", isOn: false, action: openSettings)
+                }
+            }
+        }
     }
 
     private var aspectButton: some View {
@@ -175,32 +176,66 @@ struct ControlBand: View {
     }
 }
 
-/// One line of what the camera is set to and how long it can run.
+/// What the camera is set to and how long it can run, above the picture. Held sideways the band
+/// is too narrow for a line, so only the short values stay, stacked.
 struct StatusLine: View {
     @EnvironmentObject private var model: AppModel
+    let hold: Hold
 
     var body: some View {
-        HStack(spacing: 10) {
-            Text(model.signalPath)
+        Group {
+            if hold.isLandscape {
+                VStack(spacing: 16) {
+                    if model.isRecording && model.showTelemetry {
+                        Text(String(format: "%.1f", model.stats.rollingFPS))
+                        Text(String(format: "%.0f", model.dataRate))
+                    }
+                    readings
+                }
+                .labelStyle(CompactLabel(axis: .vertical))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
-            Spacer(minLength: 0)
-            Label(model.timeLeftLabel, systemImage: "internaldrive")
-            Label(model.batteryLabel, systemImage: "battery.75")
-            if model.isHot {
-                Image(systemName: "thermometer.high").foregroundStyle(Tokens.held)
+            } else {
+                HStack(spacing: 10) {
+                    Text(leadingText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    Spacer(minLength: 0)
+                    readings
+                }
+                .labelStyle(CompactLabel(axis: .horizontal))
+                .padding(.horizontal, 16)
             }
         }
-        .labelStyle(CompactLabel())
         .font(Tokens.lineFont)
         .foregroundStyle(Tokens.label)
         .accessibilityElement(children: .combine)
     }
+
+    private var leadingText: String {
+        guard model.isRecording, model.showTelemetry else { return model.signalPath }
+        return String(
+            format: "%.2f FPS  %.0f MB/S  GPU %.0f", model.stats.rollingFPS, model.dataRate,
+            model.pipelineStats.gpuRecentMs)
+    }
+
+    @ViewBuilder
+    private var readings: some View {
+        Label(model.timeLeftLabel, systemImage: "internaldrive")
+        Label(model.batteryLabel, systemImage: "battery.75")
+        if model.isHot {
+            Image(systemName: "thermometer.high").foregroundStyle(Tokens.held)
+        }
+    }
 }
 
 private struct CompactLabel: LabelStyle {
+    let axis: Axis
+
     func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 3) {
+        let layout = axis == .horizontal
+            ? AnyLayout(HStackLayout(spacing: 3)) : AnyLayout(VStackLayout(spacing: 3))
+        layout {
             configuration.icon
             configuration.title
         }
@@ -219,23 +254,6 @@ struct RecordingClock: View {
             .minimumScaleFactor(0.7)
             .fixedSize(horizontal: true, vertical: false)
             .accessibilityLabel("Recording, \(elapsed) seconds")
-    }
-}
-
-struct Telemetry: View {
-    @EnvironmentObject private var model: AppModel
-
-    var body: some View {
-        if model.showTelemetry {
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(String(format: "%.2f FPS", model.stats.rollingFPS))
-                Text(String(format: "%.0f MB/S", model.dataRate))
-                Text(String(format: "GPU %.0f", model.pipelineStats.gpuRecentMs))
-            }
-            .font(Tokens.lineFont)
-            .foregroundStyle(model.isHot ? Tokens.held : Tokens.label)
-            .fixedSize()
-        }
     }
 }
 
@@ -267,20 +285,21 @@ struct ToolRow: View {
     }
 }
 
-/// The read-outs, which give way to a dial in the same place.
+/// Four tabs that always show their values, over the one dial for the selected tab.
 struct ControlPanel: View {
     @EnvironmentObject private var model: AppModel
     @AppStorage("fineDial") private var fine = false
-    @Binding var selected: ControlDial?
+    @Binding var selected: ControlDial
     let axis: Axis
 
     var body: some View {
-        if let selected {
-            dialPanel(selected)
-                .transition(.opacity)
-        } else {
-            readouts
-                .transition(.opacity)
+        let horizontal = axis == .horizontal
+        let lines = horizontal
+            ? AnyLayout(VStackLayout(spacing: 0)) : AnyLayout(HStackLayout(spacing: 0))
+        lines {
+            tabs
+                .frame(maxWidth: horizontal ? .infinity : 48, maxHeight: horizontal ? 46 : .infinity)
+            dialRow
         }
     }
 
@@ -288,24 +307,24 @@ struct ControlPanel: View {
         axis == .horizontal ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
     }
 
-    private var readouts: some View {
+    private var tabs: some View {
         stack {
-            cell(title: "FPS", value: "\(Int(model.frameRate))", held: false)
             ForEach(ControlDial.allCases) { control in
                 Button {
-                    open(control)
+                    select(control)
                 } label: {
-                    cell(title: title(control), value: value(control), held: isHeld(control))
+                    cell(control)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(name(control))
                 .accessibilityValue(value(control))
+                .accessibilityAddTraits(selected == control ? .isSelected : [])
             }
         }
     }
 
-    private func open(_ control: ControlDial) {
+    private func select(_ control: ControlDial) {
         // A focus rack lost half its frames during a take.
         if control == .focus, model.isRecording {
             let notice = "Focus is held during a recording"
@@ -315,21 +334,28 @@ struct ControlPanel: View {
             }
             return
         }
-        withAnimation(.easeOut(duration: 0.12)) { selected = control }
+        selected = control
     }
 
-    private func cell(title: String, value: String, held: Bool) -> some View {
+    private func cell(_ control: ControlDial) -> some View {
         VStack(spacing: 2) {
-            Text(title)
+            Text(title(control))
                 .font(Tokens.labelFont)
-                .foregroundStyle(Tokens.label)
-            Text(value)
+                .foregroundStyle(selected == control ? Tokens.value : Tokens.label)
+            Text(value(control))
                 .font(Tokens.valueFont)
-                .foregroundStyle(held ? Tokens.held : Tokens.value)
+                .foregroundStyle(isHeld(control) ? Tokens.held : Tokens.value)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: axis == .horizontal ? .bottom : .trailing) {
+            if selected == control {
+                Rectangle()
+                    .fill(Tokens.value)
+                    .frame(width: axis == .horizontal ? 28 : 1, height: axis == .horizontal ? 1 : 28)
+            }
+        }
     }
 
     private func title(_ control: ControlDial) -> String {
@@ -369,23 +395,17 @@ struct ControlPanel: View {
         }
     }
 
-    private func dialPanel(_ control: ControlDial) -> some View {
-        let buttons = Group {
-            smallButton(isHeld(control) ? "lock" : "lock.open", isOn: isHeld(control),
-                label: isHeld(control) ? "Unlock \(name(control))" : "Lock \(name(control))") {
-                toggleLock(control)
+    private var dialRow: some View {
+        stack {
+            smallButton(isHeld(selected) ? "lock" : "lock.open", isOn: isHeld(selected),
+                label: isHeld(selected) ? "Unlock \(name(selected))" : "Lock \(name(selected))") {
+                toggleLock(selected)
             }
+            Dial(
+                stops: stops(selected), value: binding(selected), axis: axis, spacing: fine ? 7 : 44,
+                label: name(selected), valueText: value(selected))
             smallButton("scope", isOn: fine, label: fine ? "Snap to stops" : "Fine adjustment") {
                 fine.toggle()
-            }
-        }
-        return stack {
-            buttons
-            Dial(
-                stops: stops(control), value: binding(control), axis: axis, spacing: fine ? 7 : 44,
-                label: name(control), valueText: value(control))
-            smallButton("xmark", isOn: false, label: "Close \(name(control))") {
-                withAnimation(.easeOut(duration: 0.12)) { selected = nil }
             }
         }
     }
@@ -557,6 +577,7 @@ struct Dial: View {
     }
 }
 
+/// Fills the phone's bottom-edge row, and stays in one place whatever the hold.
 struct RecordButton: View {
     let isRecording: Bool
     let action: () -> Void
@@ -565,12 +586,12 @@ struct RecordButton: View {
         Button(action: action) {
             ZStack {
                 Circle()
-                    .strokeBorder(Tokens.value, lineWidth: 2)
-                RoundedRectangle(cornerRadius: isRecording ? 3 : 27)
+                    .strokeBorder(Tokens.value, lineWidth: 3)
+                RoundedRectangle(cornerRadius: isRecording ? 4 : 30)
                     .fill(Tokens.record)
-                    .frame(width: isRecording ? 24 : 54, height: isRecording ? 24 : 54)
+                    .frame(width: isRecording ? 28 : 60, height: isRecording ? 28 : 60)
             }
-            .frame(width: 64, height: 64)
+            .frame(width: 72, height: 72)
             .contentShape(Circle())
             .animation(.easeOut(duration: 0.15), value: isRecording)
         }

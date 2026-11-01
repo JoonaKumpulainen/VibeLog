@@ -67,6 +67,8 @@ Modules are dynamic frameworks. Swift is in Swift 5 mode.
 
 The owner approved a redesign called the precision instrument: the picture sits under the Dynamic Island and every control lives on black beneath it, with nothing overlapping. Icons, monospaced values and even spacing. Glass was dropped: it added no clarity, and flat black can't cost frames. Done so far: layout, orientation tagging, snapping dials with a fine mode, and a saved config. Still to do: format panel and searchable settings, 24 and 25 fps, warnings, library, accessibility and a 10-minute test. Gyro logging to a Gyroflow `.gcsv` follows as its own change once that test passes. Stage 1 is confirmed on the phone. `VLCapture` gained focus and exposure points, exposure compensation and live values for direct control. Other module code is unchanged.
 
+The screen now uses one dial: four value tabs over a single always-visible dial, with tools, aspect, monitor and Settings behind the tools button in the dials' place. The record button stays in one fixed spot on the phone's bottom edge in every hold, and the picture keeps the same top and bottom edges in 4:3 and 16:9. `CameraGeometry.topShare` is an estimate of the Camera app's split, not a measurement.
+
 Diagnostics opens with a long press on **Version** in Settings.
 
 ## Adjusting the camera while recording
