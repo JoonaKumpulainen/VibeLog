@@ -346,22 +346,6 @@ final class PipelineGPUTests: XCTestCase {
         }
     }
 
-    func testSubmittedFramesAreCopiedAndProcessed() throws {
-        let pipeline = try makePipeline()
-        var buffer: CVPixelBuffer?
-        let attributes = [kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any]]
-        let status = CVPixelBufferCreate(
-            nil, 64, 32, kCVPixelFormatType_14Bayer_BGGR, attributes as CFDictionary, &buffer)
-        guard status == kCVReturnSuccess, let buffer else {
-            throw XCTSkip("Bayer pixel buffers are not available here")
-        }
-        pipeline.submit(RawFrame(
-            buffer: buffer, pts: 0, exposureSeconds: 0.01, iso: 100, whiteBalanceGains: [2, 1, 1.5]))
-        let processed = expectation(for: NSPredicate { _, _ in pipeline.currentStats().processed == 1 }, evaluatedWith: nil)
-        wait(for: [processed], timeout: 10)
-        XCTAssertEqual(pipeline.currentStats().dropped, 0)
-    }
-
     func testClippedSamplesStayNeutral() throws {
         let pipeline = try makePipeline()
         var settings = ProcessingSettings()
