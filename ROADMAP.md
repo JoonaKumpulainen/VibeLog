@@ -7,23 +7,18 @@
 | 1 | Prove a continuous RAW stream | Done: 12 MP Bayer at 30 fps |
 | 2 | GPU debayer, color and log curves | Done |
 | 3 | ProRes and HEVC encoding with audio | Done: ProRes 422 HQ at 4032x3024 |
-| 4 | Heat, crop, exposure tools, LUT import | In progress |
+| 4 | Heat, crop, exposure tools, LUT import | Done: 10 minutes at 30 fps |
 | 5 | Camera experience redesign | Planned |
 | 6 | Image quality and capture | Planned |
 | 7 | Shooting tools | Planned |
 | 8 | On-phone finishing | Planned |
-
-## Phase 4: what's left
-
-- Measure how long recording lasts past 8 minutes, in both pipelines.
-- Check **LUT input** with a look LUT.
 
 ## Pipelines
 
 Both pipelines use the same debayer, color and log math at every pixel.
 
 - **Maximum quality** is the default. It builds a full RGB image, then converts it for the encoder. It is the reference that the other pipeline is tested against, and the only one that can resize.
-- **Efficient** writes the encoder's planes directly, and gives the monitor its own half-size image. It should use less GPU time and memory while recording the same picture, to within rounding. Other sizes fall back to Maximum quality.
+- **Efficient** writes the encoder's planes directly, and gives the monitor its own half-size image. It records the same picture to within rounding in tests, and one person could not see a difference on real footage. Other sizes fall back to Maximum quality. In one 10-minute run its GPU time was about the same as Maximum quality, and it had more failed photos, so it is not yet proven better.
 
 Half-resolution color is left out because it could soften fine red and blue detail.
 
