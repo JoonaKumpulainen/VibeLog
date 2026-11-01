@@ -52,7 +52,7 @@ The file is tagged Rec.2020, but its transfer tag is nominal. Apply the log curv
 
 **Duration** goes up to 30 minutes or **Until stopped**. Recording stops safely if the thermal state turns critical or less than 2 GB is free. Files are written in 10-second fragments, so a killed app should lose only the last few seconds. **Monitor off while recording** freezes the preview to save power and heat. **Reduce load when hot** switches to the bilinear debayer and a slower monitor once the thermal state is serious.
 
-On an iPhone 14 Pro, ProRes 422 HQ at full size held 30 fps for 5 minutes, indoors, before heat cut GPU speed and frames began to drop.
+On an iPhone 14 Pro, ProRes 422 HQ at full size held 30 fps for 5 minutes before heat cut GPU speed and frames began to drop.
 
 **Aspect** records 4:3 open gate or a 16:9 center crop, and the monitor dims the area outside it. **Exposure tool** adds zebras where the sensor clips, or false color: blue is four stops under middle gray, green is middle gray, pink is about one stop over, yellow is well above that, and red is clipped. These show exposure of the signal, not of the graded image.
 
