@@ -96,9 +96,11 @@ final class AppModel: ObservableObject {
 
         thermalObserver = NotificationCenter.default.addObserver(
             forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: nil
-        ) { _ in
+        ) { [weak self] _ in
             Log.shared.warn("Thermal state changed to \(SystemStatus.thermalName)")
+            self?.updateHeatMode()
         }
+        updateHeatMode()
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             self?.tick()
         }
@@ -186,6 +188,11 @@ final class AppModel: ObservableObject {
                 Log.shared.error("Cannot load LUT \(name): \(error)")
             }
         }
+    }
+
+    private func updateHeatMode() {
+        let state = ProcessInfo.processInfo.thermalState
+        pipeline?.setHot(state == .serious || state == .critical)
     }
 
     private var outputSize: EncoderSize { widescreen ? encoderSize.widescreen : encoderSize }
@@ -365,6 +372,10 @@ final class AppModel: ObservableObject {
             let encoder = try VideoEncoder(config: .init(
                 url: url, preset: encoderPreset, size: outputSize, audio: true, metadata: metadata))
             audio.onSample = { [weak encoder] sample in encoder?.appendAudio(sample) }
+            encoder.onFailure = { [weak self] message in
+                Log.shared.error("Recording stopped: \(message)")
+                self?.stopRecording()
+            }
             audio.start { _ in }
             activeEncoder = encoder
             router.stats.reset()

@@ -37,9 +37,10 @@ public enum SystemStatus {
         return result == KERN_SUCCESS ? Int(info.phys_footprint) : 0
     }
 
+    /// Space writable right now. The "important usage" figure also counts purgeable data,
+    /// which read 30 GB on a disk that was already full.
     public static var freeDisk: Int64 {
-        let values = try? Storage.documents.resourceValues(
-            forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-        return values?.volumeAvailableCapacityForImportantUsage ?? 0
+        let values = try? Storage.documents.resourceValues(forKeys: [.volumeAvailableCapacityKey])
+        return Int64(values?.volumeAvailableCapacity ?? 0)
     }
 }

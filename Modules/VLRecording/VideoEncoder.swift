@@ -49,6 +49,9 @@ public final class VideoEncoder: VideoFrameSink {
         case cannotStart(String)
     }
 
+    /// Runs on the main queue once if the writer fails mid-recording.
+    public var onFailure: ((String) -> Void)?
+
     private let config: Config
     private let writer: AVAssetWriter
     private let videoInput: AVAssetWriterInput
@@ -64,6 +67,7 @@ public final class VideoEncoder: VideoFrameSink {
     private var framesWritten = 0
     private var framesDropped = 0
     private var audioSamples = 0
+    private var failureReported = false
 
     public init(config: Config) throws {
         self.config = config
@@ -135,7 +139,12 @@ public final class VideoEncoder: VideoFrameSink {
 
     public func append(_ buffer: CVPixelBuffer, at time: CMTime) {
         queue.async { [self] in
-            guard !finished, writer.status == .writing else { return }
+            guard !finished else { return }
+            guard writer.status == .writing else {
+                framesDropped += 1
+                reportFailure()
+                return
+            }
             if !sessionStarted {
                 writer.startSession(atSourceTime: time)
                 sessionStarted = true
@@ -184,6 +193,13 @@ public final class VideoEncoder: VideoFrameSink {
                 DispatchQueue.main.async { completion(result) }
             }
         }
+    }
+
+    private func reportFailure() {
+        guard !failureReported, writer.status == .failed else { return }
+        failureReported = true
+        let message = writer.error.map { describe($0) } ?? "Writer failed"
+        DispatchQueue.main.async { [self] in onFailure?(message) }
     }
 
     private func describe(_ error: Error) -> String {

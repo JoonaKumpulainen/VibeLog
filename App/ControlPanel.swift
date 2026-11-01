@@ -43,10 +43,17 @@ struct ControlPanel: View {
                         ForEach(model.lutNames, id: \.self) { Text($0).tag($0) }
                     }
                     Button("Import .cube LUT") { importingLUT = true }
+                    if !model.selectedLUT.isEmpty {
+                        Picker("LUT input", selection: $model.processing.lutExpectsRec709) {
+                            Text("Log").tag(false)
+                            Text("Rec.709").tag(true)
+                        }
+                    }
                     Picker("Exposure tool", selection: $model.processing.overlay) {
                         ForEach(ExposureOverlay.allCases) { Text($0.label).tag($0) }
                     }
                     Toggle("Monitor off while recording", isOn: $model.processing.pauseMonitorWhileRecording)
+                    Toggle("Reduce load when hot", isOn: $model.processing.reduceLoadWhenHot)
                     Picker("Log curve", selection: $model.processing.curve) {
                         ForEach(LogCurve.allCases) { Text($0.label).tag($0) }
                     }

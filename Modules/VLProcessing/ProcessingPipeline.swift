@@ -57,6 +57,10 @@ public struct ProcessingSettings: Equatable, Sendable {
     /// Share of the sensor height kept by the recording crop, dimmed outside on the monitor.
     public var cropFraction = 1.0
     public var pauseMonitorWhileRecording = false
+    /// Uses the cheaper debayer and a slower monitor when the phone is hot.
+    public var reduceLoadWhenHot = true
+    /// Look LUTs expect Rec.709; conversion LUTs expect the log image.
+    public var lutExpectsRec709 = false
     public var curve = LogCurve.appleLog
     public var demosaic = DemosaicMethod.malvar
     public var monitor = MonitorMode.rec709
@@ -174,6 +178,8 @@ public final class ProcessingPipeline: NSObject {
     private var gpuTotalMs = 0.0
     private var stillRequest: ((ProcessedStill?) -> Void)?
     private var sink: VideoFrameSink?
+    private var hot = false
+    private var drawCounter = 0
     private var loggedFailure = false
 
     public init?(pixelFormat: MTLPixelFormat = .bgra8Unorm) {
@@ -206,6 +212,15 @@ public final class ProcessingPipeline: NSObject {
         }
         super.init()
         CVMetalTextureCacheCreate(nil, nil, device, nil, &textureCache)
+    }
+
+    /// Reports whether the phone is hot enough to reduce load, if that setting is on.
+    public func setHot(_ isHot: Bool) {
+        lock.lock()
+        let changed = hot != isHot
+        hot = isHot
+        lock.unlock()
+        if changed { Log.shared.warn("Reduced GPU load \(isHot ? "on" : "off")") }
     }
 
     /// Replaces the Rec.709 monitoring LUT, or restores it when nil.
@@ -482,7 +497,8 @@ public final class ProcessingPipeline: NSObject {
         return ProcessParams(
             matrixRow0: row(0), matrixRow1: row(1), matrixRow2: row(2), cfaGain: cfaGain,
             redOffset: SIMD2(cfa.redOffset.x, cfa.redOffset.y), curve: settings.curve.rawValue,
-            demosaic: settings.demosaic.rawValue, black: black, scale: 1 / (clipValue - black),
+            demosaic: (hot && settings.reduceLoadWhenHot ? DemosaicMethod.bilinear : settings.demosaic).rawValue,
+            black: black, scale: 1 / (clipValue - black),
             clip: min(red, blue, 1), exposure: Float(pow(2, settings.exposureStops)))
     }
 
@@ -556,7 +572,9 @@ public final class ProcessingPipeline: NSObject {
             stats.gpuRecentMs = stats.processed == 1 ? gpuMs : stats.gpuRecentMs * 0.95 + gpuMs * 0.05
             stats.gpuMaxMs = max(stats.gpuMaxMs, gpuMs)
             let paused = settings.pauseMonitorWhileRecording && sink != nil
-            schedule = !drawScheduled && settings.monitor != .isp && !paused
+            drawCounter += 1
+            let slowed = hot && settings.reduceLoadWhenHot && drawCounter % 3 != 0
+            schedule = !drawScheduled && settings.monitor != .isp && !paused && !slowed
             if schedule { drawScheduled = true }
         } else {
             stats.dropped += 1
@@ -613,8 +631,7 @@ extension ProcessingPipeline: MTKViewDelegate {
         let current = settings
         let custom = customLUT
         lock.unlock()
-        guard current.monitor != .isp, let image,
-            let lut = custom?.texture ?? currentLUT(curve: current.curve),
+        guard current.monitor != .isp, let image, let rec709 = currentLUT(curve: current.curve),
             let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
             let commands = queue.makeCommandBuffer(),
             let encoder = commands.makeRenderCommandEncoder(descriptor: pass)
@@ -623,16 +640,21 @@ extension ProcessingPipeline: MTKViewDelegate {
         let low = custom?.lut.domainMin ?? SIMD3(repeating: 0)
         let high = custom?.lut.domainMax ?? SIMD3(repeating: 1)
         let bands = MonitorBands(curve: current.curve, exposureStops: current.exposureStops)
+        var mode: UInt32 = 0
+        if current.monitor == .rec709 {
+            mode = custom == nil ? 1 : (current.lutExpectsRec709 ? 3 : 2)
+        }
         var parameters = MonitorParams(
-            useLUT: current.monitor == .rec709 ? 1 : 0,
+            useLUT: mode,
             lutSize: Float(custom?.lut.size ?? Self.lutSize), overlay: current.overlay.rawValue,
             cropFraction: Float(current.cropFraction),
             lutScale: SIMD4(1 / (high - low), 0), lutOffset: SIMD4(low, 0),
             bandsLow: SIMD4(bands.blueBelow, bands.greenFrom, bands.greenTo, bands.pinkFrom),
-            bandsHigh: SIMD4(bands.pinkTo, bands.yellowFrom, bands.clip, 0))
+            bandsHigh: SIMD4(bands.pinkTo, bands.yellowFrom, bands.clip, Float(Self.lutSize)))
         encoder.setRenderPipelineState(monitorState)
         encoder.setFragmentTexture(image, index: 0)
-        encoder.setFragmentTexture(lut, index: 1)
+        encoder.setFragmentTexture(rec709, index: 1)
+        encoder.setFragmentTexture(custom?.texture ?? rec709, index: 2)
         encoder.setFragmentBytes(&parameters, length: MemoryLayout<MonitorParams>.stride, index: 0)
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         encoder.endEncoding()

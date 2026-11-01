@@ -17,14 +17,14 @@ struct ProcessParams {
 };
 
 struct MonitorParams {
-    uint useLUT;
-    float lutSize;
+    uint useLUT;  // 0 none, 1 Rec.709, 2 custom on log, 3 Rec.709 then custom.
+    float lutSize;  // Of the custom LUT.
     uint overlay;  // 0 none, 1 zebras, 2 false color.
     float cropFraction;  // Share of the sensor height kept by the recording crop.
     float4 lutScale;
     float4 lutOffset;
     float4 bandsLow;  // Blue below, green from, green to, pink from.
-    float4 bandsHigh;  // Pink to, yellow from, clip.
+    float4 bandsHigh;  // Pink to, yellow from, clip, size of the Rec.709 LUT.
 };
 
 struct CropParams {
@@ -184,16 +184,21 @@ vertex VertexOut monitorVertex(uint vertexID [[vertex_id]]) {
 // image is rotated 90 degrees for the portrait screen.
 fragment float4 monitorFragment(VertexOut in [[stage_in]],
                                 texture2d<float> image [[texture(0)]],
-                                texture3d<float> lut [[texture(1)]],
+                                texture3d<float> rec709 [[texture(1)]],
+                                texture3d<float> custom [[texture(2)]],
                                 constant MonitorParams &m [[buffer(0)]]) {
     constexpr sampler linearSampler(filter::linear, address::clamp_to_edge);
     float2 rotated = float2(in.uv.y, 1.0 - in.uv.x);
     float3 logColor = image.sample(linearSampler, rotated).rgb;
     float3 color = logColor;
-    if (m.useLUT != 0) {
-        float3 normalized = saturate((logColor - m.lutOffset.rgb) * m.lutScale.rgb);
+    if (m.useLUT == 1 || m.useLUT == 3) {
+        float size = m.bandsHigh.w;
+        color = rec709.sample(linearSampler, (saturate(color) * (size - 1.0) + 0.5) / size).rgb;
+    }
+    if (m.useLUT >= 2) {
+        float3 normalized = saturate((color - m.lutOffset.rgb) * m.lutScale.rgb);
         float3 coordinate = (normalized * (m.lutSize - 1.0) + 0.5) / m.lutSize;
-        color = lut.sample(linearSampler, coordinate).rgb;
+        color = custom.sample(linearSampler, coordinate).rgb;
     }
 
     float clip = m.bandsHigh.z;
