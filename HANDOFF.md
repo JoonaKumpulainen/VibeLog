@@ -1,6 +1,6 @@
 # VibeLog handoff
 
-For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of early Phase 6. Phase 5 is built, and only a few phone checks remain. The latest build is `021248e`, which passed CI with 97 tests and hasn't been tested on the phone. The latest phone results came from `a2d2cab`. The last logged session came from `9f9a456`.
+For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of early Phase 6. Phase 5 is built, and only a few phone checks remain. The latest build is `b86f6bd`, which passed CI with 99 tests and hasn't been tested on the phone. The latest phone results came from `021248e`. The last logged session came from `9f9a456`.
 
 ## What this is
 
