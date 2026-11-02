@@ -1,6 +1,6 @@
 # VibeLog handoff
 
-For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of early Phase 6. Phase 5 is built, and only a few phone checks remain. The latest build is `a2d2cab`, which passed CI with 93 tests and hasn't been tested on the phone. Earlier phone results came from `fc8fc51`. The last logged session came from `9f9a456`.
+For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of early Phase 6. Phase 5 is built, and only a few phone checks remain. The latest build is `021248e`, which passed CI with 97 tests and hasn't been tested on the phone. The latest phone results came from `a2d2cab`. The last logged session came from `9f9a456`.
 
 ## What this is
 
@@ -67,7 +67,9 @@ Modules are dynamic frameworks. Swift is in Swift 5 mode.
 - **Viewfinder yields didn't save a long take:** take `210133` on `a2d2cab`, 1x, ProRes 422 HQ, Maximum quality, uncompressed audio and all tools except zebras, began at nominal heat but only about 2 minutes after leaving fair, following a run of short takes. The camera delivered 29.99 fps with `missed 8`, but 1982 frames (12%) dropped at the GPU and the file wrote 26.35 fps. Heat reached serious at 1:30 and critical at 9:05, the first critical seen, so the app ended the take. GPU time left about 30 ms at about 3 minutes and settled near 78 ms. The viewfinder gave up 11909 draws and losses still grew, so the compute work itself is what slows. Starting heat differs from `192944`, so it isn't a direct comparison, and that take's lower loss may only reflect a cooler phone.
 - **Tele:** take `194057` delivered 29.86 fps. It started at serious heat, and GPU time reached 66 ms once tools were on, so 68 frames dropped at the GPU over 21 seconds. Take `194232`, in the same conditions, logged 664 frames at 29.98 fps, but 151 were duplicates with the same timestamp as the frame before, so the file wrote 23.13 fps. `missed` showed 0.
 - **Frame time doesn't set the lens limit:** on `a2d2cab`, 20-second takes at 1/120 s wrote 21.33 fps fixed and 21.50 variable on the ultra wide, and 29.91 both ways on the tele. Fixed stays the default until the 1x long run says otherwise, and the Diagnostics switch can go once it does.
-- **Why the ultra wide is slow:** **Log capture timing** shows the camera stays not ready for about 45 ms after each request on the ultra wide, against 30 to 32 ms on the 1x and tele. Requests are held for it, so frames land 1 or 2 sensor frames apart on a steady 33 ms grid, averaging about 21 fps. The sensor isn't slowing. The ultra wide is also the only lens whose format reports `gdc fov`, so geometric distortion correction is the first suspect, which is untested. `device.isGeometricDistortionCorrectionEnabled = false` would test it.
+- **Why the ultra wide was slow:** distortion correction. On `021248e`, 20-second takes at 1/120 s wrote 22.89 fps with it on and 29.85 fps with it off, and the camera's not-ready time fell from 40.5 ms to 31.9 ms. With it on, previews came out 704x504 with black edges, and with it off 672x504 with none, so correction reshapes the frame the app receives. Off gives the sensor's plain 4032x3024, which suits the app's goal, but the lens's distortion then stays in the picture. The switch is on by default, so the ultra wide stays slow until that changes. Whether colors and levels stay right with it off hasn't been checked on footage.
+- **Shutter priority:** at 1x and 1/60 s, a 20-second take frozen at the start and a 30-second take with ISO live both lost 0 frames, at 29.75 and 29.84 fps. ISO moved from 926 to 1114 between them, but no take has followed a real change of light.
+- **Frame steps:** in a 20-second 1x take, copy took about 7 ms, queue 0.3 ms, append 0 ms and draw 6 ms, with the compute pass at 26 ms. The viewfinder is small next to compute. A long take should show which step grows when hot.
 - **Tele:** two 20-second takes at 1/120 s kept every frame at 29.91 fps with no duplicates. The earlier 23 fps duplicates take hasn't repeated.
 - **Auto during a take:** the owner reported that auto exposure and white balance work. It hasn't been in a logged test, so its cost isn't measured.
 - **Long run in Efficient:** 10:12 of ProRes 422 HQ at full size with 0 `DROP`, 18338 frames and 172 MB/s, in a dark scene at 1/31 s and ISO 8710. Heat reached serious at 5 minutes, with **Keep recording when hot** on and no failure. The file wrote 29.97 fps, about 16 frames fewer than 30 fps gives, and the rolling rate dipped to 29.49 in 8 of 122 samples. `DROP` doesn't count frames the camera never delivered, so result lines now log `missed` and `gap`.
@@ -85,7 +87,7 @@ Modules are dynamic frameworks. Swift is in Swift 5 mode.
 - Whether the 8-minute clip played to the end.
 - Color accuracy against a chart.
 - Whether the exposure default holds across scenes.
-- Why the ultra wide and tele fall short of 30 fps.
+- Whether footage with distortion correction off keeps correct color and levels.
 - Crash recovery from the 10-second file fragments.
 - What `-12686` and `-16800` mean. Nearly every one is the single failure right after a session rebuild. The exception is the ultra wide long run, where 33 came mid-take while the GPU ran slow.
 - Why `-11819` session runtime errors appear. Three came with the camera idle, and each stream recovered within a second.
@@ -107,9 +109,9 @@ New additions follow the design rules in [ROADMAP.md](ROADMAP.md). `CameraGeomet
 - **Test link:** see below.
 - **From other sessions:** the 48mm RAW probe and **Log capture timing**.
 
-### Built after `a2d2cab`
+### New in `021248e`, untested on the phone
 
-- **Efficient path when hot:** a Diagnostics switch, off by default. While the phone is hot, frames use the Efficient path whichever pipeline is chosen. `tools/suites/heat_paths.json` tests it.
+- **Efficient path when hot:** a Diagnostics switch, on by default since after `021248e`, at the owner's request and before any long take has proven it. While the phone is hot, frames use the Efficient path whichever pipeline is chosen. `tools/suites/heat_paths.json` tests it.
 - **Frame steps:** `Recording` and result lines log `steps copy, queue, append, draw` in ms, to show where GPU time goes as heat rises.
 - **Lens distortion correction:** a Diagnostics switch, on by default, because the ultra wide's 45 ms wait may come from it. `tools/suites/ultra_wide.json` tests it.
 - **Suites:** `tools/test_server.py suite <plan.json>` runs takes and cooling breaks, stopping the stream to cool, and writes `suite_*.csv` and `heat_*.csv`. A cooling step waits for a minimum time as well as nominal heat, because `210133` showed nominal alone isn't cool.

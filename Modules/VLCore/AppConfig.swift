@@ -84,10 +84,10 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var peakingSensitivity = "low"
     /// Holds the sensor at one frame time at 30 fps, as every other rate does.
     public var fixedFrameTime = true
-    /// Lets the camera apply lens distortion correction, as it does by default.
-    public var distortionCorrection = true
+    /// Lets the camera reshape frames to correct the lens. On, the ultra wide only reached 23 fps.
+    public var distortionCorrection = false
     /// Moves to the Efficient path while the phone is hot.
-    public var efficientWhenHot = false
+    public var efficientWhenHot = true
     public var frameGuide = "2.39"
     public var desqueeze = 1.0
     public var fileTag = "rec2020"

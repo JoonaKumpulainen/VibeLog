@@ -63,14 +63,14 @@ public struct CaptureConfig: Sendable {
     public var usePhotoPreset: Bool
     /// Photo methods only: holds 30 fps at one frame time. Off, the sensor may stretch to 1/15 s.
     public var fixedFrameTime: Bool
-    /// Photo methods only: off stops the camera correcting lens distortion, where it does.
+    /// Photo methods only: on lets the camera correct lens distortion, where it can.
     public var distortionCorrection: Bool
 
     public init(
         lensID: String, formatIndex: Int, method: CaptureMethod, rawPixelFormat: OSType? = nil,
         photoSize: PhotoSize? = nil, videoPixelFormat: OSType? = nil, videoFPS: Double = 30,
         frameRate: Double = 30, bracketCount: Int = 3, usePhotoPreset: Bool = true,
-        fixedFrameTime: Bool = true, distortionCorrection: Bool = true
+        fixedFrameTime: Bool = true, distortionCorrection: Bool = false
     ) {
         self.lensID = lensID
         self.formatIndex = formatIndex

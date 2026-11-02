@@ -130,7 +130,7 @@ public struct ProcessingSettings: Equatable, Sendable {
     /// Stretches the viewfinder across its short side for anamorphic lenses. The file stays as shot.
     public var desqueeze = 1.0
     /// Uses the Efficient path while the phone is hot, whichever pipeline is chosen.
-    public var efficientWhenHot = false
+    public var efficientWhenHot = true
     /// On an iPhone 14 Pro, auto exposure on a plain surface read 0.37 linear at +0.5 stops,
     /// so -0.5 stops places it near 0.18. This is from a single measurement.
     public var exposureStops = -0.5

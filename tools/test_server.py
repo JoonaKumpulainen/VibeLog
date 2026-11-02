@@ -239,13 +239,16 @@ def send_once(options, command):
 def send(options):
     command = command_from(options.words)
     try:
+        waiting = options.wait and command["action"] == "record"
+        previous = send_once(options, {"action": "status"})["values"].get("lastResult") if waiting else None
         reply = send_once(options, command)
         print(json.dumps(reply, indent=2))
-        if options.wait and reply["ok"] and command["action"] == "record":
+        if waiting and reply["ok"]:
             time.sleep(command["seconds"])
             while True:
                 reply = send_once(options, {"action": "status"})
-                if reply["values"].get("recording") == "false":
+                values = reply["values"]
+                if values.get("recording") == "false" and values.get("lastResult") != previous:
                     break
                 time.sleep(2)
             print(reply["values"].get("lastResult", ""))
@@ -260,7 +263,9 @@ RESULT = re.compile(
     r"capture (?P<capture>[\d.]+) fps fail (?P<failed>\d+) missed (?P<missed>\d+) duplicates (?P<duplicates>\d+)"
     r" .*gpu (?P<gpu>[\d.]+) recent .*copy (?P<copy>[\d.]+) queue (?P<queue>[\d.]+) append (?P<append>[\d.]+)"
     r" draw (?P<draw>[\d.]+) ms, viewfinder yields (?P<yields>\d+)")
-HEAT_FIELDS = ["time", "label", "thermal", "battery", "fps", "drops", "gpuMs", "queueMs", "drawMs", "freeGB"]
+HEAT_FIELDS = [
+    "time", "label", "thermal", "battery", "fps", "drops", "gpuMs", "copyMs", "queueMs", "drawMs", "freeGB",
+    "distortionCorrection", "efficientWhenHot"]
 RESULT_FIELDS = ["label", "seconds", "thermal_end", *RESULT.groupindex, "result"]
 
 
@@ -306,7 +311,8 @@ class Suite:
 
     def set_values(self, values):
         for name, value in values.items():
-            reply = self.ask({"action": "set", "name": name, "value": str(value)})
+            text = str(value).lower() if isinstance(value, bool) else str(value)
+            reply = self.ask({"action": "set", "name": name, "value": text})
             if not reply["ok"]:
                 sys.exit(f"{name}: {reply['message']}")
         time.sleep(1)

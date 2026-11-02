@@ -1128,8 +1128,8 @@ final class AppConfigTests: XCTestCase {
         XCTAssertEqual(config.peakingSensitivity, "low")
         XCTAssertTrue(config.fixedFrameTime)
         XCTAssertEqual(config.testServer, "")
-        XCTAssertTrue(config.distortionCorrection)
-        XCTAssertFalse(config.efficientWhenHot)
+        XCTAssertFalse(config.distortionCorrection)
+        XCTAssertTrue(config.efficientWhenHot)
         XCTAssertEqual(config.fileTag, "rec2020")
     }
 

@@ -74,7 +74,7 @@ final class AppModel: ObservableObject {
     @Published var bracketCount = 3 { didSet { if bracketCount != oldValue { reconfigure() } } }
     @Published var usePhotoPreset = true { didSet { if usePhotoPreset != oldValue { reconfigure() } } }
     @Published var fixedFrameTime = true { didSet { if fixedFrameTime != oldValue { reconfigure() } } }
-    @Published var distortionCorrection = true { didSet { if distortionCorrection != oldValue { reconfigure() } } }
+    @Published var distortionCorrection = false { didSet { if distortionCorrection != oldValue { reconfigure() } } }
     @Published var frameGuide = FrameGuide.scope
     @Published var fileTag = FileTag.rec2020
 

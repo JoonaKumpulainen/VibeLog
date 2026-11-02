@@ -39,8 +39,8 @@ Long-press **Version** in Settings to open **Diagnostics**:
 | **Run 48mm RAW probe** | Captures Bayer RAW on the main camera at each mix of photo size, 2x zoom and quality priority, and compares each picture with a 1x frame to see if it's really cropped. Saves `probes/zoom_raw_*.txt` and a folder of DNGs. Keep the phone still on a detailed scene. |
 | **Test link** | Connects to `tools/test_server.py` on your computer, which can change settings, start takes and collect logs. It can't delete takes, and it's off at every launch. Use it on your own network only. [TEST_LINK.md](TEST_LINK.md) covers privacy, the server and removing it. |
 | **Fixed frame time at 30 fps** | Holds the sensor at 1/30 s. Off lets it stretch to 1/15 s, as older builds did. |
-| **Lens distortion correction** | Off stops the camera correcting lens distortion, where it does. For measuring its cost. |
-| **Efficient path when hot** | Moves to the Efficient path while the phone is hot. |
+| **Lens distortion correction** | Off by default, which keeps the sensor's plain frame. On, the camera reshapes frames to correct the lens, and the ultra wide only reached about 23 fps. |
+| **Efficient path when hot** | On by default. While the phone is hot, frames go straight to the encoder instead of through a full RGB image. The file matches Maximum quality to within rounding. |
 | **Start stream** / **Stop stream** | Starts or stops the selected method without saving. |
 | **Encode video** | Off records a RAW dump to `clips/clip_*/`. Turn off **Write frames to disk** to measure capture speed alone. |
 | **Log capture timing** | Off by default. Each encoded take saves `videos/video_*.timing.csv`, with when each photo was requested, started and arrived and when the camera wasn't ready, and logs a `Capture timing:` summary. Holds about 30 minutes in memory. |
