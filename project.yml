@@ -82,6 +82,9 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSCameraUsageDescription: VibeLog reads the camera sensor to record RAW frames.
         NSMicrophoneUsageDescription: VibeLog records sound with your video.
+        NSLocalNetworkUsageDescription: The test link in Diagnostics talks to your own computer.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         UILaunchScreen: {}

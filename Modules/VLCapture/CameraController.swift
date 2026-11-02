@@ -12,6 +12,8 @@ public final class CameraController: NSObject {
     public var onReference: ((Data?, [String: Any]) -> Void)?
     /// Runs on the main queue when options change after configuring.
     public var onOptionsChanged: ((CaptureOptions) -> Void)?
+    /// Survives session rebuilds. It records nothing until `begin()`.
+    public let timing = CaptureTimingLog()
 
     private let queue = DispatchQueue(label: "vibelog.session", qos: .userInitiated)
     private var device: AVCaptureDevice?
@@ -382,8 +384,8 @@ public final class CameraController: NSObject {
         }
     }
 
-    /// Keeps auto exposure inside one frame time, so a dark scene can't slow a take. 30 fps leaves
-    /// the rest of the sensor's timing as the long runs proved it.
+    /// Fixes the sensor at one frame time and keeps auto exposure inside it, so a dark scene can't
+    /// slow a take. Without `fixedFrameTime`, 30 fps can stretch to 1/15 s per frame.
     private func applyFrameRate(
         device: AVCaptureDevice, format: AVCaptureDevice.Format, options: inout CaptureOptions
     ) {
@@ -399,11 +401,12 @@ public final class CameraController: NSObject {
         options.config.frameRate = fps
         let timing = FrameRates.frameTime(fps)
         let frameTime = CMTime(value: timing.value, timescale: timing.timescale)
+        let fixesFrameTime = fps < 30 || options.config.fixedFrameTime
         do {
             try device.lockForConfiguration()
             // The longest duration goes first, because the shortest can't pass it.
             let exception = VLTryCatch {
-                if fps < 30 {
+                if fixesFrameTime {
                     device.activeVideoMaxFrameDuration = frameTime
                     device.activeVideoMinFrameDuration = frameTime
                 }
@@ -480,7 +483,7 @@ public final class CameraController: NSObject {
         let driver = PhotoRawDriver(
             output: output, device: device, method: options.config.method, rawFormat: raw,
             size: size, bracketCount: options.config.bracketCount,
-            frameRate: options.config.frameRate)
+            frameRate: options.config.frameRate, timing: timing)
         driver.onFrame = { [weak self] in self?.onFrame?($0) }
         driver.onFailure = { [weak self] message, shouldLog in
             if shouldLog { Log.shared.error(message) }

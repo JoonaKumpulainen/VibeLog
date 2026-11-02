@@ -17,6 +17,7 @@ final class PhotoRawDriver: NSObject {
     private let rawFormat: OSType
     private let size: PhotoSize
     private let bracketCount: Int
+    private let timing: CaptureTimingLog
     private let queue = DispatchQueue(label: "vibelog.photo-loop", qos: .userInitiated)
     private let maxInFlight = 4
     /// Keeps requests from outrunning the sensor when several events trigger one.
@@ -34,7 +35,8 @@ final class PhotoRawDriver: NSObject {
 
     init(
         output: AVCapturePhotoOutput, device: AVCaptureDevice, method: CaptureMethod,
-        rawFormat: OSType, size: PhotoSize, bracketCount: Int, frameRate: Double
+        rawFormat: OSType, size: PhotoSize, bracketCount: Int, frameRate: Double,
+        timing: CaptureTimingLog
     ) {
         self.output = output
         self.device = device
@@ -42,7 +44,16 @@ final class PhotoRawDriver: NSObject {
         self.rawFormat = rawFormat
         self.size = size
         self.bracketCount = bracketCount
+        self.timing = timing
         minimumRequestInterval = 0.9 / frameRate
+    }
+
+    private func note(
+        _ event: CaptureTimingLog.Event, request: Int64 = 0, sensorTime: Double? = nil, inFlight: Int? = nil
+    ) {
+        timing.record(
+            event, time: CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock())), request: request,
+            sensorTime: sensorTime, inFlight: inFlight)
     }
 
     func start() {
@@ -125,6 +136,7 @@ final class PhotoRawDriver: NSObject {
     private func fire() {
         guard running, inFlight < maxInFlight else { return }
         let settings = makeSettings()
+        note(.request, request: settings.uniqueID, inFlight: inFlight)
         let exception = VLTryCatch {
             self.coordinator?.startTrackingCaptureRequest(using: settings)
             self.output.capturePhoto(with: settings, delegate: self)
@@ -142,7 +154,11 @@ final class PhotoRawDriver: NSObject {
     /// Runs on `queue`. Readiness callbacks arrive on the main thread, so capture events
     /// also trigger requests and UI work cannot delay the next frame.
     private func requestWhenReady() {
-        guard running, inFlight < maxInFlight else { return }
+        guard running else { return }
+        guard inFlight < maxInFlight else {
+            note(.heldInFlight)
+            return
+        }
         let wait = minimumRequestInterval - Date().timeIntervalSince(lastRequest)
         if wait > 0 {
             guard !retryScheduled else { return }
@@ -153,6 +169,8 @@ final class PhotoRawDriver: NSObject {
             }
         } else if output.captureReadiness == .ready {
             fire()
+        } else {
+            note(.heldNotReady)
         }
     }
 
@@ -185,6 +203,7 @@ extension PhotoRawDriver: AVCapturePhotoCaptureDelegate {
         _ output: AVCapturePhotoOutput,
         willCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings
     ) {
+        note(.willCapture, request: resolvedSettings.uniqueID)
         // Removes the shutter sound on iOS 17, where suppression has no public API.
         AudioServicesDisposeSystemSoundID(1108)
         if method == .photoReadiness {
@@ -197,9 +216,11 @@ extension PhotoRawDriver: AVCapturePhotoCaptureDelegate {
         error: Error?
     ) {
         if let error {
+            note(.failed, request: photo.resolvedSettings.uniqueID)
             reportFailure(error as NSError)
             return
         }
+        note(.frame, request: photo.resolvedSettings.uniqueID, sensorTime: CMTimeGetSeconds(photo.timestamp))
         guard let buffer = photo.pixelBuffer else {
             onFailure?("Photo has no pixelBuffer (isRawPhoto=\(photo.isRawPhoto))", true)
             return
@@ -223,6 +244,7 @@ extension PhotoRawDriver: AVCapturePhotoCaptureDelegate {
         _ output: AVCapturePhotoOutput,
         didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?
     ) {
+        note(.finished, request: resolvedSettings.uniqueID)
         finishedRequest()
     }
 }
@@ -232,6 +254,7 @@ extension PhotoRawDriver: AVCapturePhotoOutputReadinessCoordinatorDelegate {
         _ coordinator: AVCapturePhotoOutputReadinessCoordinator,
         captureReadinessDidChange captureReadiness: AVCapturePhotoOutput.CaptureReadiness
     ) {
+        note(captureReadiness == .ready ? .ready : .notReady)
         guard captureReadiness == .ready else { return }
         queue.async { [self] in
             lastEvent = Date()

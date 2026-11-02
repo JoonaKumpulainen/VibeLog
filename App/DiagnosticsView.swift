@@ -40,10 +40,29 @@ struct DiagnosticsView: View {
                     close()
                     model.runProbe()
                 }
+                Button("Run 48mm RAW probe") {
+                    close()
+                    model.runZoomRawProbe()
+                }
                 Button("Run encoder test") {
                     close()
                     model.runEncoderTest()
                 }
+            }
+            Section {
+                TextField("Server, as 192.168.1.20:8765", text: $model.testServer)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                SecureField("Token", text: $model.testToken)
+                Toggle("Connect", isOn: $model.testLinkOn)
+                LabeledContent("State", value: model.testLinkState)
+                Toggle("Send logs and sidecars after each take", isOn: $model.testSendsResults)
+                Toggle("Send gyro and timing files", isOn: $model.testSendsGyro)
+            } header: {
+                Text("Test link")
+            } footer: {
+                Text("Lets your computer change settings and start takes, using tools/test_server.py. It can't delete takes, and videos only go when asked for. Off at every launch. Plain HTTP, so use it on your own network.")
             }
             Section("Capture") {
                 Picker("Method", selection: $model.method) {
@@ -51,6 +70,7 @@ struct DiagnosticsView: View {
                 }
                 if model.method.isPhoto {
                     Toggle("Use Photo preset", isOn: $model.usePhotoPreset)
+                    Toggle("Fixed frame time at 30 fps", isOn: $model.fixedFrameTime)
                 }
                 if !model.method.isPhoto || !model.usePhotoPreset {
                     Picker("Format", selection: $model.formatIndex) {
@@ -71,8 +91,12 @@ struct DiagnosticsView: View {
                 if !model.recordEncoded {
                     Toggle("Write frames to disk", isOn: $model.writeFrames)
                 }
+                if model.recordEncoded {
+                    Toggle("Log capture timing", isOn: $model.logCaptureTiming)
+                }
             }
         }
+        .onAppear { model.diagnosticsOpened() }
         .navigationTitle("Diagnostics")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showLog) {

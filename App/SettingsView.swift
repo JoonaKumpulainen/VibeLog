@@ -66,7 +66,7 @@ struct SettingsView: View {
     }
 
     private static let formatTerms = "format codec size resolution frame rate fps log curve aspect open gate chroma"
-    private static let presetTerms = "preset save saved recall format"
+    private static let presetTerms = "preset save saved recall format default stock delete startup"
     private static let stopTerms = "stop after limit duration time timer"
     private static let autoTerms = "auto exposure shutter iso white balance during take recording freeze lock start roll"
     private static let heatTerms = "hot heat thermal cool long takes debayer"
@@ -77,7 +77,8 @@ struct SettingsView: View {
     private static let lookTerms = "look monitor rec.709 log preview isp viewfinder"
     private static let lutTerms = "lut cube import look monitor input"
     private static let pauseTerms = "pause viewfinder monitor off gpu recording"
-    private static let viewfinderTerms = [lookTerms, lutTerms, pauseTerms].joined(separator: " ")
+    private static let peakingTerms = "focus peaking sensitivity low high detail"
+    private static let viewfinderTerms = [lookTerms, lutTerms, pauseTerms, peakingTerms].joined(separator: " ")
     private static let offsetTerms = "exposure offset stops brightness baked"
     private static let gamutTerms = "color colour space gamut native s-gamut3 s-log3 arri wide logc3 awg3 rec.2020"
     private static let processingTerms = "pipeline debayer demosaic quality processing"
@@ -131,36 +132,70 @@ struct SettingsView: View {
         }
     }
 
-    /// Tapping one applies it, and a swipe removes it.
+    /// Tapping one applies it. Saved ones go with a swipe or from their menu, and Stock stays.
     private var presetSection: some View {
-        Section("Presets") {
-            ForEach(model.presets) { preset in
-                Button {
-                    model.apply(preset)
-                } label: {
-                    HStack {
-                        Text(preset.name)
-                            .foregroundStyle(Tokens.value)
-                        Spacer()
-                        if model.isCurrent(preset) {
-                            Image(systemName: "checkmark")
-                                .accessibilityLabel("In use")
-                        }
-                    }
-                }
-            }
-            .onDelete { model.presets.remove(atOffsets: $0) }
+        Section {
+            presetRow(.stock)
+            ForEach(model.presets) { presetRow($0) }
+                .onDelete { model.deletePresets(at: $0) }
             Button("Save current format") {
                 presetName = ""
                 namingPreset = true
             }
+        } header: {
+            Text("Presets")
+        } footer: {
+            Text("The default opens every time. With none set, VibeLog opens on your last choices.")
         }
         .alert("Save preset", isPresented: $namingPreset) {
             TextField("Name", text: $presetName)
             Button("Save") { model.savePreset(named: presetName) }
+                .disabled(FormatPreset.isReserved(presetName))
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Keeps the codec, size, aspect, frame rate, log curve, pipeline, debayer and exposure offset. A name in use is replaced.")
+            Text("Keeps the codec, size, aspect, frame rate, log curve, pipeline, debayer and exposure offset. A name in use is replaced. Stock can't be.")
+        }
+    }
+
+    private func presetRow(_ preset: FormatPreset) -> some View {
+        let isDefault = model.defaultPreset == preset.name
+        return HStack {
+            Button {
+                model.apply(preset)
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(preset.name)
+                            .foregroundStyle(Tokens.value)
+                        if isDefault {
+                            Text("Default")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    if model.isCurrent(preset) {
+                        Image(systemName: "checkmark")
+                            .accessibilityLabel("In use")
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            Menu {
+                Button(isDefault ? "Remove default" : "Set as default") {
+                    model.defaultPreset = isDefault ? "" : preset.name
+                }
+                if !preset.isStock {
+                    Button("Delete", role: .destructive) { model.delete(preset) }
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("\(preset.name) options")
         }
     }
 
@@ -244,6 +279,13 @@ struct SettingsView: View {
             if matches(Self.pauseTerms) {
                 Toggle(isOn: $model.processing.pauseMonitorWhileRecording) {
                     explained("Freeze viewfinder during a take", "Saves GPU time, but the picture stops.")
+                }
+            }
+            if matches(Self.peakingTerms) {
+                Picker(selection: $model.processing.peakingSensitivity) {
+                    ForEach(PeakingSensitivity.allCases) { Text($0.label).tag($0) }
+                } label: {
+                    explained("Focus peaking sensitivity", "High also marks softer detail.")
                 }
             }
         }

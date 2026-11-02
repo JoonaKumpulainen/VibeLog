@@ -52,6 +52,11 @@ public final class VideoEncoder: VideoFrameSink {
         public var megabytesPerSecond: Double
         public var failure: String?
         public var metadata: [String: String]
+        /// Frames lost before reaching the encoder. Missing from older sidecars.
+        public var droppedAtGPU: Int?
+        public var missed: Int?
+        public var duplicates: Int?
+        public var captureFPS: Double?
     }
 
     public enum Failure: Error {

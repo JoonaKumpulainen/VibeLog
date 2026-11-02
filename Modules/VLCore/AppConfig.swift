@@ -32,6 +32,23 @@ public struct FormatPreset: Codable, Equatable, Identifiable, Sendable {
         self.exposureOffset = exposureOffset
         self.nativeGamut = nativeGamut
     }
+
+    /// The app's own defaults. It's built in, so it can't be replaced or deleted.
+    public static let stock: FormatPreset = {
+        let defaults = AppConfig()
+        return FormatPreset(
+            name: "Stock", codec: defaults.codec, size: defaults.size, widescreen: defaults.widescreen,
+            frameRate: defaults.frameRate, logCurve: defaults.logCurve, pipeline: defaults.pipeline,
+            debayer: defaults.debayer, exposureOffset: defaults.exposureOffset,
+            nativeGamut: defaults.nativeGamut)
+    }()
+
+    /// A saved preset can't take the built-in name.
+    public static func isReserved(_ name: String) -> Bool {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(stock.name) == .orderedSame
+    }
+
+    public var isStock: Bool { Self.isReserved(name) }
 }
 
 /// Every saved choice, kept as readable JSON in the VibeLog folder. Missing keys take their
@@ -62,6 +79,14 @@ public struct AppConfig: Codable, Equatable, Sendable {
     /// Tools left on between sessions.
     public var activeTools: [String] = []
     public var presets: [FormatPreset] = []
+    /// The preset the app opens with. Empty keeps the last choices used.
+    public var defaultPreset = ""
+    public var peakingSensitivity = "low"
+    /// Holds the sensor at one frame time at 30 fps, as every other rate does.
+    public var fixedFrameTime = true
+    /// Where the test link connects. It's never switched on from here.
+    public var testServer = ""
+    public var testToken = ""
 
     public init() {}
 
@@ -94,7 +119,35 @@ public struct AppConfig: Codable, Equatable, Sendable {
         mainsHz = read(.mainsHz, defaults.mainsHz)
         toolbar = read(.toolbar, defaults.toolbar)
         activeTools = read(.activeTools, defaults.activeTools)
-        presets = read(.presets, defaults.presets)
+        // One saved or hand-edited under the built-in name keeps its choices under another.
+        presets = read(.presets, defaults.presets).map { preset in
+            var preset = preset
+            if preset.isStock { preset.name = "My Stock" }
+            return preset
+        }
+        defaultPreset = read(.defaultPreset, defaults.defaultPreset)
+        peakingSensitivity = read(.peakingSensitivity, defaults.peakingSensitivity)
+        fixedFrameTime = read(.fixedFrameTime, defaults.fixedFrameTime)
+        testServer = read(.testServer, defaults.testServer)
+        testToken = read(.testToken, defaults.testToken)
+    }
+
+    /// Nil when no default is set, or its preset is gone.
+    public var startupPreset: FormatPreset? {
+        ([FormatPreset.stock] + presets).first { $0.name == defaultPreset }
+    }
+
+    /// Takes a preset's format choices and leaves every other setting.
+    public mutating func use(_ preset: FormatPreset) {
+        codec = preset.codec
+        size = preset.size
+        widescreen = preset.widescreen
+        frameRate = preset.frameRate
+        logCurve = preset.logCurve
+        nativeGamut = preset.nativeGamut ?? false
+        pipeline = preset.pipeline
+        debayer = preset.debayer
+        exposureOffset = preset.exposureOffset
     }
 
     public static func load(from url: URL) throws -> AppConfig {

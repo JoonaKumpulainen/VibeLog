@@ -47,7 +47,7 @@ final class FrameRouter {
     }
 
     func handle(_ frame: RawFrame) {
-        stats.recordFrame(pts: frame.pts)
+        guard stats.recordFrame(pts: frame.pts) else { return }
         pipeline?.submit(frame)
 
         lock.lock()

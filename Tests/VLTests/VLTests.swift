@@ -156,6 +156,106 @@ final class FrameSamplerTests: XCTestCase {
     }
 }
 
+final class FieldOfViewTests: XCTestCase {
+    private let width = 640
+    private let height = 480
+
+    /// A frame of one fixed scene, magnified about its center by `zoom`.
+    private func frame(zoom: Double) -> [UInt16] {
+        var values: [UInt16] = []
+        for y in 0..<height {
+            let v = 0.5 + (Double(y) / Double(height) - 0.5) / zoom
+            for x in 0..<width {
+                let u = 0.5 + (Double(x) / Double(width) - 0.5) / zoom
+                values.append(UInt16(8000 + 3000 * sin(u * 12) + 2000 * cos(v * 9) + 1500 * u * v))
+            }
+        }
+        return values
+    }
+
+    private func map(_ values: [UInt16], fraction: Double = 1) -> [Double]? {
+        values.withUnsafeBytes {
+            FieldOfView.map(
+                base: $0.baseAddress!, width: width, height: height, bytesPerRow: width * 2,
+                fraction: fraction)
+        }
+    }
+
+    private func match(_ shot: [UInt16], reference: [UInt16]) throws -> FieldOfView.Match {
+        let image = try XCTUnwrap(map(shot))
+        return FieldOfView.match(
+            whole: FieldOfView.correlation(image, try XCTUnwrap(map(reference))),
+            center: FieldOfView.correlation(image, try XCTUnwrap(map(reference, fraction: 0.5))))
+    }
+
+    func testTrueCropMatchesTheCenter() throws {
+        XCTAssertEqual(try match(frame(zoom: 2), reference: frame(zoom: 1)), .cropped)
+    }
+
+    func testIgnoredZoomMatchesTheWholeFrame() throws {
+        XCTAssertEqual(try match(frame(zoom: 1), reference: frame(zoom: 1)), .same)
+    }
+
+    func testFlatSceneProvesNothing() throws {
+        let flat = [UInt16](repeating: 5000, count: width * height)
+        XCTAssertEqual(try match(flat, reference: flat), .unclear)
+        XCTAssertNil(FieldOfView.correlation(try XCTUnwrap(map(flat)), try XCTUnwrap(map(flat))))
+    }
+
+    func testRejectsEightBitLayout() {
+        let values: [UInt16] = [0, 0]
+        let result = values.withUnsafeBytes {
+            FieldOfView.map(base: $0.baseAddress!, width: 640, height: 480, bytesPerRow: 640)
+        }
+        XCTAssertNil(result)
+    }
+}
+
+final class CaptureTimingTests: XCTestCase {
+    func testIgnoresEventsOutsideATake() {
+        let log = CaptureTimingLog()
+        log.record(.request, time: 1)
+        XCTAssertTrue(log.finish().isEmpty)
+        log.begin()
+        log.record(.request, time: 2)
+        XCTAssertEqual(log.finish().map(\.time), [2])
+        log.record(.request, time: 3)
+        XCTAssertTrue(log.finish().isEmpty)
+    }
+
+    func testCSVCountsFromTheFirstEvent() {
+        let log = CaptureTimingLog()
+        log.begin()
+        log.record(.request, time: 10, request: 7, inFlight: 2)
+        log.record(.frame, time: 10.5, request: 7, sensorTime: 10.25)
+        XCTAssertEqual(
+            CaptureTimingLog.csv(log.finish()),
+            "seconds,event,request,sensor_seconds,in_flight\n"
+                + "0.000000,request,7,,2\n0.500000,frame,7,0.250000,\n")
+    }
+
+    /// The ultra wide's pattern: two frames out of every three on a 33 ms grid.
+    func testSummaryShowsSkippedFrames() {
+        let log = CaptureTimingLog()
+        log.begin()
+        let slots = [0, 1, 3, 4, 6, 7]
+        for (index, slot) in slots.enumerated() {
+            let time = Double(slot) / 30
+            log.record(.request, time: time, request: Int64(index + 1), inFlight: 0)
+            log.record(.frame, time: time + 0.1, request: Int64(index + 1), sensorTime: time)
+        }
+        log.record(.notReady, time: 1)
+        log.record(.heldNotReady, time: 1.01)
+        log.record(.ready, time: 1.04)
+        let summary = CaptureTimingLog.summary(log.finish())
+        XCTAssertTrue(summary.contains("6 requests, 6 frames"), summary)
+        XCTAssertTrue(summary.contains("request to frame 100.0 ms median"), summary)
+        XCTAssertTrue(summary.contains("not ready 1 times for 40.0 ms median"), summary)
+        XCTAssertTrue(summary.contains("held 1 not ready"), summary)
+        XCTAssertTrue(summary.contains("frame gaps 35 ms x3, 65 ms x2"), summary)
+    }
+}
+
 final class LogCurveTests: XCTestCase {
     func testMiddleGrayMatchesPublishedValues() {
         XCTAssertEqual(LogCurve.appleLog.encode(0.18), 0.4882724585, accuracy: 1e-8)
@@ -880,6 +980,82 @@ final class ExposureScalesTests: XCTestCase {
     }
 }
 
+final class TakeAccountingTests: XCTestCase {
+    func testDuplicateFramesGoNoFurther() {
+        let stats = FrameStats()
+        XCTAssertTrue(stats.recordFrame(pts: 1))
+        XCTAssertFalse(stats.recordFrame(pts: 1))
+        XCTAssertFalse(stats.recordFrame(pts: 1.00000001))
+        XCTAssertTrue(stats.recordFrame(pts: 1.033))
+        let snapshot = stats.snapshot()
+        XCTAssertEqual(snapshot.frames, 2)
+        XCTAssertEqual(snapshot.duplicates, 2)
+    }
+
+    func testExpectedRateCountsFramesLostEvenly() {
+        let stats = FrameStats()
+        stats.setExpectedRate(30)
+        // Every third frame is lost, so the median gap alone looks steady.
+        for index in 0..<201 { stats.recordFrame(pts: Double(index) * 0.05) }
+        XCTAssertEqual(stats.snapshot().estimatedMissed, 100)
+    }
+
+    func testViewfinderYieldsWhileBehindAndHolds() {
+        var pacer = MonitorPacer()
+        XCTAssertTrue(pacer.decide(behind: false, hot: false).draw)
+        var draws = 0
+        var yields = 0
+        for index in 0..<MonitorPacer.holdFrames {
+            let pace = pacer.decide(behind: index == 0, hot: false)
+            draws += pace.draw ? 1 : 0
+            yields += pace.yielded ? 1 : 0
+        }
+        XCTAssertGreaterThan(draws, 0, "The picture must keep moving")
+        XCTAssertLessThan(draws, yields)
+        XCTAssertTrue(pacer.decide(behind: false, hot: false).draw)
+    }
+
+    func testHotPacingNeedsNoBacklog() {
+        var pacer = MonitorPacer()
+        let draws = (0..<30).filter { _ in pacer.decide(behind: false, hot: true).draw }
+        XCTAssertEqual(draws.count, 10)
+    }
+
+    func testPeakingThresholds() {
+        XCTAssertEqual(PeakingSensitivity.low.threshold, 0.1)
+        XCTAssertLessThan(PeakingSensitivity.high.threshold, PeakingSensitivity.low.threshold)
+    }
+
+    func testOlderSidecarsHaveNoNewCounts() throws {
+        let json = #"{"file":"a.mov","preset":"p","width":1,"height":1,"framesWritten":1,"framesDropped":0,"droppedNoBuffer":0,"droppedNotReady":0,"audioSamplesWritten":0,"seconds":1,"fps":1,"megabytes":1,"megabytesPerSecond":1,"metadata":{}}"#
+        let result = try JSONDecoder().decode(VideoEncoder.Result.self, from: Data(json.utf8))
+        XCTAssertNil(result.droppedAtGPU)
+        XCTAssertNil(result.duplicates)
+    }
+}
+
+final class TestLinkTests: XCTestCase {
+    func testServerAddresses() {
+        XCTAssertEqual(TestLinkAddress.base("192.168.1.20")?.absoluteString, "http://192.168.1.20:8765")
+        XCTAssertEqual(TestLinkAddress.base(" 192.168.1.20:9000 ")?.absoluteString, "http://192.168.1.20:9000")
+        XCTAssertEqual(TestLinkAddress.base("http://box.local:8765/x")?.absoluteString, "http://box.local:8765")
+        XCTAssertNil(TestLinkAddress.base(""))
+        XCTAssertNil(TestLinkAddress.base("ftp://box"))
+    }
+
+    func testFileNamesStayInTheirFolder() {
+        XCTAssertEqual(TestLinkAddress.safeName("video.mov"), "video.mov")
+        XCTAssertEqual(TestLinkAddress.safeName("../../secret"), "secret")
+        XCTAssertNil(TestLinkAddress.safeName(".."))
+        XCTAssertNil(TestLinkAddress.safeName(""))
+    }
+
+    func testCommandsDecodeWithoutOptionalFields() throws {
+        let command = try JSONDecoder().decode(TestCommand.self, from: Data(#"{"id":3,"action":"status"}"#.utf8))
+        XCTAssertEqual(command, TestCommand(id: 3, action: "status"))
+    }
+}
+
 final class AppConfigTests: XCTestCase {
     func testRoundTrip() throws {
         var config = AppConfig()
@@ -913,6 +1089,56 @@ final class AppConfigTests: XCTestCase {
         let config = try JSONDecoder().decode(AppConfig.self, from: Data("{}".utf8))
         XCTAssertEqual(config.frameRate, 30)
         XCTAssertTrue(config.presets.isEmpty)
+        XCTAssertEqual(config.defaultPreset, "")
+        XCTAssertEqual(config.peakingSensitivity, "low")
+        XCTAssertTrue(config.fixedFrameTime)
+        XCTAssertEqual(config.testServer, "")
+    }
+
+    private let night = FormatPreset(
+        name: "Night", codec: "prores4444", size: "2880x2160", widescreen: true, frameRate: 25,
+        logCurve: "S-Log3", pipeline: "efficient", debayer: "Bilinear", exposureOffset: 0.3, nativeGamut: true)
+
+    func testStockIsTheDefaultChoices() {
+        var config = AppConfig()
+        config.use(night)
+        config.use(.stock)
+        XCTAssertEqual(config, AppConfig())
+    }
+
+    func testStartupPresetNeedsADefaultThatExists() {
+        var config = AppConfig()
+        config.presets = [night]
+        XCTAssertNil(config.startupPreset)
+        config.defaultPreset = "Night"
+        XCTAssertEqual(config.startupPreset, night)
+        config.defaultPreset = "Stock"
+        XCTAssertEqual(config.startupPreset, FormatPreset.stock)
+        config.defaultPreset = "Deleted"
+        XCTAssertNil(config.startupPreset)
+    }
+
+    func testUsingAPresetLeavesOtherSettings() {
+        var config = AppConfig()
+        config.mainsHz = 60
+        config.presets = [night]
+        config.use(night)
+        XCTAssertEqual(config.codec, "prores4444")
+        XCTAssertEqual(config.frameRate, 25)
+        XCTAssertTrue(config.nativeGamut)
+        XCTAssertEqual(config.mainsHz, 60)
+        XCTAssertEqual(config.presets, [night])
+    }
+
+    func testSavedPresetCantTakeTheStockName() throws {
+        XCTAssertTrue(FormatPreset.isReserved(" stock "))
+        var config = AppConfig()
+        var clash = night
+        clash.name = "stock"
+        config.presets = [clash]
+        let loaded = try JSONDecoder().decode(AppConfig.self, from: JSONEncoder().encode(config))
+        XCTAssertEqual(loaded.presets.map(\.name), ["My Stock"])
+        XCTAssertEqual(loaded.presets.first?.codec, "prores4444")
     }
 }
 

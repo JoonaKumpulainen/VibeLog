@@ -65,6 +65,50 @@ public enum PipelineMode: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// How readily focus peaking marks detail. Only the threshold changes, so neither costs GPU time.
+public enum PeakingSensitivity: String, CaseIterable, Identifiable, Sendable {
+    case low, high
+
+    public var id: String { rawValue }
+
+    public var label: String {
+        switch self {
+        case .low: return "Low"
+        case .high: return "High"
+        }
+    }
+
+    var threshold: Float {
+        switch self {
+        case .low: return 0.1
+        case .high: return 0.05
+        }
+    }
+}
+
+/// Decides which processed frames also reach the viewfinder. A take comes first: once frames
+/// queue during one, the viewfinder nearly stops for a while, so a slowing GPU spends its time on
+/// the file. It holds on, or the freed time would bring the draws straight back.
+struct MonitorPacer {
+    static let hotStride = 3
+    static let behindStride = 8
+    static let holdFrames = 30
+
+    private var frame = 0
+    private var heldUntil = 0
+
+    /// The second value says this frame's draw was given up to protect the take.
+    mutating func decide(behind: Bool, hot: Bool) -> (draw: Bool, yielded: Bool) {
+        frame += 1
+        if behind { heldUntil = frame + Self.holdFrames }
+        if frame < heldUntil {
+            let draw = frame % Self.behindStride == 0
+            return (draw, !draw)
+        }
+        return (!hot || frame % Self.hotStride == 0, false)
+    }
+}
+
 public struct ProcessingSettings: Equatable, Sendable {
     public var enabled = true
     public var pipeline = PipelineMode.maximum
@@ -81,6 +125,7 @@ public struct ProcessingSettings: Equatable, Sendable {
     public var nativeGamut = false
     public var demosaic = DemosaicMethod.malvar
     public var monitor = MonitorMode.rec709
+    public var peakingSensitivity = PeakingSensitivity.low
     /// On an iPhone 14 Pro, auto exposure on a plain surface read 0.37 linear at +0.5 stops,
     /// so -0.5 stops places it near 0.18. This is from a single measurement.
     public var exposureStops = -0.5
@@ -100,6 +145,8 @@ public struct ProcessingSettings: Equatable, Sendable {
 public struct PipelineStats: Sendable {
     public var processed = 0
     public var dropped = 0
+    /// Viewfinder draws given up so a take could keep its frames.
+    public var monitorYields = 0
     public var gpuLastMs = 0.0
     public var gpuAverageMs = 0.0
     public var gpuRecentMs = 0.0
@@ -154,6 +201,7 @@ private struct MonitorParams {
     var viewScale: Float
     var peaking: UInt32
     var peakStep: SIMD2<Float>
+    var peakThreshold: Float
 }
 
 private struct CropParams {
@@ -234,7 +282,7 @@ public final class ProcessingPipeline: NSObject {
     private var monitorOrigin = SIMD2<Float>(0, 0)
     private var monitorScale: Float = 1
     private var monitorPeaking = false
-    private var drawCounter = 0
+    private var pacer = MonitorPacer()
     private var loggedFailure = false
 
     public init?(pixelFormat: MTLPixelFormat = .bgra8Unorm) {
@@ -740,9 +788,11 @@ public final class ProcessingPipeline: NSObject {
             stats.gpuRecentMs = stats.processed == 1 ? gpuMs : stats.gpuRecentMs * 0.95 + gpuMs * 0.05
             stats.gpuMaxMs = max(stats.gpuMaxMs, gpuMs)
             let paused = settings.pauseMonitorWhileRecording && sink != nil
-            drawCounter += 1
-            let slowed = hot && settings.reduceLoadWhenHot && drawCounter % 3 != 0
-            schedule = image != nil && !drawScheduled && settings.monitor != .isp && !paused && !slowed
+            // Two frames still waiting mean the GPU has stopped keeping up.
+            let pace = pacer.decide(
+                behind: sink != nil && inFlight >= 2, hot: hot && settings.reduceLoadWhenHot)
+            if pace.yielded { stats.monitorYields += 1 }
+            schedule = image != nil && !drawScheduled && settings.monitor != .isp && !paused && pace.draw
             if schedule { drawScheduled = true }
         } else {
             stats.dropped += 1
@@ -827,7 +877,8 @@ extension ProcessingPipeline: MTKViewDelegate {
             // Fixed to the image, not the zoom: one sensor pixel apart, punch-in sees too little
             // change for peaking to fire. The image is turned, so its first axis runs along the
             // drawable's height.
-            peakStep: SIMD2(1 / Float(view.drawableSize.height), 1 / Float(view.drawableSize.width)))
+            peakStep: SIMD2(1 / Float(view.drawableSize.height), 1 / Float(view.drawableSize.width)),
+            peakThreshold: current.peakingSensitivity.threshold)
         encoder.setRenderPipelineState(monitorState)
         encoder.setFragmentTexture(image, index: 0)
         encoder.setFragmentTexture(rec709, index: 1)

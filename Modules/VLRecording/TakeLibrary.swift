@@ -26,6 +26,10 @@ public enum TakeLibrary {
         url.deletingPathExtension().appendingPathExtension("gcsv")
     }
 
+    public static func captureTiming(for url: URL) -> URL {
+        url.deletingPathExtension().appendingPathExtension("timing.csv")
+    }
+
     public static func take(at url: URL) -> Take {
         let values = try? url.resourceValues(forKeys: [.fileSizeKey, .creationDateKey])
         let info = (try? Data(contentsOf: sidecar(for: url))).flatMap {
@@ -48,5 +52,6 @@ public enum TakeLibrary {
         try FileManager.default.removeItem(at: take.url)
         try? FileManager.default.removeItem(at: sidecar(for: take.url))
         try? FileManager.default.removeItem(at: gyroLog(for: take.url))
+        try? FileManager.default.removeItem(at: captureTiming(for: take.url))
     }
 }

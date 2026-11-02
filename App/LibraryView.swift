@@ -266,6 +266,8 @@ private struct TakeInfoView: View {
             ("Length", take.durationLabel ?? "-"),
             ("Frames written", "\(info.framesWritten)"),
             ("Frames dropped", "\(info.framesDropped)"),
+            ("Missed by the camera", info.missed.map(String.init) ?? "-"),
+            ("Duplicates skipped", info.duplicates.map(String.init) ?? "-"),
             ("Measured rate", String(format: "%.2f fps", info.fps)),
             ("Data rate", String(format: "%.0f MB/s", info.megabytesPerSecond)),
         ]
@@ -278,7 +280,8 @@ private struct TakeInfoView: View {
             ("frameRate", "Frame rate"), ("curve", "Log curve"), ("gamut", "Gamut"),
             ("aspect", "Aspect"), ("exposureStops", "Exposure offset"),
             ("exposureDuringTake", "Exposure"), ("whiteBalanceDuringTake", "White balance"),
-            ("pipeline", "Pipeline"), ("orientation", "Hold"),
+            ("pipeline", "Pipeline"), ("orientation", "Hold"), ("lens", "Lens"), ("tools", "Tools"),
+            ("audio", "Audio"), ("frameTime", "Frame time"),
             ("reducedLoadAtStart", "Reduced load at start"),
         ]
         return names.compactMap { key, name in take.info?.metadata[key].map { (name, $0) } }

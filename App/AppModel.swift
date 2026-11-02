@@ -73,11 +73,14 @@ final class AppModel: ObservableObject {
     @Published var videoFPS = 30.0 { didSet { if videoFPS != oldValue { reconfigure() } } }
     @Published var bracketCount = 3 { didSet { if bracketCount != oldValue { reconfigure() } } }
     @Published var usePhotoPreset = true { didSet { if usePhotoPreset != oldValue { reconfigure() } } }
+    @Published var fixedFrameTime = true { didSet { if fixedFrameTime != oldValue { reconfigure() } } }
 
     @Published var processing = ProcessingSettings() { didSet { pipeline?.update(processing) } }
     @Published var pipelineStats = PipelineStats()
 
     @Published var recordEncoded = true
+    /// Saves when each photo was requested and arrived, beside each encoded take.
+    @Published var logCaptureTiming = false
     /// The best preset proven at full size on an iPhone 14 Pro at 30 fps.
     @Published var encoderPreset = EncoderPreset.all.first { $0.id == "prores422hq" } ?? EncoderPreset.all[0]
     @Published var encoderSize = EncoderSize.all[0]
@@ -134,6 +137,16 @@ final class AppModel: ObservableObject {
     /// 24-bit PCM instead of AAC.
     @Published var pcmAudio = false
     @Published var presets: [FormatPreset] = []
+    /// Where the test link connects, kept between launches. The link itself never is.
+    @Published var testServer = ""
+    @Published var testToken = ""
+    @Published var testLinkOn = false { didSet { if testLinkOn != oldValue { updateTestLink() } } }
+    @Published var testLinkState = "Off"
+    @Published var testSendsResults = true
+    @Published var testSendsGyro = true
+    let testLink = TestLink()
+    /// The preset the app opens with. Empty keeps the last choices used.
+    @Published var defaultPreset = ""
 
     /// A shutter of half the frame time, the usual look for motion.
     var isHalfAngleShutter: Bool {
@@ -193,6 +206,14 @@ final class AppModel: ObservableObject {
     private var ticksSinceReport = 0
     private var recordStart = Date()
     private var recordStarting = false
+    private var streamStart = Date.distantPast
+    /// Long enough after a session rebuild for the first frames to come steadily.
+    private static let settleSeconds = 1.5
+    /// One take's length, instead of the owner's **Stop after**.
+    private var takeSeconds: Double?
+    private var resumeAfterSettings = false
+    /// Names the log the test link sends, so one session keeps one file.
+    let sessionStamp = Storage.timestamp()
     private let statsQueue = DispatchQueue(label: "vibelog.stats", qos: .utility)
 
     func onAppear() {
@@ -375,6 +396,11 @@ final class AppModel: ObservableObject {
         config.toolbar = toolbar.map(\.rawValue)
         config.activeTools = activeTools.map(\.rawValue).sorted()
         config.presets = presets
+        config.defaultPreset = defaultPreset
+        config.peakingSensitivity = processing.peakingSensitivity.rawValue
+        config.fixedFrameTime = fixedFrameTime
+        config.testServer = testServer
+        config.testToken = testToken
         return config
     }
 
@@ -390,6 +416,7 @@ final class AppModel: ObservableObject {
                     at: Storage.config, to: Storage.config.appendingPathExtension("invalid"))
             }
         }
+        if let startup = loaded.startupPreset { loaded.use(startup) }
         encoderPreset = EncoderPreset.all.first { $0.id == loaded.codec } ?? encoderPreset
         encoderSize = EncoderSize.all.first { $0.label == loaded.size } ?? encoderSize
         widescreen = loaded.widescreen
@@ -416,6 +443,12 @@ final class AppModel: ObservableObject {
         toolbar = loaded.toolbar.compactMap(Tool.init(rawValue:))
         activeTools = Set(loaded.activeTools.compactMap(Tool.init(rawValue:)))
         presets = loaded.presets
+        defaultPreset = loaded.startupPreset?.name ?? ""
+        processing.peakingSensitivity = PeakingSensitivity(rawValue: loaded.peakingSensitivity) ?? .low
+        // The first configuration comes after this and uses it.
+        fixedFrameTime = loaded.fixedFrameTime
+        testServer = loaded.testServer
+        testToken = loaded.testToken
         savedConfig = config
     }
 
@@ -427,15 +460,24 @@ final class AppModel: ObservableObject {
             exposureOffset: processing.exposureStops, nativeGamut: processing.nativeGamut)
     }
 
-    /// A name already in use takes the new choices.
+    /// A name already in use takes the new choices, apart from Stock.
     func savePreset(named name: String) {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return }
+        guard !name.isEmpty, !FormatPreset.isReserved(name) else { return }
         if let index = presets.firstIndex(where: { $0.name == name }) {
             presets[index] = preset(named: name)
         } else {
             presets.append(preset(named: name))
         }
+    }
+
+    func deletePresets(at offsets: IndexSet) {
+        if offsets.contains(where: { presets[$0].name == defaultPreset }) { defaultPreset = "" }
+        for index in offsets.reversed() { presets.remove(at: index) }
+    }
+
+    func delete(_ saved: FormatPreset) {
+        if let index = presets.firstIndex(of: saved) { deletePresets(at: [index]) }
     }
 
     func isCurrent(_ saved: FormatPreset) -> Bool { saved == preset(named: saved.name) }
@@ -571,6 +613,7 @@ final class AppModel: ObservableObject {
             if method.isPhoto { camera.requestReference() }
             camera.start()
             isStreaming = true
+            streamStart = Date()
             // The driver may only exist once the session runs, which loses the first request.
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in
                 if isStreaming, method.isPhoto, !hasReference { camera.requestReference() }
@@ -713,6 +756,38 @@ final class AppModel: ObservableObject {
         if !isStreaming { toggleStream() }
     }
 
+    /// The sheet covers the picture, so the stream stops to save heat and battery. A take keeps
+    /// running. Settings only change what the next stream starts with.
+    func settingsOpened() {
+        guard isStreaming, !isRecording else { return }
+        resumeAfterSettings = true
+        toggleStream()
+    }
+
+    func settingsClosed() {
+        guard resumeAfterSettings else { return }
+        resumeAfterSettings = false
+        if !isStreaming { toggleStream() }
+    }
+
+    /// Diagnostics tools use the stream, and leave it running when they close Settings.
+    func diagnosticsOpened() {
+        settingsClosed()
+    }
+
+    /// Records for a set time, leaving **Stop after** as it is.
+    func record(seconds: Double) {
+        guard !isRecording, recordEncoded else { return }
+        takeSeconds = seconds
+        startRecording()
+    }
+
+    /// The tools on the picture, as a log and a sidecar record them.
+    var toolsLabel: String {
+        let names = Tool.allCases.filter(isOn).map(\.shortTitle)
+        return names.isEmpty ? "none" : names.joined(separator: " ")
+    }
+
     /// Removes each video and its sidecar, then finds the newest that's left.
     func delete(_ takes: [Take]) {
         for take in takes {
@@ -756,13 +831,23 @@ final class AppModel: ObservableObject {
     }
 
     func runProbe() {
+        runReleasingCamera(CaptureProbe.run)
+    }
+
+    func runZoomRawProbe() {
+        runReleasingCamera(ZoomRawProbe.run)
+    }
+
+    private func runReleasingCamera(
+        _ probe: @escaping (@escaping (String) -> Void, @escaping (URL) -> Void) -> Void
+    ) {
         guard !isRecording, isBusy == nil else { return }
         isBusy = "Releasing camera"
         isStreaming = false
         camera.teardown { [self] in
-            CaptureProbe.run(progress: { text in
+            probe({ text in
                 DispatchQueue.main.async { self.isBusy = text }
-            }, completion: { [self] url in
+            }, { [self] url in
                 isBusy = nil
                 lastResult = "Probe saved: probes/\(url.lastPathComponent)"
                 startStreamAfterConfigure = true
@@ -825,7 +910,8 @@ final class AppModel: ObservableObject {
             lensID: lensID, formatIndex: formatIndex, method: method,
             rawPixelFormat: rawFormat == 0 ? nil : rawFormat, photoSize: photoSize,
             videoPixelFormat: videoFormat == 0 ? nil : videoFormat, videoFPS: videoFPS,
-            frameRate: frameRate, bracketCount: bracketCount, usePhotoPreset: usePhotoPreset)
+            frameRate: frameRate, bracketCount: bracketCount, usePhotoPreset: usePhotoPreset,
+            fixedFrameTime: fixedFrameTime)
         camera.configure(config) { [self] options in
             guard let options else { return }
             adopt(options)
@@ -915,9 +1001,11 @@ final class AppModel: ObservableObject {
         let warmUp = !isStreaming || !hasReference
         if !isStreaming { toggleStream() }
         if recordEncoded {
-            // The first frames after a stream starts are unreliable, so give it a moment.
+            // The first frames after a stream starts are unreliable, so give it a moment. A take
+            // started 1.2 seconds after a rebuild still lost 3 frames in its first second.
+            let settling = max(0, Self.settleSeconds - Date().timeIntervalSince(streamStart))
             recordStarting = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + (warmUp ? 1 : 0)) { [self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + (warmUp ? max(1, settling) : settling)) { [self] in
                 recordStarting = false
                 if isStreaming { startEncoding() }
             }
@@ -940,6 +1028,7 @@ final class AppModel: ObservableObject {
             }
             holdForTake()
             router.stats.reset()
+            router.stats.setExpectedRate(frameRate)
             pipeline?.resetStats()
             router.beginRecording(recorder, seconds: rawDumpSeconds)
             recordDeadline = Date().addingTimeInterval(rawDumpSeconds + 5)
@@ -976,6 +1065,11 @@ final class AppModel: ObservableObject {
             "pipeline": processing.pipeline.label,
             "orientation": hold.hold.label,
             "reducedLoadAtStart": isHot && processing.reduceLoadWhenHot ? "yes, bilinear debayer" : "no",
+            "lens": currentLensLabel,
+            "tools": toolsLabel,
+            "frameTime": fixedFrameTime ? "fixed" : "variable at 30 fps",
+            "gyroLog": saveGyroLog ? "on" : "off",
+            "thermalAtStart": SystemStatus.thermalName,
             "note": "The file's transfer tag is nominal; decode with the curve named here.",
         ]
         do {
@@ -1005,14 +1099,18 @@ final class AppModel: ObservableObject {
             activeEncoder = encoder
             holdForTake()
             router.stats.reset()
+            router.stats.setExpectedRate(frameRate)
             pipeline.resetStats()
             pipeline.setSink(encoder)
+            testLink.holdFiles(true)
+            if logCaptureTiming { camera.timing.begin() }
             recordStart = Date()
             recordElapsed = 0
             recordingFile = url
             isRecording = true
-            let seconds = recordSeconds
-            Log.shared.info("Encoding \(name): \(encoderPreset.label) \(outputSize.label) at \(frameRateLabel) fps, exposure \(metadata["exposureDuringTake"] ?? "?"), white balance \(metadata["whiteBalanceDuringTake"] ?? "?"), \(processing.curve.label), \(processing.pipeline.label) pipeline, \(seconds > 0 ? "\(seconds)s" : "until stopped"), battery \(SystemStatus.batteryText), thermal \(SystemStatus.thermalName), free \(SystemStatus.freeDisk / 1_000_000_000) GB")
+            let seconds = takeSeconds ?? recordSeconds
+            takeSeconds = nil
+            Log.shared.info("Encoding \(name): lens \(currentLensLabel), \(encoderPreset.label) \(outputSize.label) at \(frameRateLabel) fps, frame time \(metadata["frameTime"] ?? "?"), audio \(metadata["audio"] ?? "?"), gyro \(metadata["gyroLog"] ?? "?"), tools \(toolsLabel), exposure \(metadata["exposureDuringTake"] ?? "?"), white balance \(metadata["whiteBalanceDuringTake"] ?? "?"), \(processing.curve.label), \(processing.pipeline.label) pipeline, \(seconds > 0 ? "\(seconds)s" : "until stopped"), battery \(SystemStatus.batteryText), thermal \(SystemStatus.thermalName), free \(SystemStatus.freeDisk / 1_000_000_000) GB")
             guard seconds > 0 else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self, weak encoder] in
                 guard let self, let encoder, self.activeEncoder === encoder else { return }
@@ -1025,7 +1123,23 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Writes on a background queue, so the end of a take isn't held up by a large log.
+    private func saveCaptureTiming(for file: URL?) {
+        let entries = camera.timing.finish()
+        guard let file, !entries.isEmpty else { return }
+        DispatchQueue.global(qos: .utility).async {
+            Log.shared.info(CaptureTimingLog.summary(entries))
+            let url = TakeLibrary.captureTiming(for: file)
+            do {
+                try CaptureTimingLog.csv(entries).write(to: url, atomically: true, encoding: .utf8)
+            } catch {
+                Log.shared.error("Capture timing save failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
     private func stopEncoding(_ encoder: VideoEncoder) {
+        saveCaptureTiming(for: recordingFile)
         activeEncoder = nil
         recordingFile = nil
         isRecording = false
@@ -1035,25 +1149,38 @@ final class AppModel: ObservableObject {
         resumeAfterTake()
         let capture = router.stats.snapshot()
         let gpu = pipeline?.currentStats() ?? PipelineStats()
-        encoder.finish { [self] result in
+        encoder.finish { [self] finished in
+            let encoderDrops = finished.framesDropped
+            var result = finished
+            // The library and the sidecar show one number for frames the file lost.
+            result.framesDropped = encoderDrops + gpu.dropped
+            result.droppedAtGPU = gpu.dropped
+            result.missed = capture.estimatedMissed
+            result.duplicates = capture.duplicates
+            result.captureFPS = capture.sustainedFPS
             let summary = String(
-                format: "%@ %dx%d: %.2f fps written, %d frames, %d dropped (%d no buffer, %d not ready), %.1f MB/s, audio %d, capture %.2f fps fail %d missed %d gap %.0f ms, gpu %.1f recent %.1f max ms drop %d",
+                format: "%@ %dx%d: %.2f fps written, %d frames, %d lost (%d gpu, %d encoder: %d no buffer, %d not ready), %.1f MB/s, audio %d, capture %.2f fps fail %d missed %d duplicates %d gap %.0f ms, gpu %.1f recent %.1f max ms, viewfinder yields %d",
                 result.preset, result.width, result.height, result.fps, result.framesWritten,
-                result.framesDropped, result.droppedNoBuffer, result.droppedNotReady,
+                result.framesDropped, gpu.dropped, encoderDrops, result.droppedNoBuffer, result.droppedNotReady,
                 result.megabytesPerSecond, result.audioSamplesWritten,
-                capture.sustainedFPS, capture.captureFailures, capture.estimatedMissed, capture.gapMaxMs,
-                gpu.gpuRecentMs, gpu.gpuMaxMs, gpu.dropped)
+                capture.sustainedFPS, capture.captureFailures, capture.estimatedMissed, capture.duplicates,
+                capture.gapMaxMs, gpu.gpuRecentMs, gpu.gpuMaxMs, gpu.monitorYields)
             if let failure = result.failure {
                 Log.shared.error("VIDEO FAILED \(result.file): \(failure)")
             }
             Log.shared.info("VIDEO RESULT \(result.file): \(summary)")
             lastResult = summary
-            guard result.framesWritten > 0 else { return }
+            guard result.framesWritten > 0 else {
+                testLink.holdFiles(false)
+                return
+            }
             makeThumbnail(for: Storage.videos.appendingPathComponent(result.file))
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let sidecar = Storage.videos.appendingPathComponent(result.file + ".json")
             try? encoder.encode(result).write(to: sidecar)
+            sendTakeFiles(video: Storage.videos.appendingPathComponent(result.file))
+            testLink.holdFiles(false)
         }
     }
 

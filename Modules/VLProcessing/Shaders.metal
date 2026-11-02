@@ -29,6 +29,7 @@ struct MonitorParams {
     float viewScale;  // Share of the picture shown. Below 1 it reaches past the drawable's pixels.
     uint peaking;  // 1 marks fine detail, for judging focus.
     float2 peakStep;  // One drawable pixel at full view, in the image's coordinates.
+    float peakThreshold;  // The edge strength peaking marks.
 };
 
 struct CropParams {
@@ -287,7 +288,7 @@ fragment float4 monitorFragment(VertexOut in [[stage_in]],
         edge -= rec2020Luma(image.sample(linearSampler, rotated - float2(m.peakStep.x, 0)).rgb);
         edge -= rec2020Luma(image.sample(linearSampler, rotated + float2(0, m.peakStep.y)).rgb);
         edge -= rec2020Luma(image.sample(linearSampler, rotated - float2(0, m.peakStep.y)).rgb);
-        if (abs(edge) > 0.1) {
+        if (abs(edge) > m.peakThreshold) {
             color = float3(0.0, 1.0, 1.0);
         }
     }

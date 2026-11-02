@@ -47,7 +47,10 @@ struct CameraScreen: View {
                 CameraHUD(
                     selectedDial: $selectedDial, showMonitor: $showMonitor, showFormat: $showFormat,
                     hold: hold.hold, insets: insets, stripDepth: screen.height - layout.picture.maxY,
-                    openSettings: { showSettings = true })
+                    openSettings: {
+                        model.settingsOpened()
+                        showSettings = true
+                    })
             }
             .environment(\.heldTurn, hold.turn)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: hold.turn)
@@ -67,7 +70,7 @@ struct CameraScreen: View {
             if recording, selectedDial == .focus { selectedDial = nil }
             if recording { showFormat = false }
         }
-        .sheet(isPresented: $showSettings) {
+        .sheet(isPresented: $showSettings, onDismiss: { model.settingsClosed() }) {
             SettingsView {
                 model.fullView = false
                 showFormat = true

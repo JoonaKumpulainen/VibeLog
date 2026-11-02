@@ -87,14 +87,14 @@ The screen design should leave room for the tools in Phases 6 and 7.
 
 The rule for this phase: anything that adds to real-time GPU load must prove it doesn't cost frames or shorten recording.
 
-- **Frame rates:** 24 and 25 fps recorded with no dropped frames on the phone. 23.98 and 29.97 are added and untested. RAW Cam also offers 18 fps.
+- **Frame rates:** 24, 25, 23.98 and 29.97 fps recorded with no dropped frames on the phone. RAW Cam also offers 18 fps.
 - **Highlight reconstruction:** rebuild clipped green from red and blue, which still hold data above the point where green saturates. This could recover some highlight range that is currently clipped.
 - **Vignette correction:** apply the `FixVignetteRadial` values already found in the photo metadata.
 - **Gyro logging:** added: CoreMotion data at 100 Hz in a Gyroflow `.gcsv` next to each clip. Its cost and axes still need checking on the phone and in Gyroflow.
 - **Stabilization check:** find out whether optical stabilization is active during RAW capture, and how it affects gyro stabilization.
 - **Exposure modes:** a 180-degree button, lock at start and auto during a take are in. Shutter priority and auto exposure with an EV slider are left.
 - **Focus while recording:** test whether focus can change during capture.
-- **Audio:** PCM recording and level meters are in, with PCM untested. External microphones are left.
+- **Audio:** PCM recording and level meters are in, and PCM sounded clean over a 10-minute take. External microphones are left.
 - **Native gamuts:** S-Gamut3 and ARRI Wide Gamut 3 are in, as a color space picker that sets the curve. Options for how the file is tagged are left.
 - **Color accuracy:** measure against a chart, and confirm the exposure default.
 - **Lenses:** test recording on the ultra wide and tele, each with its own calibration.
@@ -102,7 +102,7 @@ The rule for this phase: anything that adds to real-time GPU load must prove it 
 ## Phase 7: shooting tools
 
 - Focus peaking and a focus punch-in: done.
-- Focus peaking sensitivity: a low and high switch in Settings, so it's there but out of the way. Not built.
+- Focus peaking sensitivity: a low and high switch in Settings, so it's there but out of the way. Added, untested.
 - RAW histogram, waveform and vectorscope.
 - Horizon indicator, using the Phase 6 motion data.
 - Frame guides, a 3x3 grid and anamorphic desqueeze.

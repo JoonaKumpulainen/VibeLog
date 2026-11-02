@@ -8,6 +8,8 @@ public final class FrameStats {
         public var captureFailures = 0
         public var writerDrops = 0
         public var estimatedMissed = 0
+        /// Frames the camera delivered twice, which aren't counted anywhere else.
+        public var duplicates = 0
         public var rollingFPS = 0.0
         public var sustainedFPS = 0.0
         public var durationSeconds = 0.0
@@ -27,6 +29,11 @@ public final class FrameStats {
     private var captureDrops = 0
     private var captureFailures = 0
     private var writerDrops = 0
+    private var duplicates = 0
+    private var expectedRate = 0.0
+
+    /// Two photos can come from one sensor frame. Their times can differ by rounding alone.
+    private static let duplicateGap = 0.001
 
     public init(rollingWindow: Double = 2) {
         self.rollingWindow = rollingWindow
@@ -40,12 +47,28 @@ public final class FrameStats {
         captureDrops = 0
         captureFailures = 0
         writerDrops = 0
+        duplicates = 0
     }
 
-    public func recordFrame(pts: Double) {
+    /// With a rate, `estimatedMissed` counts against it. Without one it can only compare gaps with
+    /// the median, which misses frames lost so evenly that the median itself is slow.
+    public func setExpectedRate(_ fps: Double) {
         lock.lock()
         defer { lock.unlock() }
+        expectedRate = fps
+    }
+
+    /// Returns false for a frame the camera already delivered, which should go no further.
+    @discardableResult
+    public func recordFrame(pts: Double) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if let last = timestamps.last, abs(pts - last) < Self.duplicateGap {
+            duplicates += 1
+            return false
+        }
         timestamps.append(pts)
+        return true
     }
 
     public func recordCaptureDrop() {
@@ -73,6 +96,8 @@ public final class FrameStats {
         result.captureDrops = captureDrops
         result.captureFailures = captureFailures
         result.writerDrops = writerDrops
+        result.duplicates = duplicates
+        let rate = expectedRate
         lock.unlock()
 
         result.frames = times.count
@@ -99,7 +124,10 @@ public final class FrameStats {
         result.gapP95Ms = sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))] * 1000
         result.gapMaxMs = sorted[sorted.count - 1] * 1000
         result.gapStdDevMs = variance.squareRoot() * 1000
-        if median > 0 {
+        if rate > 0 {
+            let expected = Int((result.durationSeconds * rate).rounded()) + 1
+            result.estimatedMissed = max(0, expected - times.count)
+        } else if median > 0 {
             result.estimatedMissed = gaps.reduce(0) { total, gap in
                 gap > median * 1.5 ? total + Int((gap / median).rounded()) - 1 : total
             }
