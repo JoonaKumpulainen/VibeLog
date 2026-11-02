@@ -13,6 +13,8 @@ struct VibeLogApp: App {
             + "\(ProcessInfo.processInfo.operatingSystemVersionString)")
     }
 
+    @UIApplicationDelegateAdaptor(AppOrientation.self) private var orientation
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -27,6 +29,29 @@ struct VibeLogApp: App {
             // Permission prompts make the app inactive for a moment, so only background counts.
             if phase == .background { model.enteredBackground() }
             if phase == .active { model.enteredForeground() }
+        }
+    }
+}
+
+/// The camera screen stays portrait and turns its own controls. Only the takes turn with the phone.
+final class AppOrientation: NSObject, UIApplicationDelegate {
+    private static var allowsTurning = false
+
+    func application(
+        _ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?
+    ) -> UIInterfaceOrientationMask {
+        Self.allowsTurning ? .allButUpsideDown : .portrait
+    }
+
+    static func allowTurning(_ allowed: Bool) {
+        allowsTurning = allowed
+        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+            var controller = scene.windows.first?.rootViewController
+            while let current = controller {
+                current.setNeedsUpdateOfSupportedInterfaceOrientations()
+                controller = current.presentedViewController
+            }
+            if !allowed { scene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait)) }
         }
     }
 }

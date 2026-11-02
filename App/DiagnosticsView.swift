@@ -2,7 +2,7 @@ import SwiftUI
 import VLCapture
 import VLCore
 
-/// Test tools for phone runs, opened by long-pressing the version in Settings.
+/// Test tools for phone runs, opened from Advanced in Settings.
 struct DiagnosticsView: View {
     @EnvironmentObject private var model: AppModel
     @AppStorage("debugOverlay") private var showDebugOverlay = false
@@ -71,7 +71,6 @@ struct DiagnosticsView: View {
                 if model.method.isPhoto {
                     Toggle("Use Photo preset", isOn: $model.usePhotoPreset)
                     Toggle("Fixed frame time at 30 fps", isOn: $model.fixedFrameTime)
-                    Toggle("Lens distortion correction", isOn: $model.distortionCorrection)
                 }
                 if !model.method.isPhoto || !model.usePhotoPreset {
                     Picker("Format", selection: $model.formatIndex) {
@@ -87,14 +86,6 @@ struct DiagnosticsView: View {
             Section("Recording") {
                 if model.method.isPhoto {
                     Toggle("GPU pipeline", isOn: $model.processing.enabled)
-                }
-                Toggle(isOn: $model.processing.efficientWhenHot) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Efficient path when hot")
-                        Text("While the phone is hot, frames go straight to the encoder instead of through a full RGB image, and the viewfinder gets its own half-size picture. The file matches Maximum quality to within rounding. Maximum quality returns once the phone cools, and sizes other than full size stay on it.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
                 }
                 Toggle("Encode video (off: RAW dump)", isOn: $model.recordEncoded)
                 if !model.recordEncoded {

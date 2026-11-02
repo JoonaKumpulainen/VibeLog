@@ -31,7 +31,8 @@ struct LibraryView: View {
     @State private var toDelete: [Take] = []
     @State private var confirmsDelete = false
 
-    private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+    /// Two columns upright, and as many as fit when turned.
+    private let columns = [GridItem(.adaptive(minimum: 170), spacing: 12)]
 
     var body: some View {
         ScrollView {
@@ -199,6 +200,7 @@ struct TakePlayer: View {
     @State private var take: Take
     @State private var showsInfo = false
     @State private var confirmsDelete = false
+    @Environment(\.verticalSizeClass) private var verticalSize
 
     init(url: URL) {
         _player = State(initialValue: AVPlayer(url: url))
@@ -206,9 +208,13 @@ struct TakePlayer: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        // Turned, the actions move beside the picture, which keeps the full height.
+        let turned = verticalSize == .compact
+        let page = turned ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
+        let actions = turned ? AnyLayout(VStackLayout(spacing: 0)) : AnyLayout(HStackLayout(spacing: 0))
+        page {
             VideoPlayer(player: player)
-            HStack(spacing: 0) {
+            actions {
                 Button { showsInfo = true } label: { action("Details", symbol: "info.circle") }
                 ShareLink(items: take.files) { action("Share", symbol: "square.and.arrow.up") }
                 Button(role: .destructive) {
@@ -217,6 +223,7 @@ struct TakePlayer: View {
                     action("Delete", symbol: "trash")
                 }
             }
+            .frame(width: turned ? 120 : nil)
             .padding(.vertical, 4)
         }
         .background(Color.black)
@@ -280,8 +287,10 @@ private struct TakeInfoView: View {
             ("frameRate", "Frame rate"), ("curve", "Log curve"), ("gamut", "Gamut"),
             ("aspect", "Aspect"), ("exposureStops", "Exposure offset"),
             ("exposureDuringTake", "Exposure"), ("whiteBalanceDuringTake", "White balance"),
-            ("pipeline", "Pipeline"), ("orientation", "Hold"), ("lens", "Lens"), ("tools", "Tools"),
-            ("audio", "Audio"), ("frameTime", "Frame time"),
+            ("pipeline", "Pipeline"), ("debayer", "Debayer"), ("heatChanges", "Heat changes"),
+            ("hotPath", "Pipeline when hot"), ("hotDebayer", "Debayer when hot"),
+            ("orientation", "Hold"), ("lens", "Lens"), ("distortionCorrection", "Lens correction"),
+            ("tools", "Tools"), ("audio", "Audio"), ("frameTime", "Frame time"), ("fileTag", "File tag"),
             ("reducedLoadAtStart", "Reduced load at start"),
         ]
         return names.compactMap { key, name in take.info?.metadata[key].map { (name, $0) } }

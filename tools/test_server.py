@@ -18,6 +18,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import socket
 import sys
 import threading
@@ -29,8 +30,22 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 DEFAULT_PORT = 8765
-DEFAULT_FOLDER = Path.home() / "VibeLogTest"
 CHUNK = 1024 * 1024
+# Left free on the drive, so a large clip can't fill it.
+SPARE_BYTES = 2_000_000_000
+# ProRes 422 HQ at full size, with some to spare.
+GB_PER_SECOND = 0.18
+# Recording stops itself below this.
+PHONE_FLOOR_GB = 10
+
+
+def default_folder():
+    """VIBELOG_TEST_FOLDER, then the path in ~/.vibelog_test_folder, then ~/VibeLogTest."""
+    chosen = os.environ.get("VIBELOG_TEST_FOLDER")
+    saved = Path.home() / ".vibelog_test_folder"
+    if not chosen and saved.exists():
+        chosen = saved.read_text().strip()
+    return Path(chosen) if chosen else Path.home() / "VibeLogTest"
 
 
 class Link:
@@ -162,6 +177,11 @@ def make_handler(link):
                 self.rfile.read(length)
                 self.answer(400, {"error": "bad name"})
                 return
+            if shutil.disk_usage(link.folder).free < length + SPARE_BYTES:
+                print(f"no room for {safe} ({length} bytes) in {link.folder}", flush=True)
+                self.close_connection = True
+                self.answer(507, {"error": "no room"})
+                return
             part = link.folder / (safe + ".part")
             with open(part, "wb") as output:
                 left = length
@@ -264,7 +284,7 @@ RESULT = re.compile(
     r" .*gpu (?P<gpu>[\d.]+) recent .*copy (?P<copy>[\d.]+) queue (?P<queue>[\d.]+) append (?P<append>[\d.]+)"
     r" draw (?P<draw>[\d.]+) ms, viewfinder yields (?P<yields>\d+)")
 HEAT_FIELDS = [
-    "time", "label", "thermal", "battery", "fps", "drops", "gpuMs", "copyMs", "queueMs", "drawMs", "freeGB",
+    "time", "label", "thermal", "battery", "fps", "drops", "yields", "gpuMs", "copyMs", "queueMs", "drawMs", "freeGB",
     "distortionCorrection", "efficientWhenHot"]
 RESULT_FIELDS = ["label", "seconds", "thermal_end", *RESULT.groupindex, "result"]
 
@@ -353,7 +373,19 @@ class Suite:
         self.ask({"action": "stream", "value": "on"})
         time.sleep(5)
 
+    def check(self, steps):
+        """Stops before anything runs, rather than partway through a long plan."""
+        values = self.ask({"action": "status"})["values"]
+        if values.get("screen") != "camera":
+            sys.exit(f"The phone is on {values.get('screen')}. Return it to the camera screen first")
+        if values.get("busy"):
+            sys.exit(f"The phone is busy: {values['busy']}")
+        needed = sum(step.get("take", 0) for step in steps) * GB_PER_SECOND + PHONE_FLOOR_GB
+        if float(values.get("freeGB", 0)) < needed:
+            sys.exit(f"The phone needs about {needed:.0f} GB free and has {values.get('freeGB')} GB")
+
     def run(self, steps):
+        self.check(steps)
         for step in steps:
             if "set" in step:
                 self.set_values(step["set"])
@@ -375,7 +407,7 @@ def suite(options):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
-    parser.add_argument("--folder", type=Path, default=DEFAULT_FOLDER)
+    parser.add_argument("--folder", type=Path, default=default_folder())
     commands = parser.add_subparsers(dest="mode", required=True)
     serving = commands.add_parser("serve")
     serving.add_argument("--bind", default="0.0.0.0")

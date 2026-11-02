@@ -77,7 +77,8 @@ static inline float encodeLogC3(float x) {
 
 static inline float encodeLog(float x, uint curve) {
     switch (curve) {
-        case 0: return encodeAppleLog(x);
+        case 0:
+        case 3: return encodeAppleLog(x);
         case 1: return encodeSLog3(x);
         default: return encodeLogC3(x);
     }

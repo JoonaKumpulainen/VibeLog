@@ -31,7 +31,7 @@ An iPhone camera app that records full-sensor RAW frames, processes them on the 
 | `Modules/VLProcessing` | Log curves, color math, monitor LUT, `.cube` parser, Metal pipeline, still export, `Shaders.metal` |
 | `Modules/VLRecording` | RAW dump writer, `VideoEncoder`, encoder presets, encoder benchmark, `TakeLibrary` |
 | `Modules/ObjCGuard` | Catches Objective-C exceptions from AVFoundation, runtime scan |
-| `Tests/VLTests` | 97 tests, including real GPU tests on the simulator |
+| `Tests/VLTests` | 99 tests, including real GPU tests on the simulator |
 | `tools/inspect_clip.py` | Summarizes a RAW clip and exports a frame |
 | `tools/test_server.py` | The test link's server, which sends the phone commands and collects its files |
 
@@ -65,9 +65,13 @@ Modules are dynamic frameworks. Swift is in Swift 5 mode.
 - **Gyro cost:** none seen. Two 40-second 1x takes, gyro on and off, both wrote 1200 frames with 0 lost.
 - **Main camera, Maximum quality, 10 minutes:** take `192944`, 1x, ProRes 422 HQ, uncompressed audio and all tools except zebras, ran 10:01. The camera delivered 29.99 fps with `missed 5`, and the encoder dropped nothing, but the file wrote 28.11 fps because 1128 frames (6%) dropped at the GPU. The first 6:20 lost none. Heat reached fair at 38 seconds and serious at 1:48. At 6:20, GPU time jumped from about 27 ms to 52 ms, then to about 70 ms by 8:30, with no other change, which looks like GPU throttling. Tools were first blamed for this, but a later comparison showed no measurable difference, so the slowdown itself is the problem. `a2d2cab` has the viewfinder yield in that case, which still needs a long take.
 - **Viewfinder yields didn't save a long take:** take `210133` on `a2d2cab`, 1x, ProRes 422 HQ, Maximum quality, uncompressed audio and all tools except zebras, began at nominal heat but only about 2 minutes after leaving fair, following a run of short takes. The camera delivered 29.99 fps with `missed 8`, but 1982 frames (12%) dropped at the GPU and the file wrote 26.35 fps. Heat reached serious at 1:30 and critical at 9:05, the first critical seen, so the app ended the take. GPU time left about 30 ms at about 3 minutes and settled near 78 ms. The viewfinder gave up 11909 draws and losses still grew, so the compute work itself is what slows. Starting heat differs from `192944`, so it isn't a direct comparison, and that take's lower loss may only reflect a cooler phone.
+- **Efficient path when hot held a full take:** take `222321` on `021248e`, 1x, ProRes 422 HQ, Maximum quality with **Efficient path when hot** on, uncompressed audio, correction off and all tools except zebras, after a 30-minute rest with the stream off. It ran the full 10:00 at 29.96 fps written, 17975 frames at 169.4 MB/s, with 9 lost, all in the first 5 minutes before the phone was hot, and `missed 17`. Heat reached serious at 4:41 and never critical. GPU time stayed near 26 ms for the 5 minutes at serious, where `210133` and `192944` climbed to 70 ms or more. Both the longer rest and the hot path differ from those takes, so it doesn't yet separate them. `viewfinder yields` was 1897, but Settings was open over the camera, which likely inflated it: 20-second takes with Settings open gave 184 to 491 yields, against 0 to 52 in 40-second takes on the camera screen. Heat also differed between those runs. Run linked takes from the camera screen.
+- **The picture changes when hot:** **Keep recording when hot** switches to Bilinear, so hot takes change debayer as well as path. Two 10-second takes at ISO 800, matching each half of `222321`, kept the same brightness and color (mean 0.366 and 0.365), but the Efficient Bilinear frame had about 4% of the fine detail energy of Maximum Malvar-He-Cutler. Most of that is noise at this ISO: side by side it's clearly less grainy and slightly softer, with lettering intact. A low ISO scene with fine detail hasn't been compared. The next step is a long take with the hot path on and **Keep recording when hot** off, which should keep Malvar-He-Cutler if the heat allows.
 - **Tele:** take `194057` delivered 29.86 fps. It started at serious heat, and GPU time reached 66 ms once tools were on, so 68 frames dropped at the GPU over 21 seconds. Take `194232`, in the same conditions, logged 664 frames at 29.98 fps, but 151 were duplicates with the same timestamp as the frame before, so the file wrote 23.13 fps. `missed` showed 0.
 - **Frame time doesn't set the lens limit:** on `a2d2cab`, 20-second takes at 1/120 s wrote 21.33 fps fixed and 21.50 variable on the ultra wide, and 29.91 both ways on the tele. Fixed stays the default until the 1x long run says otherwise, and the Diagnostics switch can go once it does.
 - **Why the ultra wide was slow:** distortion correction. On `021248e`, 20-second takes at 1/120 s wrote 22.89 fps with it on and 29.85 fps with it off, and the camera's not-ready time fell from 40.5 ms to 31.9 ms. With it on, previews came out 704x504 with black edges, and with it off 672x504 with none, so correction reshapes the frame the app receives. Off gives the sensor's plain 4032x3024, which suits the app's goal, but the lens's distortion then stays in the picture. The switch is on by default, so the ultra wide stays slow until that changes. Whether colors and levels stay right with it off hasn't been checked on footage.
+- **Correction on the 1x and tele:** 20-second takes were the same with it on and off: 1x 29.71 and 29.30 fps, tele 29.71 and 29.81, all with the same 672x504 previews. The phone heated through this run, so the small losses of 1 to 10 frames at the GPU follow the order of the takes more than the setting. Off is fine as the default on every lens.
+- **Slow focus move still costs frames:** in the 56-second control test, 16 small focus changes at two a second over 8 seconds delivered 210 of 240 frames. A rack lost 30 of 60 in 2 seconds, and tap focus lost about 4 to 7 frames, as before. ISO and exposure bias steps stayed clean. Focus stays blocked during takes.
 - **Shutter priority:** at 1x and 1/60 s, a 20-second take frozen at the start and a 30-second take with ISO live both lost 0 frames, at 29.75 and 29.84 fps. ISO moved from 926 to 1114 between them, but no take has followed a real change of light.
 - **Frame steps:** in a 20-second 1x take, copy took about 7 ms, queue 0.3 ms, append 0 ms and draw 6 ms, with the compute pass at 26 ms. The viewfinder is small next to compute. A long take should show which step grows when hot.
 - **Tele:** two 20-second takes at 1/120 s kept every frame at 29.91 fps with no duplicates. The earlier 23 fps duplicates take hasn't repeated.
@@ -80,7 +84,7 @@ Modules are dynamic frameworks. Swift is in Swift 5 mode.
 
 ## Not verified
 
-- Recording well past 10 minutes, or 10 minutes in Maximum quality with no dropped frames.
+- Recording well past 10 minutes, or 10 minutes with no dropped frames at all.
 - Why the long run was about 16 frames short of 30 fps: skipped frames or the sensor's real rate. The new `missed` and `gap` figures should show which.
 - Whether **Auto exposure and white balance during a take** costs frames.
 - Why a take at 00:24:03 in the last session stopped after 76 ms with no frames. It may have been a double tap or record firing twice.
@@ -100,7 +104,7 @@ New additions follow the design rules in [ROADMAP.md](ROADMAP.md). `CameraGeomet
 
 ### New in `a2d2cab`, untested on the phone
 
-- **Presets:** a default preset and a built-in Stock.
+- **Presets:** a default preset.
 - **Fixed frame time at 30 fps:** on by default, with a Diagnostics switch.
 - **Viewfinder yields:** `MonitorPacer` drops to every 8th draw for 30 frames once two frames are waiting during a take. It's meant to stop the 6% loss in `192944`, which is untested. The result line reports `viewfinder yields`.
 - **Loss counts:** `FrameRouter` stops duplicate frames, within 1 ms of the last, before the GPU, so they no longer count or cost anything. `missed` now compares with the real frame rate during a take. The result line gives `lost (gpu, encoder)`, and the sidecar and library include GPU losses, which they used to leave out.
@@ -125,12 +129,27 @@ New additions follow the design rules in [ROADMAP.md](ROADMAP.md). `CameraGeomet
 - **Test link:** stream control, the settings and actions above, a preview still, RAW clip fetching, and a report of the open screen. The `sendPreview` still works without any sign on the phone, which `TEST_LINK.md` states.
 - **Fixes:** the timing file now sends once it's written, and `record` works for RAW dumps.
 
+### Not yet built
+
+- **Presets:** every setting except the link, plus **Reset all settings** in place of Stock.
+- **Status blocks:** centered sideways and slightly wider.
+- **Debayer text:** Settings says what each debayer does to detail and grain.
+- **Apple Log 2:** Apple Log's curve with Apple Wide Gamut, from the primaries in OpenColorIO's source, which credits Apple's white paper. Red 0.725, 0.301, green 0.221, 0.814, blue 0.068, -0.076, D65. The Apple paper itself wasn't read. It's a software encoding, so it isn't limited to newer iPhones. The file tag stays nominal. Grading it hasn't been checked.
+- **Library and player turn:** `AppOrientation` allows landscape only while they're open, and the camera screen stays portrait. The sheet and share views turn with them. Turning hasn't been seen on the phone.
+
+- **Advanced page:** Settings has an **Advanced** page with **Pipeline** and **Efficient when hot**, **Debayer** and **Bilinear when hot**, **Lens distortion correction** and **Diagnostics**. The long press on **Version** is gone. A search still shows these rows on the main page. **Keep recording when hot** is split: the debayer switch moved here, and the viewfinder part stayed as **Slow viewfinder when hot**.
+
+- **Heat changes:** the sidecar's `heatChanges` and **Details** give the time of each hot and cool change in a take, with what changed. **Details** also shows debayer, hot switches, lens correction and file tag.
+- **Idle camera pause:** after 2 minutes with no touch on the camera screen, the stream stops and a tap resumes it. Change or turn it off under Viewfinder. It doesn't run while a dial or panel is open, or while the test link is on. A dial drag only counts through that open dial, so a very long hold on a closed screen can still pause.
+- **Warm note:** starting a take within 20 minutes of the phone leaving serious heat shows a notice, because nominal doesn't mean cool.
+- **Server:** the default results folder can be set in `~/.vibelog_test_folder`, the server refuses uploads that would leave under 2 GB free, suites check the screen and storage first, and the heat log records `yields`.
+
 ### Test link
 
 **Test link** in Diagnostics connects the phone to `tools/test_server.py` on the owner's computer, so a session can run tests itself. [TEST_LINK.md](TEST_LINK.md) covers privacy, running the server and removing it. It's off at every launch, and can't be switched on from the server.
 
-- **Setup:** run `python3 tools/test_server.py serve`, which prints the address and token, and keeps files in `~/VibeLogTest`. Enter both in Diagnostics and turn on **Connect**. iOS asks for Local Network permission the first time. The computer's firewall must allow port 8765.
-- **Commands:** `python3 tools/test_server.py send status`, `send set <name> <value>`, `send record <seconds> --wait` and the rest in [TEST_LINK.md](TEST_LINK.md). `set` takes lens, frameRate, codec, size, aspect, curve, gamut, pipeline, debayer, peaking, exposureOffset, shutter, iso, uncompressedAudio, saveGyro, captureTiming, fixedFrameTime, keepRecordingWhenHot, autoDuringTake, distortionCorrection, efficientWhenHot, isoAuto, frameGuide, fileTag, desqueeze, tools, method, encodeVideo, writeFrames, look, lut, lutMadeFor, freezeViewfinder, punch, stopAfter, whiteBalance, tint, focus and exposureBias. A wrong value replies with the choices.
+- **Setup:** run `python3 tools/test_server.py serve`, which prints the address and token, and keeps files in `~/VibeLogTest`. `/home` on this machine has no room for clips, so `~/.vibelog_test_folder` points it at the larger drive. Enter both in Diagnostics and turn on **Connect**. iOS asks for Local Network permission the first time. The computer's firewall must allow port 8765.
+- **Commands:** `python3 tools/test_server.py send status`, `send set <name> <value>`, `send record <seconds> --wait` and the rest in [TEST_LINK.md](TEST_LINK.md). `set` takes lens, frameRate, codec, size, aspect, curve, gamut, pipeline, debayer, peaking, exposureOffset, shutter, iso, uncompressedAudio, saveGyro, captureTiming, fixedFrameTime, slowViewfinderWhenHot, bilinearWhenHot, autoDuringTake, distortionCorrection, efficientWhenHot, isoAuto, frameGuide, fileTag, desqueeze, tools, method, encodeVideo, writeFrames, look, lut, lutMadeFor, freezeViewfinder, punch, stopAfter, whiteBalance, tint, focus and exposureBias. A wrong value replies with the choices.
 - **Limits:** the app only acts on the fixed list in `App/TestCommands.swift`. Nothing there deletes a take. Only tools, look and punch-in change during a take. Files wait until a take ends, and videos only go by `sendFile`. It's plain HTTP with a token, so it suits a private network only. The phone must be awake, with VibeLog open, and someone must point it at the scene.
 - **Cost:** one idle request stays open during a take, on its own queue. 40-second takes lost nothing with it connected, but no take has compared it with the link off.
 - **Proven:** it connected on the phone, ran these tests, and delivered logs, sidecars, gyro and timing files.
@@ -139,10 +158,10 @@ New additions follow the design rules in [ROADMAP.md](ROADMAP.md). `CameraGeomet
 
 Run these in order. The owner has limited time, so short tests come first, and the session log and sidecars should come back with the results.
 
-1. **Presets, once built:** save, apply and overwrite one. **Stock** stays at the top with no **Delete**, and the name **Stock** can't be saved. **Set as default** from a row's menu, change the format, then reopen the app: it should open on that preset. Delete it by menu and by swipe; deleting the default returns to the last choices used. Do saved presets persist?
+1. **Presets, once built:** save, apply and overwrite one, including tools, audio and Diagnostics switches. **Set as default** from a row's menu, change something, then reopen the app: it should open on that preset. Delete by menu and by swipe; deleting the default returns to the last choices used. **Reset all settings** should keep presets and the test link. Do saved presets persist?
 2. **Decimal frame rates:** what does an editor report for a 23.98 and a 29.97 file? Files use each frame's real capture time, not a fixed grid. The `Frame timing:` log line shows what the sensor accepted.
 3. **ARRI Wide Gamut 3:** does the viewfinder look unchanged, and does the file read correctly when graded that way?
-4. **Long test on `a2d2cab`:** 10 minutes at 1x, ProRes 422 HQ, Maximum quality, starting at nominal heat, once with tools and once without. Try **Efficient** next, from a fully cool phone. `210133` showed the viewfinder yield doesn't protect a Maximum quality take, and the earlier Efficient run kept every frame for 10:12. If Efficient holds, consider switching to its direct path when hot. If the yield keeps failing, remove it, because it nearly freezes the viewfinder for no gain. It needs about 100 GB per take, and the link can run it.
+4. **Long test:** `222321` held with the hot path on. To separate it from the longer rest, repeat with **Efficient path when hot** off after the same 30-minute rest. It needs about 100 GB, and the link can run it.
 5. **48mm RAW probe:** prop the phone on a still, detailed scene and tap **Run 48mm RAW probe** in Diagnostics. Each `48mm probe:` log line gives the real frame size, `35mm=` focal length, and `field=`. `cropped` at 2x with 4032x3024 frames would mean true 48mm RAW is available. `same` means RAW ignores the zoom, and `gaps` shows how fast 8064x6048 is if it works. If neither works, 2x falls back to a digital crop limited to about 1080p.
 
 For vignette correction, also ask for a short RAW clip's `reference.dng` and `reference_metadata.json`. Turn off **Encode video** in Diagnostics to record one.
@@ -160,7 +179,7 @@ For vignette correction, also ask for a short RAW clip's `reference.dng` and `re
 ### How the camera screen works
 
 - **Layout:** monospaced values around the picture. Every control keeps its portrait position in every hold and only its contents turn. The owner's earlier glass panels are gone: only black was ever behind them, so they added cost and no look.
-- **Status:** two mirrored three-line blocks beside the Dynamic Island. Each is square so it can turn, and keeps to its outer corner in every hold. Warnings are filled orange chips.
+- **Status:** two mirrored three-line blocks beside the Dynamic Island. Each is square so it can turn. Upright, its lines keep to the outer edge. Sideways, they center in the square, away from the screen's rounded corners. The owner reported text clipping before this change, and the fix hasn't been seen on the phone. Warnings are filled orange chips.
 - **Control bar:** ISO, shutter, white balance and focus. Amber means set by the user, an A badge means auto and a lock means frozen for the take.
 - **Tray:** above the control bar, it shows the tools and lenses, a dial or the **MON** tools, so the control bar always stays. During a take the mic meter replaces the lenses.
 - **Dials:** they have **AUTO** and **FINE**. The white balance dial also sets tint, the shutter dial has **180°**, and the focus dial has **PUNCH** and **PEAK**. Shutter angle shows while the shutter dial is open.
@@ -175,9 +194,9 @@ For vignette correction, also ask for a short RAW clip's `reference.dng` and `re
 - **Focus peaking:** a `Tool` that marks fine detail in cyan on the monitor, with four extra texture reads per drawable pixel while it's on. Its neighbors are fixed at about three sensor pixels, so punching in doesn't weaken it.
 - **Mic meter:** the bar moves about twelve times a second by writing to Core Animation layers from the audio queue, so it skips the main thread. Its dB number updates once a second. Green runs to -12 dB, yellow to -3 dB, then red.
 - **Gyro log:** with **Save gyro data** on, which is the default, each encoded take gets a `.gcsv` of the same name in `videos/`, from `CMDeviceMotion` at 100 Hz, the most the phone delivered when asked for 200, on its own utility queue. A 5-second sample was evenly spaced with sensible units, but began 0.14 seconds after the first frame, because motion updates take that long to start, so a take's first frames have no gyro data. Time zero is the first frame, on the same clock as frame timestamps, and the file is flushed once a second. Rotation is CoreMotion's bias-corrected rate. RAW dumps get none. Share sends it with the video, and delete removes it.
-- **Settings:** one searchable page ordered by use, shown as a sheet. Format changes link to the panel. Presets save every format column plus pipeline, debayer, exposure offset and color space, inside `VibeLog.config.json`. **Stock** is built in from `AppConfig`'s defaults, so it can't be replaced or deleted. A row's menu sets the default, which replaces the saved format at launch, and deletes saved presets. With no default, the app opens on the last choices used. **Uncompressed audio** records 24-bit PCM instead of AAC, which stays the default until it's tested. The volume buttons toggle recording on iOS 18 and later.
+- **Settings:** one searchable page ordered by use, shown as a sheet. Format changes link to the panel. Presets hold a copy of every setting in `AppConfig` except the test link, inside `VibeLog.config.json`, and older presets convert when read. They don't hold lens, exposure, white balance or focus, which aren't saved settings. **Reset all settings** returns to `AppConfig`'s defaults. A row's menu sets the default, which replaces the saved format at launch, and deletes saved presets. With no default, the app opens on the last choices used. **Uncompressed audio** records 24-bit PCM instead of AAC, which stays the default until it's tested. The volume buttons toggle recording on iOS 18 and later.
 
-Diagnostics opens with a long press on **Version** in Settings.
+Diagnostics is under **Advanced** in Settings.
 
 ## Adjusting the camera while recording
 

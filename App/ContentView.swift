@@ -76,6 +76,14 @@ struct CameraScreen: View {
                 showFormat = true
             }
         }
+        .simultaneousGesture(TapGesture().onEnded { model.cameraTouched() })
+        .onChange(of: selectedDial != nil || showFormat || showMonitor) { _, open in
+            model.isCameraControlOpen = open
+            model.cameraTouched()
+        }
+        .onChange(of: model.playingTake != nil) { _, open in
+            AppOrientation.allowTurning(open)
+        }
         .fullScreenCover(isPresented: Binding(
             get: { model.playingTake != nil },
             set: { if !$0 { model.closeLastTake() } }
@@ -610,7 +618,7 @@ struct StatusLine: View {
             .font(Tokens.statusFont)
             .foregroundStyle(warns ? Color.black : tint)
             .lineLimit(1)
-            .minimumScaleFactor(0.8)
+            .minimumScaleFactor(0.7)
             .background {
                 if warns {
                     RoundedRectangle(cornerRadius: 3)
@@ -636,8 +644,9 @@ struct RemainingLines: View {
 }
 
 /// The format and what's left, mirrored either side of the Dynamic Island: three lines each, the
-/// same width, centered in the depth above the picture. Each block turns as a square and keeps
-/// to its outer corner in every hold.
+/// same width, centered in the depth above the picture. Each block turns as a square. Upright, it
+/// keeps to its outer edge. Sideways, its lines center in the square, which keeps them equally far
+/// from the Dynamic Island and clear of the screen's rounded corners.
 struct StatusBlocks: View {
     @EnvironmentObject private var model: AppModel
     let hold: Hold
@@ -667,23 +676,22 @@ struct StatusBlocks: View {
     }
 
     /// Where the phone's sides end up as held, which turns "outer" into a direction.
-    private func outerAlignment(_ side: Side) -> Alignment {
+    private func lineAlignment(_ side: Side) -> HorizontalAlignment {
         switch hold {
         case .portrait: return side == .left ? .leading : .trailing
         case .upsideDown: return side == .left ? .trailing : .leading
-        case .landscapeLeft: return side == .left ? .bottom : .top
-        case .landscapeRight: return side == .left ? .top : .bottom
+        case .landscapeLeft, .landscapeRight: return .center
         }
     }
 
     private func block<Content: View>(
         _ side: Side, @ViewBuilder content: (HorizontalAlignment) -> Content
     ) -> some View {
-        let outer = outerAlignment(side)
-        let lines: HorizontalAlignment = outer == .trailing ? .trailing : .leading
+        let lines = lineAlignment(side)
+        let edge = Alignment(horizontal: lines, vertical: .center)
         return content(lines)
-            .frame(width: CameraGeometry.statusLineWidth, alignment: Alignment(horizontal: lines, vertical: .center))
-            .frame(width: CameraGeometry.statusSide, height: CameraGeometry.statusSide, alignment: outer)
+            .frame(width: CameraGeometry.statusLineWidth, alignment: edge)
+            .frame(width: CameraGeometry.statusSide, height: CameraGeometry.statusSide, alignment: edge)
             .turnedToHold()
     }
 }

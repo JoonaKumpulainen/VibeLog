@@ -10,11 +10,10 @@ struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var importingLUT = false
-    @State private var showDiagnostics = false
     @State private var search = ""
-    @State private var showsProcessing = false
     @State private var namingPreset = false
     @State private var presetName = ""
+    @State private var confirmingReset = false
     let openFormat: () -> Void
 
     var body: some View {
@@ -35,7 +34,15 @@ struct SettingsView: View {
                 if matches(Self.imageTerms) {
                     imageSection
                 }
-                if matches("about version saved config file diagnostics") {
+                if search.isEmpty {
+                    advancedSection
+                } else if matches(Self.processingTerms) {
+                    Section("Advanced") { processingRows }
+                }
+                if matches(Self.distortionTerms), !search.isEmpty {
+                    Section("Advanced") { distortionRow }
+                }
+                if matches("about version saved config file") {
                     aboutSection
                 }
             }
@@ -45,9 +52,6 @@ struct SettingsView: View {
                 }
             }
             .searchable(text: $search, prompt: "Search settings")
-            .navigationDestination(isPresented: $showDiagnostics) {
-                DiagnosticsView { dismiss() }
-            }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -67,17 +71,17 @@ struct SettingsView: View {
     }
 
     private static let formatTerms = "format codec size resolution frame rate fps log curve aspect open gate chroma"
-    private static let presetTerms = "preset save saved recall format default stock delete startup"
+    private static let presetTerms = "preset save saved recall format default reset delete startup"
     private static let stopTerms = "stop after limit duration time timer"
     private static let autoTerms = "auto exposure shutter iso white balance during take recording freeze lock start roll"
-    private static let heatTerms = "hot heat thermal cool long takes debayer"
+    private static let heatTerms = "hot heat thermal cool long takes viewfinder slow"
     private static let audioTerms = "audio pcm aac sound uncompressed microphone"
     private static let gyroTerms = "gyro gyroflow stabilization motion gcsv log"
     private static let mainsTerms = "flicker mains lights hz power frequency shutter"
     private static let recordingTerms = [stopTerms, autoTerms, audioTerms, gyroTerms, heatTerms, mainsTerms].joined(separator: " ")
     private static let lookTerms = "look monitor rec.709 log preview isp viewfinder"
     private static let lutTerms = "lut cube import look monitor input"
-    private static let pauseTerms = "pause viewfinder monitor off gpu recording"
+    private static let pauseTerms = "pause viewfinder monitor off gpu recording idle heat sleep"
     private static let peakingTerms = "focus peaking sensitivity low high detail"
     private static let guideTerms = "frame guide aspect scope 2.39 1.85 framing"
     private static let desqueezeTerms = "anamorphic desqueeze squeeze lens"
@@ -85,8 +89,9 @@ struct SettingsView: View {
     private static let offsetTerms = "exposure offset stops brightness baked"
     private static let gamutTerms = "color colour space gamut native s-gamut3 s-log3 arri wide logc3 awg3 rec.2020"
     private static let tagTerms = "file tag color colour rec.709 rec.2020 hlg editor"
-    private static let processingTerms = "pipeline debayer demosaic quality processing"
-    private static let imageTerms = [offsetTerms, gamutTerms, tagTerms, processingTerms].joined(separator: " ")
+    private static let processingTerms = "pipeline debayer demosaic quality processing efficient bilinear malvar hot advanced"
+    private static let distortionTerms = "lens distortion correction ultra wide advanced"
+    private static let imageTerms = [offsetTerms, gamutTerms, tagTerms].joined(separator: " ")
 
     /// Every word typed has to appear, so a phrase can come in any order.
     private func matches(_ terms: String) -> Bool {
@@ -95,8 +100,8 @@ struct SettingsView: View {
 
     private var hasResults: Bool {
         matches(Self.formatTerms) || matches(Self.presetTerms) || matches(Self.recordingTerms)
-            || matches(Self.viewfinderTerms) || matches(Self.imageTerms)
-            || matches("about version saved config file diagnostics")
+            || matches(Self.viewfinderTerms) || matches(Self.imageTerms) || matches(Self.processingTerms)
+            || matches(Self.distortionTerms) || matches("about version saved config file")
     }
 
     private static var version: String {
@@ -136,16 +141,17 @@ struct SettingsView: View {
         }
     }
 
-    /// Tapping one applies it. Saved ones go with a swipe or from their menu, and Stock stays.
+    /// Tapping one applies it. Saved ones go with a swipe or from their menu.
     private var presetSection: some View {
         Section {
-            presetRow(.stock)
             ForEach(model.presets) { presetRow($0) }
                 .onDelete { model.deletePresets(at: $0) }
             Button("Save current format") {
                 presetName = ""
                 namingPreset = true
             }
+            Button("Reset all settings", role: .destructive) { confirmingReset = true }
+                .disabled(model.isRecording)
         } header: {
             Text("Presets")
         } footer: {
@@ -154,10 +160,15 @@ struct SettingsView: View {
         .alert("Save preset", isPresented: $namingPreset) {
             TextField("Name", text: $presetName)
             Button("Save") { model.savePreset(named: presetName) }
-                .disabled(FormatPreset.isReserved(presetName))
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Keeps the codec, size, aspect, frame rate, log curve, pipeline, debayer and exposure offset. A name in use is replaced. Stock can't be.")
+            Text("Keeps every setting except the test link. A name in use is replaced.")
+        }
+        .confirmationDialog("Reset all settings?", isPresented: $confirmingReset, titleVisibility: .visible) {
+            Button("Reset", role: .destructive) { model.resetSettings() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Returns every setting and manual control to the app's own. Presets, takes and the test link stay.")
         }
     }
 
@@ -190,9 +201,7 @@ struct SettingsView: View {
                 Button(isDefault ? "Remove default" : "Set as default") {
                     model.defaultPreset = isDefault ? "" : preset.name
                 }
-                if !preset.isStock {
-                    Button("Delete", role: .destructive) { model.delete(preset) }
-                }
+                Button("Delete", role: .destructive) { model.delete(preset) }
             } label: {
                 Image(systemName: "ellipsis.circle")
                     .frame(width: 44, height: 44)
@@ -236,7 +245,7 @@ struct SettingsView: View {
             }
             if matches(Self.heatTerms) {
                 Toggle(isOn: $model.processing.reduceLoadWhenHot) {
-                    explained("Keep recording when hot", "Uses a cheaper debayer once the phone is hot.")
+                    explained("Slow viewfinder when hot", "Draws fewer frames once the phone is hot, leaving more for the take.")
                 }
             }
             if matches(Self.mainsTerms) {
@@ -284,6 +293,14 @@ struct SettingsView: View {
                 Toggle(isOn: $model.processing.pauseMonitorWhileRecording) {
                     explained("Freeze viewfinder during a take", "Saves GPU time, but the picture stops.")
                 }
+                Picker(selection: $model.idlePauseMinutes) {
+                    Text("Never").tag(0.0)
+                    Text("1 minute").tag(1.0)
+                    Text("2 minutes").tag(2.0)
+                    Text("5 minutes").tag(5.0)
+                } label: {
+                    explained("Pause camera when idle", "Stops the camera with no touch, to save heat. A tap wakes it.")
+                }
             }
             if matches(Self.peakingTerms) {
                 Picker(selection: $model.processing.peakingSensitivity) {
@@ -315,7 +332,7 @@ struct SettingsView: View {
 
     private var gamutDetail: String {
         guard let curve = model.processing.gamut.curve else {
-            return "Every log curve can record this. Other gamuts need their own curve."
+            return "Apple Log, S-Log3 and LogC3 can record this. Apple Log 2 can't, so choosing this from it moves to Apple Log."
         }
         return "Sets the log curve to \(curve.label), which this gamut belongs to."
     }
@@ -346,39 +363,66 @@ struct SettingsView: View {
                     explained("File tag", "What the file tells an editor. The picture doesn't change.")
                 }
             }
-            if matches(Self.processingTerms) {
-                // A search opens this by showing its rows directly.
-                if search.isEmpty {
-                    DisclosureGroup("Processing", isExpanded: $showsProcessing) {
-                        processingRows
-                    }
-                } else {
-                    processingRows
-                }
-            }
         }
     }
 
+    /// Rarely changed, so it's a page of its own. A search shows these rows on the main page.
+    private var advancedSection: some View {
+        Section {
+            NavigationLink("Advanced") { advancedPage }
+        }
+    }
+
+    private var advancedPage: some View {
+        Form {
+            Section("Processing") { processingRows }
+            Section("Capture") { distortionRow }
+            Section {
+                NavigationLink("Diagnostics") {
+                    DiagnosticsView { dismiss() }
+                }
+            } footer: {
+                Text("Tests, logs and the test link.")
+            }
+        }
+        .navigationTitle("Advanced")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// Each choice sits with what can replace it while the phone is hot.
     @ViewBuilder
     private var processingRows: some View {
         Picker(selection: $model.processing.pipeline) {
             ForEach(PipelineMode.allCases) { Text($0.label).tag($0) }
         } label: {
-            explained("Pipeline", "Maximum quality is the proven default.")
+            explained("Pipeline", "How frames reach the encoder. Maximum quality is the reference.")
+        }
+        Toggle(isOn: $model.processing.efficientWhenHot) {
+            explained(
+                "Efficient when hot",
+                "Frames go straight to the encoder instead of through a full RGB image, and the viewfinder gets its own half-size picture. The file matches to within rounding.")
         }
         Picker(selection: $model.processing.demosaic) {
             ForEach(DemosaicMethod.allCases) { Text($0.label).tag($0) }
         } label: {
-            explained("Debayer", "How color is rebuilt from the sensor.")
+            explained("Debayer", "How color is rebuilt from the sensor. Malvar-He-Cutler keeps more detail and grain. Bilinear is softer and cleaner.")
+        }
+        Toggle(isOn: $model.processing.bilinearWhenHot) {
+            explained("Bilinear when hot", "Saves GPU time, but the picture turns softer partway through a take.")
+        }
+    }
+
+    private var distortionRow: some View {
+        Toggle(isOn: $model.distortionCorrection) {
+            explained(
+                "Lens distortion correction",
+                "Off keeps the sensor's plain frame, and lets the ultra wide reach 30 fps. On, the camera reshapes frames to correct the lens.")
         }
     }
 
     private var aboutSection: some View {
         Section {
             LabeledContent("Version", value: Self.version)
-                .contentShape(Rectangle())
-                .onLongPressGesture { showDiagnostics = true }
-                .accessibilityAction(named: "Open diagnostics") { showDiagnostics = true }
         } header: {
             Text("About")
         } footer: {

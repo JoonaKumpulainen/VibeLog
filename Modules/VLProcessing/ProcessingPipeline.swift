@@ -117,8 +117,10 @@ public struct ProcessingSettings: Equatable, Sendable {
     /// Share of the sensor height kept by the recording crop, dimmed outside on the monitor.
     public var cropFraction = 1.0
     public var pauseMonitorWhileRecording = false
-    /// Uses the cheaper debayer and a slower monitor when the phone is hot.
+    /// Slows the monitor when the phone is hot.
     public var reduceLoadWhenHot = true
+    /// Uses the cheaper debayer when the phone is hot, whichever one is chosen.
+    public var bilinearWhenHot = true
     /// Look LUTs expect Rec.709; conversion LUTs expect the log image.
     public var lutExpectsRec709 = false
     public var curve = LogCurve.appleLog
@@ -137,10 +139,15 @@ public struct ProcessingSettings: Equatable, Sendable {
 
     /// Choosing a gamut other than Rec.2020 also chooses its curve.
     public var gamut: Gamut {
-        get { nativeGamut ? curve.nativeGamut : .rec2020 }
+        // Apple Log 2 is defined by its gamut, so it can't record Rec.2020. That's Apple Log.
+        get { nativeGamut || curve == .appleLog2 ? curve.nativeGamut : .rec2020 }
         set {
             nativeGamut = newValue != .rec2020
-            if let paired = newValue.curve { curve = paired }
+            if let paired = newValue.curve {
+                curve = paired
+            } else if curve == .appleLog2 {
+                curve = .appleLog
+            }
         }
     }
 
@@ -721,7 +728,7 @@ public final class ProcessingPipeline: NSObject {
         return ProcessParams(
             matrixRow0: row(0), matrixRow1: row(1), matrixRow2: row(2), cfaGain: cfaGain,
             redOffset: SIMD2(cfa.redOffset.x, cfa.redOffset.y), curve: settings.curve.rawValue,
-            demosaic: (hot && settings.reduceLoadWhenHot ? DemosaicMethod.bilinear : settings.demosaic).rawValue,
+            demosaic: (hot && settings.bilinearWhenHot ? DemosaicMethod.bilinear : settings.demosaic).rawValue,
             black: black, scale: 1 / (clipValue - black),
             clip: min(red, blue, 1), exposure: Float(pow(2, settings.exposureStops)))
     }

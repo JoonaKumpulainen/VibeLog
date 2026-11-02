@@ -13,6 +13,7 @@ extension LogCurve {
         case .appleLog: return "ALOG"
         case .sLog3: return "SLOG3"
         case .logC3: return "LOGC3"
+        case .appleLog2: return "ALOG2"
         }
     }
 }
@@ -74,6 +75,8 @@ final class AppModel: ObservableObject {
     @Published var bracketCount = 3 { didSet { if bracketCount != oldValue { reconfigure() } } }
     @Published var usePhotoPreset = true { didSet { if usePhotoPreset != oldValue { reconfigure() } } }
     @Published var fixedFrameTime = true { didSet { if fixedFrameTime != oldValue { reconfigure() } } }
+    /// Stops the stream after this long with no touch. Zero never does.
+    @Published var idlePauseMinutes = 2.0
     @Published var distortionCorrection = false { didSet { if distortionCorrection != oldValue { reconfigure() } } }
     @Published var frameGuide = FrameGuide.scope
     @Published var fileTag = FileTag.rec2020
@@ -224,6 +227,12 @@ final class AppModel: ObservableObject {
     /// One take's length, instead of the owner's **Stop after**.
     private var takeSeconds: Double?
     private var resumeAfterSettings = false
+    private var hotEnded: Date?
+    private var takeHeatEvents: [String] = []
+    private var lastTouch = Date()
+    private var idlePaused = false
+    /// A dial or panel is open, which counts as using the camera.
+    var isCameraControlOpen = false
     /// Names the log the test link sends, so one session keeps one file.
     let sessionStamp = Storage.timestamp()
     private let statsQueue = DispatchQueue(label: "vibelog.stats", qos: .utility)
@@ -399,6 +408,8 @@ final class AppModel: ObservableObject {
         config.debayer = processing.demosaic.label
         config.exposureOffset = processing.exposureStops
         config.reduceLoadWhenHot = processing.reduceLoadWhenHot
+        config.bilinearWhenHot = processing.bilinearWhenHot
+        config.idlePauseMinutes = idlePauseMinutes
         config.monitor = processing.monitor.rawValue
         config.monitorLUT = selectedLUT
         config.lutExpectsRec709 = processing.lutExpectsRec709
@@ -437,62 +448,69 @@ final class AppModel: ObservableObject {
             }
         }
         if let startup = loaded.startupPreset { loaded.use(startup) }
-        encoderPreset = EncoderPreset.all.first { $0.id == loaded.codec } ?? encoderPreset
-        encoderSize = EncoderSize.all.first { $0.label == loaded.size } ?? encoderSize
-        widescreen = loaded.widescreen
         // The first configuration comes after this and uses it.
         applyingOptions = true
-        frameRate = FrameRates.all.contains(loaded.frameRate) ? loaded.frameRate : frameRate
+        adoptSettings(loaded)
         applyingOptions = false
-        recordSeconds = loaded.stopAfterSeconds
-        processing.curve = LogCurve.allCases.first { $0.label == loaded.logCurve } ?? processing.curve
-        processing.nativeGamut = loaded.nativeGamut
-        processing.pipeline = PipelineMode(rawValue: loaded.pipeline) ?? processing.pipeline
-        processing.demosaic = DemosaicMethod.allCases.first { $0.label == loaded.debayer } ?? processing.demosaic
-        processing.exposureStops = loaded.exposureOffset
-        processing.reduceLoadWhenHot = loaded.reduceLoadWhenHot
-        processing.monitor = MonitorMode(rawValue: loaded.monitor) ?? processing.monitor
-        if lutNames.contains(loaded.monitorLUT) { selectedLUT = loaded.monitorLUT }
-        processing.lutExpectsRec709 = loaded.lutExpectsRec709
-        processing.pauseMonitorWhileRecording = loaded.monitorOffWhileRecording
-        showTelemetry = loaded.telemetry
-        lockAtRoll = loaded.lockAtRoll
-        saveGyroLog = loaded.saveGyroLog
-        pcmAudio = loaded.pcmAudio
-        mainsHz = loaded.mainsHz
-        toolbar = loaded.toolbar.compactMap(Tool.init(rawValue:))
-        activeTools = Set(loaded.activeTools.compactMap(Tool.init(rawValue:)))
         presets = loaded.presets
         defaultPreset = loaded.startupPreset?.name ?? ""
-        processing.peakingSensitivity = PeakingSensitivity(rawValue: loaded.peakingSensitivity) ?? .low
-        // The first configuration comes after this and uses it.
-        fixedFrameTime = loaded.fixedFrameTime
-        distortionCorrection = loaded.distortionCorrection
-        processing.efficientWhenHot = loaded.efficientWhenHot
-        frameGuide = FrameGuide(rawValue: loaded.frameGuide) ?? frameGuide
-        processing.desqueeze = loaded.desqueeze
-        fileTag = FileTag(rawValue: loaded.fileTag) ?? fileTag
         testServer = loaded.testServer
         testToken = loaded.testToken
         savedConfig = config
     }
 
-    private func preset(named name: String) -> FormatPreset {
-        FormatPreset(
-            name: name, codec: encoderPreset.id, size: encoderSize.label, widescreen: widescreen,
-            frameRate: frameRate, logCurve: processing.curve.label,
-            pipeline: processing.pipeline.rawValue, debayer: processing.demosaic.label,
-            exposureOffset: processing.exposureStops, nativeGamut: processing.nativeGamut)
+    /// Every setting, at launch and from a preset. A choice this version no longer has stays as it is.
+    private func adoptSettings(_ saved: AppConfig) {
+        encoderPreset = EncoderPreset.all.first { $0.id == saved.codec } ?? encoderPreset
+        encoderSize = EncoderSize.all.first { $0.label == saved.size } ?? encoderSize
+        widescreen = saved.widescreen
+        if FrameRates.all.contains(saved.frameRate) { frameRate = saved.frameRate }
+        recordSeconds = saved.stopAfterSeconds
+        processing.curve = LogCurve.allCases.first { $0.label == saved.logCurve } ?? processing.curve
+        processing.nativeGamut = saved.nativeGamut
+        processing.pipeline = PipelineMode(rawValue: saved.pipeline) ?? processing.pipeline
+        processing.demosaic = DemosaicMethod.allCases.first { $0.label == saved.debayer } ?? processing.demosaic
+        processing.exposureStops = saved.exposureOffset
+        processing.reduceLoadWhenHot = saved.reduceLoadWhenHot
+        processing.bilinearWhenHot = saved.bilinearWhenHot
+        idlePauseMinutes = saved.idlePauseMinutes
+        processing.monitor = MonitorMode(rawValue: saved.monitor) ?? processing.monitor
+        if saved.monitorLUT.isEmpty || lutNames.contains(saved.monitorLUT) { selectedLUT = saved.monitorLUT }
+        processing.lutExpectsRec709 = saved.lutExpectsRec709
+        processing.pauseMonitorWhileRecording = saved.monitorOffWhileRecording
+        showTelemetry = saved.telemetry
+        lockAtRoll = saved.lockAtRoll
+        saveGyroLog = saved.saveGyroLog
+        pcmAudio = saved.pcmAudio
+        mainsHz = saved.mainsHz
+        toolbar = saved.toolbar.compactMap(Tool.init(rawValue:))
+        activeTools = Set(saved.activeTools.compactMap(Tool.init(rawValue:)))
+        processing.overlay = ExposureOverlay(rawValue: UInt32(saved.overlay)) ?? .none
+        processing.peakingSensitivity = PeakingSensitivity(rawValue: saved.peakingSensitivity) ?? .low
+        fixedFrameTime = saved.fixedFrameTime
+        distortionCorrection = saved.distortionCorrection
+        processing.efficientWhenHot = saved.efficientWhenHot
+        frameGuide = FrameGuide(rawValue: saved.frameGuide) ?? frameGuide
+        processing.desqueeze = saved.desqueeze
+        fileTag = FileTag(rawValue: saved.fileTag) ?? fileTag
     }
 
-    /// A name already in use takes the new choices, apart from Stock.
+    /// What a preset keeps. Zebras and false color only ever reach the file through here.
+    private var presetSnapshot: AppConfig {
+        var values = config.presetValues
+        values.overlay = Int(processing.overlay.rawValue)
+        return values
+    }
+
+    /// A name already in use takes the new choices.
     func savePreset(named name: String) {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, !FormatPreset.isReserved(name) else { return }
+        guard !name.isEmpty else { return }
+        let saved = FormatPreset(name: name, settings: presetSnapshot)
         if let index = presets.firstIndex(where: { $0.name == name }) {
-            presets[index] = preset(named: name)
+            presets[index] = saved
         } else {
-            presets.append(preset(named: name))
+            presets.append(saved)
         }
     }
 
@@ -505,20 +523,21 @@ final class AppModel: ObservableObject {
         if let index = presets.firstIndex(of: saved) { deletePresets(at: [index]) }
     }
 
-    func isCurrent(_ saved: FormatPreset) -> Bool { saved == preset(named: saved.name) }
+    func isCurrent(_ saved: FormatPreset) -> Bool { saved.settings == presetSnapshot }
 
-    /// A choice this version no longer has stays as it is.
     func apply(_ saved: FormatPreset) {
         guard !isRecording else { return }
-        encoderPreset = EncoderPreset.all.first { $0.id == saved.codec } ?? encoderPreset
-        encoderSize = EncoderSize.all.first { $0.label == saved.size } ?? encoderSize
-        widescreen = saved.widescreen
-        if FrameRates.all.contains(saved.frameRate) { frameRate = saved.frameRate }
-        processing.curve = LogCurve.allCases.first { $0.label == saved.logCurve } ?? processing.curve
-        processing.nativeGamut = saved.nativeGamut ?? false
-        processing.pipeline = PipelineMode(rawValue: saved.pipeline) ?? processing.pipeline
-        processing.demosaic = DemosaicMethod.allCases.first { $0.label == saved.debayer } ?? processing.demosaic
-        processing.exposureStops = saved.exposureOffset
+        adoptSettings(saved.settings)
+    }
+
+    /// Returns every setting and manual control to the app's own, keeping presets and the test link.
+    func resetSettings() {
+        guard !isRecording else { return }
+        adoptSettings(AppConfig())
+        exposureBias = 0
+        exposureLocked = false
+        whiteBalanceLocked = false
+        releaseFocus()
     }
 
     /// Writes only after a change, and never during a take.
@@ -610,6 +629,10 @@ final class AppModel: ObservableObject {
 
     private var takeWarning: String? {
         if isHot { return "Phone is hot, so the take may stop early" }
+        // Nominal doesn't mean cool: a take started soon after heating up reached serious in 90 seconds.
+        if let hotEnded, Date().timeIntervalSince(hotEnded) < 1200 {
+            return "Phone was hot recently, so it may heat quickly"
+        }
         if isStorageLow { return "\(timeLeftLabel) of storage left" }
         if isBatteryLow { return "Battery at \(batteryLabel), so the take may stall" }
         return nil
@@ -738,13 +761,32 @@ final class AppModel: ObservableObject {
         DispatchQueue.main.async { [self] in
             guard hot != loadReduced else { return }
             loadReduced = hot
-            if processing.reduceLoadWhenHot {
+            if !hot { hotEnded = Date() }
+            noteHeatChange(hot: hot)
+            if processing.reduceLoadWhenHot || processing.bilinearWhenHot || processing.efficientWhenHot {
                 showNotice(hot ? "Hot: reduced load" : "Cool: full quality", seconds: 4)
             }
         }
     }
 
     private var outputSize: EncoderSize { widescreen ? encoderSize.widescreen : encoderSize }
+
+    /// What the phone changes to while hot, as a take's details name it.
+    private var hotChanges: String {
+        var changes: [String] = []
+        if processing.efficientWhenHot, processing.pipeline == .maximum { changes.append("Efficient") }
+        if processing.bilinearWhenHot, processing.demosaic != .bilinear { changes.append("Bilinear") }
+        return changes.isEmpty ? "no change" : changes.joined(separator: ", ")
+    }
+
+    /// The picture can change at these moments, so the take's details keep them.
+    private func noteHeatChange(hot: Bool) {
+        guard isRecording else { return }
+        let seconds = Int(Date().timeIntervalSince(recordStart))
+        let event = String(format: "%d:%02d %@", seconds / 60, seconds % 60, hot ? "hot: \(hotChanges)" : "cool")
+        takeHeatEvents.append(event)
+        Log.shared.info("Heat change at \(event)")
+    }
 
     private func updateCrop() {
         // The sensor is 4:3, so 16:9 keeps three quarters of its height.
@@ -812,6 +854,27 @@ final class AppModel: ObservableObject {
     func diagnosticsClosed() {
         // Its tools close Settings outright, which has already said so.
         if openScreen == "diagnostics" { openScreen = "settings" }
+    }
+
+    /// Any touch on the camera screen. It also wakes a paused camera.
+    func cameraTouched() {
+        lastTouch = Date()
+        guard idlePaused else { return }
+        idlePaused = false
+        notice = nil
+        if !isStreaming, playingTake == nil { toggleStream() }
+    }
+
+    /// Runs once a second. The test link's runs start and stop the stream themselves.
+    private func pauseIfIdle() {
+        guard idlePauseMinutes > 0, isStreaming, !isRecording, !recordStarting, isBusy == nil,
+            openScreen == "camera", playingTake == nil, !isCameraControlOpen, !testLinkOn,
+            Date().timeIntervalSince(lastTouch) >= idlePauseMinutes * 60
+        else { return }
+        Log.shared.info("Camera paused after \(idlePauseMinutes) minutes idle")
+        idlePaused = true
+        toggleStream()
+        notice = "Camera paused to save heat. Tap the picture to resume"
     }
 
     /// Records for a set time, leaving **Stop after** as it is.
@@ -1053,6 +1116,8 @@ final class AppModel: ObservableObject {
 
     private func startRecording() {
         guard !isRecording, !recordStarting, pendingRateChange == nil else { return }
+        idlePaused = false
+        lastTouch = Date()
         notice = nil
         takeAlert = nil
         if let takeWarning { showNotice(takeWarning, seconds: 4) }
@@ -1126,16 +1191,18 @@ final class AppModel: ObservableObject {
                 : isoAuto ? "shutter priority" : exposureLocked ? "manual" : "auto",
             "whiteBalanceDuringTake": whiteBalanceLocked ? "manual" : lockAtRoll ? "frozen at start" : "auto",
             "aspect": widescreen ? "16:9 center crop" : "4:3 open gate",
+            "debayer": processing.demosaic.label,
             "pipeline": processing.pipeline.label,
             "orientation": hold.hold.label,
-            "reducedLoadAtStart": isHot && processing.reduceLoadWhenHot ? "yes, bilinear debayer" : "no",
+            "reducedLoadAtStart": isHot && processing.bilinearWhenHot ? "yes, bilinear debayer" : "no",
             "lens": currentLensLabel,
             "tools": toolsLabel,
             "frameTime": fixedFrameTime ? "fixed" : "variable at 30 fps",
-            "distortionCorrection": distortionCorrection ? "on" : "off",
+            "distortionCorrection": distortionCorrection ? "on" : "off, so the lens's distortion stays in the picture",
             "fileTag": fileTag.label,
             "desqueeze": processing.desqueeze == 1 ? "off" : String(processing.desqueeze),
             "hotPath": processing.efficientWhenHot ? "Efficient when hot" : "stays on the chosen pipeline",
+            "hotDebayer": processing.bilinearWhenHot ? "Bilinear when hot" : "stays on the chosen debayer",
             "gyroLog": saveGyroLog ? "on" : "off",
             "thermalAtStart": SystemStatus.thermalName,
             "note": "The file's transfer tag is nominal; decode with the curve named here.",
@@ -1174,6 +1241,7 @@ final class AppModel: ObservableObject {
             if logCaptureTiming { camera.timing.begin() }
             recordStart = Date()
             recordElapsed = 0
+            takeHeatEvents = isHot ? ["0:00 hot: \(hotChanges)"] : []
             recordingFile = url
             isRecording = true
             let seconds = takeSeconds ?? recordSeconds
@@ -1227,6 +1295,7 @@ final class AppModel: ObservableObject {
             result.missed = capture.estimatedMissed
             result.duplicates = capture.duplicates
             result.captureFPS = capture.sustainedFPS
+            if !takeHeatEvents.isEmpty { result.metadata["heatChanges"] = takeHeatEvents.joined(separator: "; ") }
             let summary = String(
                 format: "%@ %dx%d: %.2f fps written, %d frames, %d lost (%d gpu, %d encoder: %d no buffer, %d not ready), %.1f MB/s, audio %d, capture %.2f fps fail %d missed %d duplicates %d gap %.0f ms, gpu %.1f recent %.1f max ms, steps copy %.1f queue %.1f append %.1f draw %.1f ms, viewfinder yields %d",
                 result.preset, result.width, result.height, result.fps, result.framesWritten,
@@ -1313,6 +1382,7 @@ final class AppModel: ObservableObject {
     /// Measures off the main thread, which capture readiness callbacks depend on.
     private func tick() {
         saveConfigIfChanged()
+        pauseIfIdle()
         let battery = SystemStatus.batteryText
         let file = recordingFile
         let seconds = Date().timeIntervalSince(recordStart)
@@ -1360,12 +1430,12 @@ final class AppModel: ObservableObject {
                 ticksSinceReport = 0
                 let capture = router.latestCapture
                 let line = String(
-                    format: "Recording: %.2f fps now, n=%d, fail %d, writer drops %d, 1/%.0f s ISO %.0f, gains %@, gpu %d done %d dropped %.1f recent %.1f max ms, steps copy %.1f queue %.1f append %.1f draw %.1f ms, mem %d MB, avail %d MB, thermal %@, free %d GB, battery %@",
+                    format: "Recording: %.2f fps now, n=%d, fail %d, writer drops %d, 1/%.0f s ISO %.0f, gains %@, gpu %d done %d dropped %.1f recent %.1f max ms, steps copy %.1f queue %.1f append %.1f draw %.1f ms, yields %d, mem %d MB, avail %d MB, thermal %@, free %d GB, battery %@",
                     stats.rollingFPS, stats.frames, stats.captureFailures, stats.writerDrops,
                     capture.exposureSeconds > 0 ? 1 / capture.exposureSeconds : 0, capture.iso,
                     capture.gains.map { String(format: "%.2f", $0) }.joined(separator: "/"),
                     gpu.processed, gpu.dropped, gpu.gpuRecentMs, gpu.gpuMaxMs,
-                    gpu.copyMs, gpu.queueMs, gpu.appendMs, gpu.drawMs,
+                    gpu.copyMs, gpu.queueMs, gpu.appendMs, gpu.drawMs, gpu.monitorYields,
                     status.footprintMB, status.availableMB,
                     status.thermal, status.freeDiskGB, status.battery)
                 if let activeEncoder {

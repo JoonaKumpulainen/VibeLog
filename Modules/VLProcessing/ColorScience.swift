@@ -53,6 +53,7 @@ public enum Gamut: String, CaseIterable, Identifiable, Sendable {
     case rec2020
     case sGamut3
     case arriWideGamut3
+    case appleWideGamut
 
     public var id: String { rawValue }
 
@@ -61,24 +62,27 @@ public enum Gamut: String, CaseIterable, Identifiable, Sendable {
         case .rec2020: return "Rec.2020"
         case .sGamut3: return "S-Gamut3"
         case .arriWideGamut3: return "ARRI Wide Gamut 3"
+        case .appleWideGamut: return "Apple Wide Gamut"
         }
     }
 
-    /// The curve this gamut belongs to. Rec.2020 goes with any curve.
+    /// The curve this gamut belongs to. Rec.2020 goes with every curve but Apple Log 2.
     public var curve: LogCurve? {
         switch self {
         case .rec2020: return nil
         case .sGamut3: return .sLog3
         case .arriWideGamut3: return .logC3
+        case .appleWideGamut: return .appleLog2
         }
     }
 
     /// The gamut with what it pairs with, so a list shows which curves have their own.
     public var pairedLabel: String {
         switch self {
-        case .rec2020: return "Rec.2020 · any curve"
+        case .rec2020: return "Rec.2020"
         case .sGamut3: return "S-Gamut3 · S-Log3"
         case .arriWideGamut3: return "ARRI Wide Gamut 3 · LogC3"
+        case .appleWideGamut: return "Apple Wide Gamut · Apple Log 2"
         }
     }
 
@@ -88,6 +92,7 @@ public enum Gamut: String, CaseIterable, Identifiable, Sendable {
         case .rec2020: return nil
         case .sGamut3: return (SIMD2(0.730, 0.280), SIMD2(0.140, 0.855), SIMD2(0.100, -0.050))
         case .arriWideGamut3: return (SIMD2(0.6840, 0.3130), SIMD2(0.2210, 0.8480), SIMD2(0.0861, -0.1020))
+        case .appleWideGamut: return (SIMD2(0.725, 0.301), SIMD2(0.221, 0.814), SIMD2(0.068, -0.076))
         }
     }
 
@@ -111,6 +116,7 @@ extension LogCurve {
         case .appleLog: return .rec2020
         case .sLog3: return .sGamut3
         case .logC3: return .arriWideGamut3
+        case .appleLog2: return .appleWideGamut
         }
     }
 }

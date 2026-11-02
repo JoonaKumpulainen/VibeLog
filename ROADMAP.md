@@ -93,9 +93,9 @@ The rule for this phase: anything that adds to real-time GPU load must prove it 
 - **Gyro logging:** added: CoreMotion data at 100 Hz in a Gyroflow `.gcsv` next to each clip. Its cost and axes still need checking on the phone and in Gyroflow.
 - **Stabilization check:** find out whether optical stabilization is active during RAW capture, and how it affects gyro stabilization.
 - **Exposure modes:** a 180-degree button, lock at start and auto during a take are in. Shutter priority and an EV dial are added, untested.
-- **Focus while recording:** the control test now includes a slow focus move. Its result is pending.
+- **Focus while recording:** tested. Even a slow focus move lost 30 of 240 frames, so focus stays held during takes.
 - **Audio:** PCM recording and level meters are in, and PCM sounded clean over a 10-minute take. External microphones are left.
-- **Native gamuts:** S-Gamut3 and ARRI Wide Gamut 3 are in, as a color space picker that sets the curve. File tag options are added, untested.
+- **Native gamuts:** S-Gamut3, ARRI Wide Gamut 3 and Apple Log 2 with Apple Wide Gamut are in, as a color space picker that sets the curve. File tag options are added, untested.
 - **Color accuracy:** measure against a chart, and confirm the exposure default.
 - **Lenses:** test recording on the ultra wide and tele, each with its own calibration.
 

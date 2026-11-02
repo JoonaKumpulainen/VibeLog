@@ -51,7 +51,7 @@ Traffic is **plain HTTP**. The token controls who may connect, but nothing is en
 ## What stays on each device
 
 - **Phone:** the server address and token stay in `VibeLog.config.json` in the VibeLog folder, as plain text. They can be read in the Files app, and they go into any phone backup.
-- **Computer:** `~/VibeLogTest` holds everything received, including previews and any fetched videos, plus the token, `replies.jsonl`, which is a log of every reply, including status, and each suite's `suite_*.csv` and `heat_*.csv`. It stays there until you delete it.
+- **Computer:** the results folder holds everything received, including previews and any fetched videos, plus the token, `replies.jsonl`, which is a log of every reply, including status, and each suite's `suite_*.csv` and `heat_*.csv`. It stays there until you delete it.
 
 Nothing is sent to the VibeLog project or to anyone else.
 
@@ -65,11 +65,11 @@ It needs Python 3 and nothing else. These commands run from the repository's fol
 python3 tools/test_server.py serve
 ```
 
-It prints the address and token to enter in the app, and where files go. The token is six random digits, kept in `~/VibeLogTest/token`.
+It prints the address and token to enter in the app, and where files go. The token is six random digits, kept in a `token` file in the results folder. That folder is `~/VibeLogTest` unless you set another: put its path in `~/.vibelog_test_folder`, set `VIBELOG_TEST_FOLDER`, or pass `--folder` before `serve`. Videos are large, so choose a drive with room. The server refuses a file that would leave under 2 GB free.
 
 ### Connect the phone
 
-1. In Settings, long-press **Version** to open Diagnostics.
+1. In Settings, open **Advanced**, then **Diagnostics**.
 2. Under **Test link**, enter the server address and token, then turn on **Connect**.
 3. Allow Local Network if iOS asks.
 
@@ -116,13 +116,14 @@ Other commands:
 | `stream on`, `stream off` | Starts or stops the camera, to save heat between takes |
 | `focusAt 0.5,0.5` | Focuses and meters at a point |
 | `applyPreset <name>`, `savePreset <name>`, `defaultPreset <name or none>` | Manage presets |
+| `resetSettings` | Returns every setting to the app's own, keeping presets and the link |
 | `controlTest`, `encoderTest`, `probe`, `zoomProbe` | Run the Diagnostics tests |
 | `sendPreview` | Sends a small JPEG of the scene |
 | `saveStill`, `sendStill` | Saves a full still, and sends the newest one |
 | `sendReference` | Sends the newest RAW clip's reference frame and metadata |
 | `sendLog`, `listFiles`, `sendFile <name>` | Fetch logs and files |
 
-A suite runs a list of takes and cooling breaks from a JSON file, and writes `suite_*.csv` and `heat_*.csv` to the results folder:
+A suite runs a list of takes and cooling breaks from a JSON file, and writes `suite_*.csv` and `heat_*.csv` to the results folder. It refuses to start unless the phone is on the camera screen with room for its takes:
 
 ```bash
 python3 tools/test_server.py suite tools/suites/ultra_wide.json
@@ -160,10 +161,10 @@ From least to most effort:
 
 **On the phone:** clear the server and token fields in Diagnostics, or edit `VibeLog.config.json` in the Files app and empty `testServer` and `testToken`. Use a new token afterward if you ever reuse the server.
 
-**On the computer:** stop the server, then delete its folder:
+**On the computer:** stop the server, then delete its folder. If you chose another one, delete that too:
 
 ```bash
-rm -rf ~/VibeLogTest
+rm -rf ~/VibeLogTest ~/.vibelog_test_folder
 ```
 
 If you opened the firewall, close it again with the same rule:

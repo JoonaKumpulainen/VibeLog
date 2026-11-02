@@ -57,8 +57,8 @@ struct CameraGeometry {
     /// The space above the picture, with the Dynamic Island in the middle.
     static let statusDepth: CGFloat = 99
     /// Status blocks are square, so they fit in every hold.
-    static let statusSide: CGFloat = 81
-    static let statusLineWidth: CGFloat = 80
+    static let statusSide: CGFloat = 87
+    static let statusLineWidth: CGFloat = 86
     static let statusLineGap: CGFloat = 3
     /// The most Full view keeps beneath the picture.
     static let fullViewDepth: CGFloat = 80

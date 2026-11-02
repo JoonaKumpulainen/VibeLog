@@ -111,22 +111,24 @@ extension AppModel {
             focus(at: CGPoint(x: point.x, y: point.y))
             return done()
         case "applyPreset":
-            guard let saved = ([FormatPreset.stock] + presets).first(where: { $0.name == command.name }) else {
-                return refused("Presets: \((["Stock"] + presets.map(\.name)).joined(separator: ", "))")
+            guard let saved = presets.first(where: { $0.name == command.name }) else {
+                return refused("Presets: \(presets.map(\.name).joined(separator: ", "))")
             }
             guard !isRecording else { return refused("A take is running") }
             apply(saved)
             return done()
         case "savePreset":
-            guard let name = command.name, !name.isEmpty, !FormatPreset.isReserved(name) else {
-                return refused("savePreset needs a name other than Stock")
-            }
+            guard let name = command.name, !name.isEmpty else { return refused("savePreset needs a name") }
             savePreset(named: name)
             return done()
         case "defaultPreset":
-            guard let name = command.name, name == "none" || ([FormatPreset.stock] + presets).contains(where: { $0.name == name })
+            guard let name = command.name, name == "none" || presets.contains(where: { $0.name == name })
             else { return refused("defaultPreset takes none or a preset's name") }
             defaultPreset = name == "none" ? "" : name
+            return done()
+        case "resetSettings":
+            guard !isRecording else { return refused("A take is running") }
+            resetSettings()
             return done()
         case "encoderTest", "probe":
             guard !isRecording else { return refused("A take is running") }
@@ -186,7 +188,7 @@ extension AppModel {
             "focus": focusLocked ? String(format: "%.2f", lensPosition) : "auto",
             "look": processing.monitor.rawValue, "lut": selectedLUT.isEmpty ? "none" : selectedLUT,
             "stopAfter": String(recordSeconds),
-            "presets": (["Stock"] + presets.map(\.name)).joined(separator: ", "),
+            "presets": presets.map(\.name).joined(separator: ", "),
             "defaultPreset": defaultPreset.isEmpty ? "none" : defaultPreset,
             "elapsed": String(recordElapsed), "lens": currentLensLabel,
             "codec": encoderPreset.id, "size": encoderSize.label, "aspect": widescreen ? "16:9" : "4:3",
@@ -195,6 +197,8 @@ extension AppModel {
             "fixedFrameTime": String(fixedFrameTime), "uncompressedAudio": String(pcmAudio),
             "distortionCorrection": String(distortionCorrection),
             "efficientWhenHot": String(processing.efficientWhenHot), "isoAuto": String(isoAuto),
+            "bilinearWhenHot": String(processing.bilinearWhenHot),
+            "yields": String(pipelineStats.monitorYields),
             "fileTag": fileTag.rawValue, "frameGuide": frameGuide.rawValue,
             "desqueeze": String(processing.desqueeze), "copyMs": String(format: "%.1f", pipelineStats.copyMs),
             "queueMs": String(format: "%.1f", pipelineStats.queueMs),
@@ -257,7 +261,12 @@ extension AppModel {
             guard let amount = Double(value), (1...2).contains(amount) else { return "desqueeze takes 1 to 2" }
             processing.desqueeze = amount
             return nil
-        case "keepRecordingWhenHot": return flag { processing.reduceLoadWhenHot = $0 }
+        case "slowViewfinderWhenHot": return flag { processing.reduceLoadWhenHot = $0 }
+        case "bilinearWhenHot": return flag { processing.bilinearWhenHot = $0 }
+        case "idlePauseMinutes":
+            guard let minutes = Double(value), minutes >= 0 else { return "idlePauseMinutes takes 0 for never, or minutes" }
+            idlePauseMinutes = minutes
+            return nil
         case "autoDuringTake": return flag { lockAtRoll = !$0 }
         case "tools":
             let wanted = value == "none" ? [] : value.split(separator: ",").map(String.init)

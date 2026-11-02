@@ -1113,9 +1113,7 @@ final class AppConfigTests: XCTestCase {
     func testFrameRateAndPresetsRoundTrip() throws {
         var config = AppConfig()
         config.frameRate = 24
-        config.presets = [FormatPreset(
-            name: "Night", codec: "prores4444", size: "2880x2160", widescreen: true, frameRate: 25,
-            logCurve: "S-Log3", pipeline: "efficient", debayer: "Bilinear", exposureOffset: 0.3)]
+        config.presets = [night]
         let data = try JSONEncoder().encode(config)
         XCTAssertEqual(try JSONDecoder().decode(AppConfig.self, from: data), config)
     }
@@ -1130,18 +1128,40 @@ final class AppConfigTests: XCTestCase {
         XCTAssertEqual(config.testServer, "")
         XCTAssertFalse(config.distortionCorrection)
         XCTAssertTrue(config.efficientWhenHot)
+        XCTAssertTrue(config.bilinearWhenHot)
+        XCTAssertEqual(config.idlePauseMinutes, 2)
         XCTAssertEqual(config.fileTag, "rec2020")
     }
 
-    private let night = FormatPreset(
-        name: "Night", codec: "prores4444", size: "2880x2160", widescreen: true, frameRate: 25,
-        logCurve: "S-Log3", pipeline: "efficient", debayer: "Bilinear", exposureOffset: 0.3, nativeGamut: true)
+    private var night: FormatPreset {
+        var settings = AppConfig()
+        settings.codec = "prores4444"
+        settings.frameRate = 25
+        settings.nativeGamut = true
+        settings.mainsHz = 60
+        settings.pcmAudio = true
+        settings.activeTools = ["grid"]
+        settings.overlay = 2
+        settings.testServer = "should not stay"
+        return FormatPreset(name: "Night", settings: settings)
+    }
 
-    func testStockIsTheDefaultChoices() {
+    func testPresetsKeepEverySettingExceptTheLink() {
+        XCTAssertEqual(night.settings.testServer, "")
         var config = AppConfig()
+        config.testServer = "box:8765"
+        config.testToken = "123"
+        config.presets = [night]
+        config.defaultPreset = "Night"
         config.use(night)
-        config.use(.stock)
-        XCTAssertEqual(config, AppConfig())
+        XCTAssertEqual(config.mainsHz, 60)
+        XCTAssertTrue(config.pcmAudio)
+        XCTAssertEqual(config.activeTools, ["grid"])
+        XCTAssertEqual(config.overlay, 2)
+        XCTAssertEqual(config.testServer, "box:8765")
+        XCTAssertEqual(config.testToken, "123")
+        XCTAssertEqual(config.presets, [night])
+        XCTAssertEqual(config.defaultPreset, "Night")
     }
 
     func testStartupPresetNeedsADefaultThatExists() {
@@ -1150,33 +1170,43 @@ final class AppConfigTests: XCTestCase {
         XCTAssertNil(config.startupPreset)
         config.defaultPreset = "Night"
         XCTAssertEqual(config.startupPreset, night)
-        config.defaultPreset = "Stock"
-        XCTAssertEqual(config.startupPreset, FormatPreset.stock)
         config.defaultPreset = "Deleted"
         XCTAssertNil(config.startupPreset)
     }
 
-    func testUsingAPresetLeavesOtherSettings() {
-        var config = AppConfig()
-        config.mainsHz = 60
-        config.presets = [night]
-        config.use(night)
-        XCTAssertEqual(config.codec, "prores4444")
-        XCTAssertEqual(config.frameRate, 25)
-        XCTAssertTrue(config.nativeGamut)
-        XCTAssertEqual(config.mainsHz, 60)
-        XCTAssertEqual(config.presets, [night])
+    func testOlderPresetsKeepTheirChoices() throws {
+        let json = #"{"name":"Old","codec":"prores4444","size":"2880x2160","widescreen":true,"frameRate":25,"logCurve":"S-Log3","pipeline":"efficient","debayer":"Bilinear","exposureOffset":0.3}"#
+        let preset = try JSONDecoder().decode(FormatPreset.self, from: Data(json.utf8))
+        XCTAssertEqual(preset.name, "Old")
+        XCTAssertEqual(preset.settings.codec, "prores4444")
+        XCTAssertEqual(preset.settings.frameRate, 25)
+        XCTAssertTrue(preset.settings.widescreen)
+        XCTAssertEqual(preset.settings.mainsHz, AppConfig().mainsHz)
+    }
+}
+
+final class AppleLog2Tests: XCTestCase {
+    func testItSharesAppleLogsCurve() {
+        for value in [0.0, 0.01, 0.18, 0.9, 4] {
+            XCTAssertEqual(LogCurve.appleLog2.encode(value), LogCurve.appleLog.encode(value))
+        }
+        XCTAssertEqual(LogCurve.appleLog2.decode(0.5), LogCurve.appleLog.decode(0.5))
     }
 
-    func testSavedPresetCantTakeTheStockName() throws {
-        XCTAssertTrue(FormatPreset.isReserved(" stock "))
-        var config = AppConfig()
-        var clash = night
-        clash.name = "stock"
-        config.presets = [clash]
-        let loaded = try JSONDecoder().decode(AppConfig.self, from: JSONEncoder().encode(config))
-        XCTAssertEqual(loaded.presets.map(\.name), ["My Stock"])
-        XCTAssertEqual(loaded.presets.first?.codec, "prores4444")
+    func testItAlwaysRecordsAppleWideGamut() {
+        var settings = ProcessingSettings()
+        settings.curve = .appleLog2
+        settings.nativeGamut = false
+        XCTAssertEqual(settings.gamut, .appleWideGamut)
+    }
+
+    func testChoosingRec2020ReturnsToAppleLog() {
+        var settings = ProcessingSettings()
+        settings.gamut = .appleWideGamut
+        XCTAssertEqual(settings.curve, .appleLog2)
+        settings.gamut = .rec2020
+        XCTAssertEqual(settings.curve, .appleLog)
+        XCTAssertEqual(settings.gamut, .rec2020)
     }
 }
 
@@ -1186,7 +1216,9 @@ final class GamutTests: XCTestCase {
     }
 
     func testPrimariesLandOnTheirOwnAxis() {
-        let cases: [(Gamut, Double, Double)] = [(.sGamut3, 0.730, 0.280), (.arriWideGamut3, 0.6840, 0.3130)]
+        let cases: [(Gamut, Double, Double)] = [
+            (.sGamut3, 0.730, 0.280), (.arriWideGamut3, 0.6840, 0.3130), (.appleWideGamut, 0.725, 0.301),
+        ]
         for (gamut, x, y) in cases {
             let red = gamut.fromRec2020 * ColorMath.xyzToRec2020 * xyz(x, y)
             XCTAssertEqual(red.y / red.x, 0, accuracy: 0.001)

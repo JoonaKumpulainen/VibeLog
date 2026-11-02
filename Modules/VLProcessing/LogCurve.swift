@@ -7,6 +7,8 @@ public enum LogCurve: UInt32, CaseIterable, Identifiable, Sendable {
     case appleLog = 0
     case sLog3 = 1
     case logC3 = 2
+    /// Apple Log's curve, recorded in Apple Wide Gamut instead of Rec.2020.
+    case appleLog2 = 3
 
     public var id: UInt32 { rawValue }
 
@@ -15,12 +17,13 @@ public enum LogCurve: UInt32, CaseIterable, Identifiable, Sendable {
         case .appleLog: return "Apple Log"
         case .sLog3: return "S-Log3"
         case .logC3: return "LogC3 (EI 800)"
+        case .appleLog2: return "Apple Log 2"
         }
     }
 
     public func encode(_ x: Double) -> Double {
         switch self {
-        case .appleLog:
+        case .appleLog, .appleLog2:
             if x >= Apple.rt { return Apple.gamma * log2(x + Apple.beta) + Apple.delta }
             if x >= Apple.r0 { return Apple.sigma * (x - Apple.r0) * (x - Apple.r0) }
             return 0
@@ -35,7 +38,7 @@ public enum LogCurve: UInt32, CaseIterable, Identifiable, Sendable {
 
     public func decode(_ y: Double) -> Double {
         switch self {
-        case .appleLog:
+        case .appleLog, .appleLog2:
             let knee = Apple.sigma * (Apple.rt - Apple.r0) * (Apple.rt - Apple.r0)
             if y >= knee { return pow(2, (y - Apple.delta) / Apple.gamma) - Apple.beta }
             if y >= 0 { return (y / Apple.sigma).squareRoot() + Apple.r0 }

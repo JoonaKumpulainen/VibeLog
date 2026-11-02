@@ -1,54 +1,48 @@
 import Foundation
 
-/// A named set of recording choices, applied from Settings.
+/// A named copy of every setting, except the test link's and the presets themselves.
 public struct FormatPreset: Codable, Equatable, Identifiable, Sendable {
     public var name: String
-    public var codec: String
-    public var size: String
-    public var widescreen: Bool
-    public var frameRate: Double
-    public var logCurve: String
-    public var pipeline: String
-    public var debayer: String
-    public var exposureOffset: Double
-    /// Missing from older presets.
-    public var nativeGamut: Bool?
+    public var settings: AppConfig
 
     public var id: String { name }
 
-    public init(
-        name: String, codec: String, size: String, widescreen: Bool, frameRate: Double,
-        logCurve: String, pipeline: String, debayer: String, exposureOffset: Double,
-        nativeGamut: Bool? = nil
-    ) {
+    public init(name: String, settings: AppConfig) {
         self.name = name
-        self.codec = codec
-        self.size = size
-        self.widescreen = widescreen
-        self.frameRate = frameRate
-        self.logCurve = logCurve
-        self.pipeline = pipeline
-        self.debayer = debayer
-        self.exposureOffset = exposureOffset
-        self.nativeGamut = nativeGamut
+        self.settings = settings.presetValues
     }
 
-    /// The app's own defaults. It's built in, so it can't be replaced or deleted.
-    public static let stock: FormatPreset = {
-        let defaults = AppConfig()
-        return FormatPreset(
-            name: "Stock", codec: defaults.codec, size: defaults.size, widescreen: defaults.widescreen,
-            frameRate: defaults.frameRate, logCurve: defaults.logCurve, pipeline: defaults.pipeline,
-            debayer: defaults.debayer, exposureOffset: defaults.exposureOffset,
-            nativeGamut: defaults.nativeGamut)
-    }()
-
-    /// A saved preset can't take the built-in name.
-    public static func isReserved(_ name: String) -> Bool {
-        name.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(stock.name) == .orderedSame
+    private enum CodingKeys: String, CodingKey {
+        case name, settings
+        // Older presets kept these beside the name.
+        case codec, size, widescreen, frameRate, logCurve, pipeline, debayer, exposureOffset, nativeGamut
     }
 
-    public var isStock: Bool { Self.isReserved(name) }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        name = try values.decode(String.self, forKey: .name)
+        if let saved = try? values.decode(AppConfig.self, forKey: .settings) {
+            settings = saved.presetValues
+            return
+        }
+        var older = AppConfig()
+        older.codec = (try? values.decode(String.self, forKey: .codec)) ?? older.codec
+        older.size = (try? values.decode(String.self, forKey: .size)) ?? older.size
+        older.widescreen = (try? values.decode(Bool.self, forKey: .widescreen)) ?? older.widescreen
+        older.frameRate = (try? values.decode(Double.self, forKey: .frameRate)) ?? older.frameRate
+        older.logCurve = (try? values.decode(String.self, forKey: .logCurve)) ?? older.logCurve
+        older.pipeline = (try? values.decode(String.self, forKey: .pipeline)) ?? older.pipeline
+        older.debayer = (try? values.decode(String.self, forKey: .debayer)) ?? older.debayer
+        older.exposureOffset = (try? values.decode(Double.self, forKey: .exposureOffset)) ?? older.exposureOffset
+        older.nativeGamut = (try? values.decode(Bool.self, forKey: .nativeGamut)) ?? older.nativeGamut
+        settings = older
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(name, forKey: .name)
+        try values.encode(settings, forKey: .settings)
+    }
 }
 
 /// Every saved choice, kept as readable JSON in the VibeLog folder. Missing keys take their
@@ -65,6 +59,9 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var debayer = "Malvar-He-Cutler"
     public var exposureOffset = -0.5
     public var reduceLoadWhenHot = true
+    public var bilinearWhenHot = true
+    /// Stops the stream after this long with no touch. Zero never does.
+    public var idlePauseMinutes = 2.0
     public var monitor = "rec709"
     public var monitorLUT = ""
     public var lutExpectsRec709 = false
@@ -91,6 +88,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var frameGuide = "2.39"
     public var desqueeze = 1.0
     public var fileTag = "rec2020"
+    /// Zebras or false color, kept in presets only. Written with `ExposureOverlay`'s raw values.
+    public var overlay = 0
     /// Where the test link connects. It's never switched on from here.
     public var testServer = ""
     public var testToken = ""
@@ -115,6 +114,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
         debayer = read(.debayer, defaults.debayer)
         exposureOffset = read(.exposureOffset, defaults.exposureOffset)
         reduceLoadWhenHot = read(.reduceLoadWhenHot, defaults.reduceLoadWhenHot)
+        bilinearWhenHot = read(.bilinearWhenHot, defaults.bilinearWhenHot)
+        idlePauseMinutes = read(.idlePauseMinutes, defaults.idlePauseMinutes)
         monitor = read(.monitor, defaults.monitor)
         monitorLUT = read(.monitorLUT, defaults.monitorLUT)
         lutExpectsRec709 = read(.lutExpectsRec709, defaults.lutExpectsRec709)
@@ -126,12 +127,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         mainsHz = read(.mainsHz, defaults.mainsHz)
         toolbar = read(.toolbar, defaults.toolbar)
         activeTools = read(.activeTools, defaults.activeTools)
-        // One saved or hand-edited under the built-in name keeps its choices under another.
-        presets = read(.presets, defaults.presets).map { preset in
-            var preset = preset
-            if preset.isStock { preset.name = "My Stock" }
-            return preset
-        }
+        presets = read(.presets, defaults.presets)
         defaultPreset = read(.defaultPreset, defaults.defaultPreset)
         peakingSensitivity = read(.peakingSensitivity, defaults.peakingSensitivity)
         fixedFrameTime = read(.fixedFrameTime, defaults.fixedFrameTime)
@@ -140,26 +136,34 @@ public struct AppConfig: Codable, Equatable, Sendable {
         frameGuide = read(.frameGuide, defaults.frameGuide)
         desqueeze = read(.desqueeze, defaults.desqueeze)
         fileTag = read(.fileTag, defaults.fileTag)
+        overlay = read(.overlay, defaults.overlay)
         testServer = read(.testServer, defaults.testServer)
         testToken = read(.testToken, defaults.testToken)
     }
 
     /// Nil when no default is set, or its preset is gone.
     public var startupPreset: FormatPreset? {
-        ([FormatPreset.stock] + presets).first { $0.name == defaultPreset }
+        presets.first { $0.name == defaultPreset }
     }
 
-    /// Takes a preset's format choices and leaves every other setting.
+    /// These settings without what a preset leaves alone, so they can be saved and compared.
+    public var presetValues: AppConfig {
+        var values = self
+        values.presets = []
+        values.defaultPreset = ""
+        values.testServer = ""
+        values.testToken = ""
+        return values
+    }
+
+    /// Takes all of a preset's settings, keeping the presets and the test link's address.
     public mutating func use(_ preset: FormatPreset) {
-        codec = preset.codec
-        size = preset.size
-        widescreen = preset.widescreen
-        frameRate = preset.frameRate
-        logCurve = preset.logCurve
-        nativeGamut = preset.nativeGamut ?? false
-        pipeline = preset.pipeline
-        debayer = preset.debayer
-        exposureOffset = preset.exposureOffset
+        var next = preset.settings
+        next.presets = presets
+        next.defaultPreset = defaultPreset
+        next.testServer = testServer
+        next.testToken = testToken
+        self = next
     }
 
     public static func load(from url: URL) throws -> AppConfig {
