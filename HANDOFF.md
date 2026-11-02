@@ -157,7 +157,7 @@ New additions follow the design rules in [ROADMAP.md](ROADMAP.md). `CameraGeomet
 ### Planned
 
 - **Hide Apple's preview at launch:** `SessionPreview` sits under `ProcessedMonitor` in `ContentView.viewfinder`, so Apple's processed preview shows until the first Metal draw, which is the bright, vivid picture at launch. Hiding it while `monitorIsProcessed` keeps the screen black until the first real frame. It stays connected, so it adds no risk, and it's not built.
-- **Diagnostics switch to remove Apple's preview:** the preview layer stays connected to the session behind the Metal view, even during takes, so it may add heat for nothing. A switch would disconnect it, to measure heat and GPU time on a long take. Every long run so far had it connected, and photo capture or auto exposure might depend on it, so this needs a test before it could become the default.
+- **Diagnostics switch to remove Apple's preview:** the preview layer stays connected to the session behind the Metal view, even during takes, so it may add heat for nothing. A switch would disconnect it, to measure heat and GPU time on a long take. Every long run so far had it connected, and photo capture or auto exposure might depend on it, so this needs a test first. The end goal: **ISP preview** stays under **Look**, Apple's preview connects only while that's selected, and any other look disconnects it fully, so it does no work. The switch can then go. The saving is unknown, because the camera still runs its own processing for RAW capture and auto exposure. The hide fix alone saves no load.
 
 ### Waiting on the phone
 
