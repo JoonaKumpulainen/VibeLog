@@ -154,6 +154,11 @@ New additions follow the design rules in [ROADMAP.md](ROADMAP.md). `CameraGeomet
 - **Cost:** one idle request stays open during a take, on its own queue. 40-second takes lost nothing with it connected, but no take has compared it with the link off.
 - **Proven:** it connected on the phone, ran these tests, and delivered logs, sidecars, gyro and timing files.
 
+### Planned
+
+- **Hide Apple's preview at launch:** `SessionPreview` sits under `ProcessedMonitor` in `ContentView.viewfinder`, so Apple's processed preview shows until the first Metal draw, which is the bright, vivid picture at launch. Hiding it while `monitorIsProcessed` keeps the screen black until the first real frame. It stays connected, so it adds no risk, and it's not built.
+- **Diagnostics switch to remove Apple's preview:** the preview layer stays connected to the session behind the Metal view, even during takes, so it may add heat for nothing. A switch would disconnect it, to measure heat and GPU time on a long take. Every long run so far had it connected, and photo capture or auto exposure might depend on it, so this needs a test before it could become the default.
+
 ### Waiting on the phone
 
 Run these in order. The owner has limited time, so short tests come first, and the session log and sidecars should come back with the results.
