@@ -2,6 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import VLCore
 import VLProcessing
+import VLRecording
 
 /// One page, ordered by how often a setting changes, with search for the rest. What gets recorded
 /// lives in the format panel, so it has one home.
@@ -78,11 +79,14 @@ struct SettingsView: View {
     private static let lutTerms = "lut cube import look monitor input"
     private static let pauseTerms = "pause viewfinder monitor off gpu recording"
     private static let peakingTerms = "focus peaking sensitivity low high detail"
-    private static let viewfinderTerms = [lookTerms, lutTerms, pauseTerms, peakingTerms].joined(separator: " ")
+    private static let guideTerms = "frame guide aspect scope 2.39 1.85 framing"
+    private static let desqueezeTerms = "anamorphic desqueeze squeeze lens"
+    private static let viewfinderTerms = [lookTerms, lutTerms, pauseTerms, peakingTerms, guideTerms, desqueezeTerms].joined(separator: " ")
     private static let offsetTerms = "exposure offset stops brightness baked"
     private static let gamutTerms = "color colour space gamut native s-gamut3 s-log3 arri wide logc3 awg3 rec.2020"
+    private static let tagTerms = "file tag color colour rec.709 rec.2020 hlg editor"
     private static let processingTerms = "pipeline debayer demosaic quality processing"
-    private static let imageTerms = [offsetTerms, gamutTerms, processingTerms].joined(separator: " ")
+    private static let imageTerms = [offsetTerms, gamutTerms, tagTerms, processingTerms].joined(separator: " ")
 
     /// Every word typed has to appear, so a phrase can come in any order.
     private func matches(_ terms: String) -> Bool {
@@ -288,6 +292,24 @@ struct SettingsView: View {
                     explained("Focus peaking sensitivity", "High also marks softer detail.")
                 }
             }
+            if matches(Self.guideTerms) {
+                Picker(selection: $model.frameGuide) {
+                    ForEach(FrameGuide.allCases) { Text($0.label).tag($0) }
+                } label: {
+                    explained("Frame guide", "The shape the GUIDE tool marks. It never reaches the file.")
+                }
+            }
+            if matches(Self.desqueezeTerms) {
+                Picker(selection: $model.processing.desqueeze) {
+                    Text("Off").tag(1.0)
+                    Text("1.33x").tag(1.33)
+                    Text("1.5x").tag(1.5)
+                    Text("1.8x").tag(1.8)
+                    Text("2x").tag(2.0)
+                } label: {
+                    explained("Anamorphic desqueeze", "Viewfinder only. The file stays squeezed.")
+                }
+            }
         }
     }
 
@@ -315,6 +337,13 @@ struct SettingsView: View {
                     ForEach(Gamut.allCases) { Text($0.pairedLabel).tag($0) }
                 } label: {
                     explained("Color space", gamutDetail)
+                }
+            }
+            if matches(Self.tagTerms) {
+                Picker(selection: $model.fileTag) {
+                    ForEach(FileTag.allCases) { Text($0.label).tag($0) }
+                } label: {
+                    explained("File tag", "What the file tells an editor. The picture doesn't change.")
                 }
             }
             if matches(Self.processingTerms) {

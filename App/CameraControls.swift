@@ -91,6 +91,7 @@ struct ControlPanels: View {
     @AppStorage("fineDial") private var fine = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsTint = false
+    @State private var showsEV = false
     @Binding var selected: ControlDial?
     let hold: Hold
 
@@ -132,6 +133,7 @@ struct ControlPanels: View {
             return
         }
         showsTint = false
+        showsEV = false
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) {
             selected = selected == control ? nil : control
         }
@@ -139,7 +141,7 @@ struct ControlPanels: View {
 
     private func title(_ control: ControlDial) -> String {
         switch control {
-        case .iso: return "ISO"
+        case .iso: return isShowingEV(control) ? "EV" : "ISO"
         case .shutter: return selected == .shutter ? model.shutterAngleLabel : "SHUTTER"
         case .whiteBalance: return isShowingTint(control) ? "TINT" : "WB"
         case .focus: return "FOCUS"
@@ -159,9 +161,20 @@ struct ControlPanels: View {
         control == .whiteBalance && showsTint && selected == .whiteBalance
     }
 
+    /// EV sets where auto exposure aims, so it only shows while the camera picks ISO.
+    private var offersEV: Bool {
+        (!model.exposureLocked || model.isoAuto) && !model.isRecording
+    }
+
+    private func isShowingEV(_ control: ControlDial) -> Bool {
+        control == .iso && showsEV && selected == .iso && offersEV
+    }
+
     private func value(_ control: ControlDial) -> String {
         switch control {
-        case .iso: return "\(Int(model.iso))"
+        case .iso:
+            if isShowingEV(control) { return String(format: "%+.1f", model.exposureBias) }
+            return "\(Int(model.iso))"
         case .shutter: return model.shutterLabel
         case .whiteBalance:
             if isShowingTint(control) { return String(format: "%+d", Int(model.tint)) }
@@ -176,7 +189,8 @@ struct ControlPanels: View {
 
     private func isHeld(_ control: ControlDial) -> Bool {
         switch control {
-        case .iso, .shutter: return model.exposureLocked || model.exposureHeldForTake
+        case .iso: return (model.exposureLocked && !model.isoAuto) || model.exposureHeldForTake
+        case .shutter: return model.exposureLocked || model.exposureHeldForTake
         case .whiteBalance: return model.whiteBalanceLocked || model.whiteBalanceHeldForTake
         case .focus: return model.focusLocked || model.focusTapped || model.focusHeldForTake
         }
@@ -185,7 +199,8 @@ struct ControlPanels: View {
     /// Set by the user, as opposed to following the camera or frozen for a take.
     private func isManual(_ control: ControlDial) -> Bool {
         switch control {
-        case .iso, .shutter: return model.exposureLocked
+        case .iso: return model.exposureLocked && !model.isoAuto
+        case .shutter: return model.exposureLocked
         case .whiteBalance: return model.whiteBalanceLocked
         case .focus: return model.focusLocked || model.focusTapped
         }
@@ -214,6 +229,7 @@ struct ControlPanels: View {
 
     private func dialPanel(_ control: ControlDial) -> some View {
         let tinted = isShowingTint(control)
+        let showingEV = isShowingEV(control)
         // One tap here would return to auto mid-shot, unless auto is allowed during a take.
         let hidesAuto = model.isRecording && model.lockAtRoll
         return HStack(spacing: 4) {
@@ -224,10 +240,10 @@ struct ControlPanels: View {
             .opacity(hidesAuto ? 0 : 1)
             .accessibilityHidden(hidesAuto)
             Dial(
-                stops: tinted ? tintStops : stops(control),
-                value: tinted ? tintBinding : binding(control), labelAngle: hold.angle,
+                stops: showingEV ? evStops : tinted ? tintStops : stops(control),
+                value: showingEV ? evBinding : tinted ? tintBinding : binding(control), labelAngle: hold.angle,
                 isMirrored: hold == .landscapeRight || hold == .upsideDown,
-                spacing: fine ? 7 : 44, label: tinted ? "Tint" : name(control),
+                spacing: fine ? 7 : 44, label: showingEV ? "Exposure value" : tinted ? "Tint" : name(control),
                 valueText: value(control)
             )
             .frame(height: 46)
@@ -235,6 +251,9 @@ struct ControlPanels: View {
                 trayButton("180°", isOn: model.isHalfAngleShutter, label: "180 degree shutter") {
                     model.setHalfAngleShutter()
                 }
+            }
+            if control == .iso, offersEV {
+                trayButton("EV", isOn: showsEV, label: "Exposure value") { showsEV.toggle() }
             }
             if control == .whiteBalance {
                 trayButton("TINT", isOn: showsTint, label: "Tint") { showsTint.toggle() }
@@ -275,11 +294,26 @@ struct ControlPanels: View {
 
     private func toggleLock(_ control: ControlDial) {
         switch control {
-        case .iso, .shutter: model.exposureLocked.toggle()
+        // ISO's AUTO keeps a set shutter, which is shutter priority. The shutter's returns to full auto.
+        case .iso:
+            if model.exposureLocked { model.isoAuto.toggle() } else { model.exposureLocked = true }
+        case .shutter: model.exposureLocked.toggle()
         case .whiteBalance: model.whiteBalanceLocked.toggle()
         case .focus:
             if isHeld(.focus) { model.releaseFocus() } else { model.focusLocked = true }
         }
+    }
+
+    private var evStops: [ExposureScales.Stop] {
+        (-6...6).map { step in
+            let whole = step % 3 == 0
+            return ExposureScales.Stop(
+                value: Double(step) / 3, label: whole ? String(format: "%+d", step / 3) : "", isMajor: whole)
+        }
+    }
+
+    private var evBinding: Binding<Double> {
+        Binding(get: { Double(model.exposureBias) }, set: { model.exposureBias = Float($0) })
     }
 
     private var tintStops: [ExposureScales.Stop] {
@@ -324,6 +358,7 @@ struct ControlPanels: View {
             return Binding(
                 get: { Double(model.iso) },
                 set: { value in
+                    model.isoAuto = false
                     model.iso = Float(value)
                     if !model.exposureLocked { model.exposureLocked = true }
                 })

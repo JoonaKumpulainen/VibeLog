@@ -74,6 +74,9 @@ final class AppModel: ObservableObject {
     @Published var bracketCount = 3 { didSet { if bracketCount != oldValue { reconfigure() } } }
     @Published var usePhotoPreset = true { didSet { if usePhotoPreset != oldValue { reconfigure() } } }
     @Published var fixedFrameTime = true { didSet { if fixedFrameTime != oldValue { reconfigure() } } }
+    @Published var distortionCorrection = true { didSet { if distortionCorrection != oldValue { reconfigure() } } }
+    @Published var frameGuide = FrameGuide.scope
+    @Published var fileTag = FileTag.rec2020
 
     @Published var processing = ProcessingSettings() { didSet { pipeline?.update(processing) } }
     @Published var pipelineStats = PipelineStats()
@@ -112,8 +115,15 @@ final class AppModel: ObservableObject {
     @Published var recordSeconds = 0.0
     @Published var writeFrames = true
 
-    @Published var exposureLocked = false { didSet { applyExposure() } }
-    @Published var iso: Float = 100 { didSet { if exposureLocked { throttled(.exposure) } } }
+    @Published var exposureLocked = false {
+        didSet {
+            if !exposureLocked { isoAuto = false }
+            applyExposure()
+        }
+    }
+    @Published var iso: Float = 100 { didSet { if exposureLocked, !isoAuto { throttled(.exposure) } } }
+    /// With a set shutter, ISO follows the meter: shutter priority. It needs `exposureLocked`.
+    @Published var isoAuto = false { didSet { if isoAuto != oldValue { applyExposure() } } }
     /// Log2 of the shutter denominator: 6.64 is 1/100 s.
     @Published var shutterStops: Double = 6.64 { didSet { if exposureLocked { throttled(.exposure) } } }
     /// Offsets auto exposure at the sensor, in stops.
@@ -144,6 +154,8 @@ final class AppModel: ObservableObject {
     @Published var testLinkState = "Off"
     @Published var testSendsResults = true
     @Published var testSendsGyro = true
+    /// What the link reports as open: camera, settings or diagnostics.
+    private(set) var openScreen = "camera"
     let testLink = TestLink()
     /// The preset the app opens with. Empty keeps the last choices used.
     @Published var defaultPreset = ""
@@ -323,6 +335,9 @@ final class AppModel: ObservableObject {
             x: punchCenter.x + (share.x - 0.5) * scale, y: punchCenter.y + (share.y - 0.5) * scale)
     }
 
+    /// The chosen guide's width to height, while the tool is on.
+    var frameGuideRatio: Double? { isOn(.frameGuide) ? frameGuide.ratio : nil }
+
     private func applyMonitorView() {
         let punched = isOn(.punchIn)
         let scale = punched ? Self.punchScale : 1
@@ -399,6 +414,11 @@ final class AppModel: ObservableObject {
         config.defaultPreset = defaultPreset
         config.peakingSensitivity = processing.peakingSensitivity.rawValue
         config.fixedFrameTime = fixedFrameTime
+        config.distortionCorrection = distortionCorrection
+        config.efficientWhenHot = processing.efficientWhenHot
+        config.frameGuide = frameGuide.rawValue
+        config.desqueeze = processing.desqueeze
+        config.fileTag = fileTag.rawValue
         config.testServer = testServer
         config.testToken = testToken
         return config
@@ -447,6 +467,11 @@ final class AppModel: ObservableObject {
         processing.peakingSensitivity = PeakingSensitivity(rawValue: loaded.peakingSensitivity) ?? .low
         // The first configuration comes after this and uses it.
         fixedFrameTime = loaded.fixedFrameTime
+        distortionCorrection = loaded.distortionCorrection
+        processing.efficientWhenHot = loaded.efficientWhenHot
+        frameGuide = FrameGuide(rawValue: loaded.frameGuide) ?? frameGuide
+        processing.desqueeze = loaded.desqueeze
+        fileTag = FileTag(rawValue: loaded.fileTag) ?? fileTag
         testServer = loaded.testServer
         testToken = loaded.testToken
         savedConfig = config
@@ -696,6 +721,8 @@ final class AppModel: ObservableObject {
             if live.seconds > 0 {
                 shutterStops = min(max(log2(1 / live.seconds), log2(frameRate)), 13)
             }
+        } else if isoAuto {
+            iso = live.iso
         }
         if !whiteBalanceLocked {
             temperature = live.temperature ?? temperature
@@ -759,12 +786,18 @@ final class AppModel: ObservableObject {
     /// The sheet covers the picture, so the stream stops to save heat and battery. A take keeps
     /// running. Settings only change what the next stream starts with.
     func settingsOpened() {
+        openScreen = "settings"
         guard isStreaming, !isRecording else { return }
         resumeAfterSettings = true
         toggleStream()
     }
 
     func settingsClosed() {
+        openScreen = "camera"
+        resumeStreamAfterSettings()
+    }
+
+    private func resumeStreamAfterSettings() {
         guard resumeAfterSettings else { return }
         resumeAfterSettings = false
         if !isStreaming { toggleStream() }
@@ -772,12 +805,18 @@ final class AppModel: ObservableObject {
 
     /// Diagnostics tools use the stream, and leave it running when they close Settings.
     func diagnosticsOpened() {
-        settingsClosed()
+        openScreen = "diagnostics"
+        resumeStreamAfterSettings()
+    }
+
+    func diagnosticsClosed() {
+        // Its tools close Settings outright, which has already said so.
+        if openScreen == "diagnostics" { openScreen = "settings" }
     }
 
     /// Records for a set time, leaving **Stop after** as it is.
     func record(seconds: Double) {
-        guard !isRecording, recordEncoded else { return }
+        guard !isRecording else { return }
         takeSeconds = seconds
         startRecording()
     }
@@ -858,6 +897,19 @@ final class AppModel: ObservableObject {
 
     // MARK: Private
 
+    /// Reading a still back takes GPU time, so the link refuses this during a take.
+    func sendPreview() {
+        pipeline?.requestStill { [weak self] still in
+            DispatchQueue.global(qos: .utility).async {
+                guard let still, let data = StillExporter.preview(still) else {
+                    Log.shared.error("Preview failed")
+                    return
+                }
+                self?.testLink.send(data: data, name: "preview_\(Storage.timestamp()).jpg")
+            }
+        }
+    }
+
     func saveStill() {
         guard let pipeline else { return }
         guard isStreaming else {
@@ -911,7 +963,7 @@ final class AppModel: ObservableObject {
             rawPixelFormat: rawFormat == 0 ? nil : rawFormat, photoSize: photoSize,
             videoPixelFormat: videoFormat == 0 ? nil : videoFormat, videoFPS: videoFPS,
             frameRate: frameRate, bracketCount: bracketCount, usePhotoPreset: usePhotoPreset,
-            fixedFrameTime: fixedFrameTime)
+            fixedFrameTime: fixedFrameTime, distortionCorrection: distortionCorrection)
         camera.configure(config) { [self] options in
             guard let options else { return }
             adopt(options)
@@ -941,7 +993,13 @@ final class AppModel: ObservableObject {
 
     func applyExposure() {
         guard !applyingOptions else { return }
-        camera.setExposure(exposureLocked ? .locked : .auto, seconds: 1 / pow(2, shutterStops), iso: iso)
+        let seconds = 1 / pow(2, shutterStops)
+        if exposureLocked, isoAuto {
+            camera.setShutterPriority(seconds: seconds, iso: iso)
+            return
+        }
+        camera.stopShutterPriority()
+        camera.setExposure(exposureLocked ? .locked : .auto, seconds: seconds, iso: iso)
     }
 
     func applyBias() {
@@ -967,8 +1025,9 @@ final class AppModel: ObservableObject {
             camera.holdFocus()
         }
         guard lockAtRoll else { return }
-        if !exposureLocked {
+        if !exposureLocked || isoAuto {
             exposureHeldForTake = true
+            camera.stopShutterPriority()
             camera.holdExposure()
         }
         if !whiteBalanceLocked {
@@ -1036,13 +1095,17 @@ final class AppModel: ObservableObject {
             recordElapsed = 0
             isRecording = true
             Log.shared.info("Recording \(name) for \(rawDumpSeconds)s, write=\(writeFrames), budget \(budget / 1_000_000) MB")
+            takeSeconds = nil
         } catch {
             Log.shared.error("Cannot start recording: \(error.localizedDescription)")
         }
     }
 
     /// RAW dumps need an end time, so until-stopped means an hour.
-    private var rawDumpSeconds: Double { recordSeconds > 0 ? recordSeconds : 3600 }
+    private var rawDumpSeconds: Double {
+        let seconds = takeSeconds ?? recordSeconds
+        return seconds > 0 ? seconds : 3600
+    }
 
     private func startEncoding() {
         guard let pipeline, processing.enabled, method.isPhoto else {
@@ -1059,7 +1122,8 @@ final class AppModel: ObservableObject {
             "matrix": "Rec.2020 non-constant luminance, video range",
             "exposureStops": String(processing.exposureStops),
             "frameRate": frameRateLabel,
-            "exposureDuringTake": exposureLocked ? "manual" : lockAtRoll ? "frozen at start" : "auto",
+            "exposureDuringTake": lockAtRoll && (!exposureLocked || isoAuto) ? "frozen at start"
+                : isoAuto ? "shutter priority" : exposureLocked ? "manual" : "auto",
             "whiteBalanceDuringTake": whiteBalanceLocked ? "manual" : lockAtRoll ? "frozen at start" : "auto",
             "aspect": widescreen ? "16:9 center crop" : "4:3 open gate",
             "pipeline": processing.pipeline.label,
@@ -1068,6 +1132,10 @@ final class AppModel: ObservableObject {
             "lens": currentLensLabel,
             "tools": toolsLabel,
             "frameTime": fixedFrameTime ? "fixed" : "variable at 30 fps",
+            "distortionCorrection": distortionCorrection ? "on" : "off",
+            "fileTag": fileTag.label,
+            "desqueeze": processing.desqueeze == 1 ? "off" : String(processing.desqueeze),
+            "hotPath": processing.efficientWhenHot ? "Efficient when hot" : "stays on the chosen pipeline",
             "gyroLog": saveGyroLog ? "on" : "off",
             "thermalAtStart": SystemStatus.thermalName,
             "note": "The file's transfer tag is nominal; decode with the curve named here.",
@@ -1076,7 +1144,7 @@ final class AppModel: ObservableObject {
             let encoder = try VideoEncoder(config: .init(
                 url: url, preset: encoderPreset, size: outputSize, frameRate: frameRate, audio: true,
                 pcmAudio: pcmAudio, metadata: metadata,
-                rotationDegrees: hold.hold.clipRotation))
+                rotationDegrees: hold.hold.clipRotation, fileTag: fileTag))
             audio.onSample = { [weak encoder] sample in encoder?.appendAudio(sample) }
             audioPeak = 0
             audioBar.reset()
@@ -1127,11 +1195,12 @@ final class AppModel: ObservableObject {
     private func saveCaptureTiming(for file: URL?) {
         let entries = camera.timing.finish()
         guard let file, !entries.isEmpty else { return }
-        DispatchQueue.global(qos: .utility).async {
+        DispatchQueue.global(qos: .utility).async { [self] in
             Log.shared.info(CaptureTimingLog.summary(entries))
             let url = TakeLibrary.captureTiming(for: file)
             do {
                 try CaptureTimingLog.csv(entries).write(to: url, atomically: true, encoding: .utf8)
+                self.sendTimingFile(url)
             } catch {
                 Log.shared.error("Capture timing save failed: \(error.localizedDescription)")
             }
@@ -1159,12 +1228,13 @@ final class AppModel: ObservableObject {
             result.duplicates = capture.duplicates
             result.captureFPS = capture.sustainedFPS
             let summary = String(
-                format: "%@ %dx%d: %.2f fps written, %d frames, %d lost (%d gpu, %d encoder: %d no buffer, %d not ready), %.1f MB/s, audio %d, capture %.2f fps fail %d missed %d duplicates %d gap %.0f ms, gpu %.1f recent %.1f max ms, viewfinder yields %d",
+                format: "%@ %dx%d: %.2f fps written, %d frames, %d lost (%d gpu, %d encoder: %d no buffer, %d not ready), %.1f MB/s, audio %d, capture %.2f fps fail %d missed %d duplicates %d gap %.0f ms, gpu %.1f recent %.1f max ms, steps copy %.1f queue %.1f append %.1f draw %.1f ms, viewfinder yields %d",
                 result.preset, result.width, result.height, result.fps, result.framesWritten,
                 result.framesDropped, gpu.dropped, encoderDrops, result.droppedNoBuffer, result.droppedNotReady,
                 result.megabytesPerSecond, result.audioSamplesWritten,
                 capture.sustainedFPS, capture.captureFailures, capture.estimatedMissed, capture.duplicates,
-                capture.gapMaxMs, gpu.gpuRecentMs, gpu.gpuMaxMs, gpu.monitorYields)
+                capture.gapMaxMs, gpu.gpuRecentMs, gpu.gpuMaxMs, gpu.copyMs, gpu.queueMs, gpu.appendMs,
+                gpu.drawMs, gpu.monitorYields)
             if let failure = result.failure {
                 Log.shared.error("VIDEO FAILED \(result.file): \(failure)")
             }
@@ -1290,11 +1360,12 @@ final class AppModel: ObservableObject {
                 ticksSinceReport = 0
                 let capture = router.latestCapture
                 let line = String(
-                    format: "Recording: %.2f fps now, n=%d, fail %d, writer drops %d, 1/%.0f s ISO %.0f, gains %@, gpu %d done %d dropped %.1f recent %.1f max ms, mem %d MB, avail %d MB, thermal %@, free %d GB, battery %@",
+                    format: "Recording: %.2f fps now, n=%d, fail %d, writer drops %d, 1/%.0f s ISO %.0f, gains %@, gpu %d done %d dropped %.1f recent %.1f max ms, steps copy %.1f queue %.1f append %.1f draw %.1f ms, mem %d MB, avail %d MB, thermal %@, free %d GB, battery %@",
                     stats.rollingFPS, stats.frames, stats.captureFailures, stats.writerDrops,
                     capture.exposureSeconds > 0 ? 1 / capture.exposureSeconds : 0, capture.iso,
                     capture.gains.map { String(format: "%.2f", $0) }.joined(separator: "/"),
                     gpu.processed, gpu.dropped, gpu.gpuRecentMs, gpu.gpuMaxMs,
+                    gpu.copyMs, gpu.queueMs, gpu.appendMs, gpu.drawMs,
                     status.footprintMB, status.availableMB,
                     status.thermal, status.freeDiskGB, status.battery)
                 if let activeEncoder {

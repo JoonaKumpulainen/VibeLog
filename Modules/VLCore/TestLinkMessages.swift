@@ -47,6 +47,13 @@ public enum TestLinkAddress {
         return parts.url
     }
 
+    /// Reads "0.5,0.25" as a share of the picture.
+    public static func point(_ text: String) -> (x: Double, y: Double)? {
+        let parts = text.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        guard parts.count == 2, parts.allSatisfy({ (0...1).contains($0) }) else { return nil }
+        return (parts[0], parts[1])
+    }
+
     /// Keeps a file name from reaching outside the folder it's looked up in.
     public static func safeName(_ text: String) -> String? {
         let name = (text as NSString).lastPathComponent

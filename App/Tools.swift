@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Monitoring tools, switched on from the monitor panel.
 enum Tool: String, CaseIterable, Identifiable {
-    case zebras, falseColor, peaking, grid, center, level, punchIn
+    case zebras, falseColor, peaking, grid, center, level, frameGuide, punchIn
 
     var id: String { rawValue }
 
@@ -14,6 +14,7 @@ enum Tool: String, CaseIterable, Identifiable {
         case .grid: return "Thirds grid"
         case .center: return "Center mark"
         case .level: return "Level"
+        case .frameGuide: return "Frame guide"
         case .punchIn: return "Punch-in"
         }
     }
@@ -26,6 +27,7 @@ enum Tool: String, CaseIterable, Identifiable {
         case .grid: return "GRID"
         case .center: return "CENTER"
         case .level: return "LEVEL"
+        case .frameGuide: return "GUIDE"
         case .punchIn: return "PUNCH"
         }
     }
@@ -38,9 +40,22 @@ enum Tool: String, CaseIterable, Identifiable {
         case .grid: return "squareshape.split.3x3"
         case .center: return "plus"
         case .level: return "level"
+        case .frameGuide: return "rectangle.dashed"
         case .punchIn: return "plus.magnifyingglass"
         }
     }
+}
+
+/// A delivery shape, marked on the picture for framing. It never reaches the file.
+enum FrameGuide: String, CaseIterable, Identifiable {
+    case scope = "2.39"
+    case univisium = "2.00"
+    case flat = "1.85"
+    case square = "1.00"
+
+    var id: String { rawValue }
+    var label: String { "\(rawValue):1" }
+    var ratio: Double { Double(rawValue) ?? 1 }
 }
 
 /// The guides, watching the level themselves.
@@ -50,11 +65,12 @@ struct LiveFrameGuides: View {
     let center: Bool
     let showsLevel: Bool
     let gravityDegrees: Double
+    let guideRatio: Double?
 
     var body: some View {
         FrameGuides(
             grid: grid, center: center, levelDegrees: showsLevel ? level.degrees : nil,
-            gravityDegrees: gravityDegrees)
+            gravityDegrees: gravityDegrees, guideRatio: guideRatio)
     }
 }
 
@@ -65,6 +81,8 @@ struct FrameGuides: View {
     let levelDegrees: Double?
     /// The hold's gravity direction, because the guides stay in portrait coordinates.
     let gravityDegrees: Double
+    /// Width to height of the guide. Its long side follows the picture's long side in any hold.
+    let guideRatio: Double?
 
     var body: some View {
         Canvas { context, size in
@@ -86,6 +104,16 @@ struct FrameGuides: View {
                 path.addLine(to: CGPoint(x: middle.x, y: middle.y + 12))
             }
             context.stroke(path, with: line, lineWidth: 0.5)
+            if let guideRatio {
+                let long = max(size.width, size.height)
+                let short = min(long / guideRatio, min(size.width, size.height))
+                let guideSize = size.height >= size.width
+                    ? CGSize(width: short, height: long) : CGSize(width: long, height: short)
+                let frame = CGRect(
+                    x: (size.width - guideSize.width) / 2, y: (size.height - guideSize.height) / 2,
+                    width: guideSize.width, height: guideSize.height)
+                context.stroke(Path(frame), with: .color(.white.opacity(0.7)), lineWidth: 1)
+            }
             if let levelDegrees {
                 let level = abs(levelDegrees) < 0.5
                 let angle = -(levelDegrees + gravityDegrees) * .pi / 180

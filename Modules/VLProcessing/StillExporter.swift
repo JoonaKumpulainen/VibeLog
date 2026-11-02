@@ -38,7 +38,7 @@ public enum StillExporter {
             info: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue | CGBitmapInfo.byteOrder16Little.rawValue),
             to: folder.appendingPathComponent("log_rec2020.png"))
 
-        let monitor = monitorPixels(still)
+        let monitor = monitorPixels(still, step: 2)
         try writePNG(
             data: monitor.data, width: monitor.width, height: monitor.height, bytesPerRow: monitor.width * 4,
             bitsPerComponent: 8, bitsPerPixel: 32,
@@ -55,6 +55,19 @@ public enum StillExporter {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(summary).write(to: folder.appendingPathComponent("still.json"))
         return (folder, spot)
+    }
+
+    /// A small Rec.709 JPEG, for checking framing and exposure from a computer.
+    public static func preview(_ still: ProcessedStill, width: Int = 640) -> Data? {
+        let monitor = monitorPixels(still, step: max(1, still.width / width))
+        let output = NSMutableData()
+        guard let image = cgImage(
+            data: monitor.data, width: monitor.width, height: monitor.height, bytesPerRow: monitor.width * 4,
+            bitsPerComponent: 8, bitsPerPixel: 32, info: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue)),
+            let destination = CGImageDestinationCreateWithData(output as CFMutableData, UTType.jpeg.identifier as CFString, 1, nil)
+        else { return nil }
+        CGImageDestinationAddImage(destination, image, nil)
+        return CGImageDestinationFinalize(destination) ? output as Data : nil
     }
 
     private static func pixel(_ bytes: UnsafeRawBufferPointer, x: Int, y: Int, width: Int) -> SIMD3<Double> {
@@ -84,9 +97,9 @@ public enum StillExporter {
             linear: [curve.decode(mean.x), curve.decode(mean.y), curve.decode(mean.z)])
     }
 
-    private static func monitorPixels(_ still: ProcessedStill) -> (data: Data, width: Int, height: Int) {
-        let width = still.width / 2
-        let height = still.height / 2
+    private static func monitorPixels(_ still: ProcessedStill, step: Int) -> (data: Data, width: Int, height: Int) {
+        let width = still.width / step
+        let height = still.height / step
         var output = Data(count: width * height * 4)
         let curve = still.settings.curve
         still.pixels.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) in
@@ -94,7 +107,7 @@ public enum StillExporter {
                 for y in 0..<height {
                     for x in 0..<width {
                         let color = MonitorTransform.display(
-                            log: pixel(bytes, x: x * 2, y: y * 2, width: still.width), curve: curve,
+                            log: pixel(bytes, x: x * step, y: y * step, width: still.width), curve: curve,
                             gamut: still.settings.gamut)
                         let offset = (y * width + x) * 4
                         target[offset] = UInt8(color.x * 255)
@@ -108,15 +121,24 @@ public enum StillExporter {
         return (output, width, height)
     }
 
+    private static func cgImage(
+        data: Data, width: Int, height: Int, bytesPerRow: Int, bitsPerComponent: Int, bitsPerPixel: Int,
+        info: CGBitmapInfo
+    ) -> CGImage? {
+        guard let provider = CGDataProvider(data: data as CFData) else { return nil }
+        return CGImage(
+            width: width, height: height, bitsPerComponent: bitsPerComponent, bitsPerPixel: bitsPerPixel,
+            bytesPerRow: bytesPerRow, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: info,
+            provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+    }
+
     private static func writePNG(
         data: Data, width: Int, height: Int, bytesPerRow: Int, bitsPerComponent: Int, bitsPerPixel: Int,
         info: CGBitmapInfo, to url: URL
     ) throws {
-        guard let provider = CGDataProvider(data: data as CFData),
-            let image = CGImage(
-                width: width, height: height, bitsPerComponent: bitsPerComponent, bitsPerPixel: bitsPerPixel,
-                bytesPerRow: bytesPerRow, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: info,
-                provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent),
+        guard let image = cgImage(
+            data: data, width: width, height: height, bytesPerRow: bytesPerRow,
+            bitsPerComponent: bitsPerComponent, bitsPerPixel: bitsPerPixel, info: info),
             let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil)
         else { throw CocoaError(.fileWriteUnknown) }
         CGImageDestinationAddImage(destination, image, nil)

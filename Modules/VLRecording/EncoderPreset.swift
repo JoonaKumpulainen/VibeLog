@@ -1,6 +1,45 @@
 import AVFoundation
 import VideoToolbox
 
+/// What a file's color tags say. None changes the pixels, because the real curve and gamut are in
+/// the sidecar. Editors read these tags to decide how to show the clip.
+public enum FileTag: String, CaseIterable, Identifiable, Sendable {
+    case rec2020, rec709, hlg
+
+    public var id: String { rawValue }
+
+    public var label: String {
+        switch self {
+        case .rec2020: return "Rec.2020"
+        case .rec709: return "Rec.709"
+        case .hlg: return "Rec.2020 HLG"
+        }
+    }
+
+    var colorProperties: [String: String] {
+        switch self {
+        case .rec2020:
+            return [
+                AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_2020,
+                AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+                AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_2020,
+            ]
+        case .rec709:
+            return [
+                AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+                AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+                AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
+            ]
+        case .hlg:
+            return [
+                AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_2020,
+                AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_2100_HLG,
+                AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_2020,
+            ]
+        }
+    }
+}
+
 /// A codec and pixel format combination to try. Support varies by device, so the benchmark
 /// tests these rather than assuming any of them works.
 public struct EncoderPreset: Identifiable, Hashable, Sendable {
@@ -35,17 +74,15 @@ public struct EncoderPreset: Identifiable, Hashable, Sendable {
             pixelFormat: kCVPixelFormatType_444YpCbCr10BiPlanarVideoRange, profile: nil, bitrate: nil),
     ]
 
-    func outputSettings(width: Int, height: Int, frameRate: Double = 30) -> [String: Any] {
+    func outputSettings(
+        width: Int, height: Int, frameRate: Double = 30, tag: FileTag = .rec2020
+    ) -> [String: Any] {
         var settings: [String: Any] = [
             AVVideoCodecKey: codec,
             AVVideoWidthKey: width,
             AVVideoHeightKey: height,
             // The transfer tag is nominal: the real curve is recorded in the JSON sidecar.
-            AVVideoColorPropertiesKey: [
-                AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_2020,
-                AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
-                AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_2020,
-            ],
+            AVVideoColorPropertiesKey: tag.colorProperties,
         ]
         if let bitrate {
             var compression: [String: Any] = [

@@ -1,0 +1,8 @@
+[
+  {"cool": 30},
+  {"set": {"lens": "1x", "pipeline": "maximum", "efficientWhenHot": true, "fixedFrameTime": true, "tools": "none", "shutter": "auto"}},
+  {"take": 600, "label": "Maximum, Efficient when hot"},
+  {"cool": 30},
+  {"set": {"pipeline": "efficient", "efficientWhenHot": false}},
+  {"take": 600, "label": "Efficient throughout"}
+]

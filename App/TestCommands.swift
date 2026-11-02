@@ -1,7 +1,10 @@
 import Foundation
+import VLCapture
 import VLCore
 import VLProcessing
 import VLRecording
+
+private let settingsDuringTake: Set<String> = ["tools", "punch", "look"]
 
 /// What the test server may ask for. Anything not listed here is refused, nothing here deletes a
 /// take, and settings that would end a take are refused during one.
@@ -34,12 +37,35 @@ extension AppModel {
             testLink.send(file: Storage.videos.appendingPathComponent(video.lastPathComponent + ".json"))
             sendLog()
         }
-        if testSendsGyro {
-            for file in [TakeLibrary.gyroLog(for: video), TakeLibrary.captureTiming(for: video)]
-            where FileManager.default.fileExists(atPath: file.path) {
-                testLink.send(file: file)
-            }
+        let gyro = TakeLibrary.gyroLog(for: video)
+        if testSendsGyro, FileManager.default.fileExists(atPath: gyro.path) { testLink.send(file: gyro) }
+    }
+
+    /// The timing file is written after the take's other files, so it goes on its own.
+    func sendTimingFile(_ file: URL) {
+        if testLinkOn, testSendsGyro { testLink.send(file: file) }
+    }
+
+    /// Why the camera can't take an instruction now.
+    private var cameraBlocked: String? {
+        if let isBusy { return "Busy: \(isBusy)" }
+        if playingTake != nil { return "The player or library is open" }
+        return nil
+    }
+
+    /// The newest folder of timestamped results.
+    private func newestFolder(in parent: URL) -> URL? {
+        let names = try? FileManager.default.contentsOfDirectory(atPath: parent.path)
+        return (names ?? []).max().map { parent.appendingPathComponent($0, isDirectory: true) }
+    }
+
+    private func sendFiles(in folder: URL, only names: [String]? = nil) -> Int {
+        let found = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        let files = found.filter { names?.contains($0) ?? true }
+        for name in files {
+            testLink.send(file: folder.appendingPathComponent(name), name: "\(folder.lastPathComponent)_\(name)")
         }
+        return files.count
     }
 
     private func sendLog() {
@@ -59,18 +85,65 @@ extension AppModel {
             return done()
         case "set":
             guard let name = command.name, let value = command.value else { return refused("set needs a name and a value") }
-            if isRecording, name != "tools" { return refused("Only tools change during a take") }
+            if isRecording, !settingsDuringTake.contains(name) {
+                return refused("Only \(settingsDuringTake.sorted().joined(separator: ", ")) change during a take")
+            }
             if let problem = applyTestSetting(name, value) { return refused(problem) }
             return done()
         case "record":
             guard let seconds = command.seconds, seconds > 0 else { return refused("record needs seconds") }
             guard !isRecording else { return refused("Already recording") }
-            guard isBusy == nil, playingTake == nil, recordEncoded else { return refused("The camera is busy") }
+            if let cameraBlocked { return refused(cameraBlocked) }
             record(seconds: seconds)
             return done()
         case "stop":
             if isRecording { toggleRecord() }
             return done()
+        case "stream":
+            guard let value = command.value, ["on", "off"].contains(value) else { return refused("stream takes on or off") }
+            guard !isRecording else { return refused("A take is running") }
+            if let cameraBlocked { return refused(cameraBlocked) }
+            if (value == "on") != isStreaming { toggleStream() }
+            return done()
+        case "focusAt":
+            guard let point = command.value.flatMap(TestLinkAddress.point) else { return refused("focusAt takes x,y from 0 to 1") }
+            guard !isRecording else { return refused("Focus can't change during a take") }
+            focus(at: CGPoint(x: point.x, y: point.y))
+            return done()
+        case "applyPreset":
+            guard let saved = ([FormatPreset.stock] + presets).first(where: { $0.name == command.name }) else {
+                return refused("Presets: \((["Stock"] + presets.map(\.name)).joined(separator: ", "))")
+            }
+            guard !isRecording else { return refused("A take is running") }
+            apply(saved)
+            return done()
+        case "savePreset":
+            guard let name = command.name, !name.isEmpty, !FormatPreset.isReserved(name) else {
+                return refused("savePreset needs a name other than Stock")
+            }
+            savePreset(named: name)
+            return done()
+        case "defaultPreset":
+            guard let name = command.name, name == "none" || ([FormatPreset.stock] + presets).contains(where: { $0.name == name })
+            else { return refused("defaultPreset takes none or a preset's name") }
+            defaultPreset = name == "none" ? "" : name
+            return done()
+        case "encoderTest", "probe":
+            guard !isRecording else { return refused("A take is running") }
+            if let cameraBlocked { return refused(cameraBlocked) }
+            command.action == "probe" ? runProbe() : runEncoderTest()
+            return done()
+        case "saveStill", "sendPreview":
+            guard isStreaming, !isRecording else { return refused("Needs a running stream and no take") }
+            command.action == "saveStill" ? saveStill() : sendPreview()
+            return done()
+        case "sendStill":
+            guard let folder = newestFolder(in: Storage.stills) else { return refused("No stills") }
+            return done("Sending \(sendFiles(in: folder)) files")
+        case "sendReference":
+            guard let folder = newestFolder(in: Storage.clips) else { return refused("No RAW clips") }
+            let sent = sendFiles(in: folder, only: ["reference.dng", "reference_metadata.json", "clip.json"])
+            return done("Sending \(sent) files from \(folder.lastPathComponent)")
         case "controlTest":
             guard isStreaming, !isRecording else { return refused("Needs a running stream and no take") }
             runControlTest()
@@ -98,7 +171,7 @@ extension AppModel {
     }
 
     private func testFiles() -> [String] {
-        [Storage.videos, Storage.logs, Storage.probes].flatMap { folder in
+        [Storage.videos, Storage.logs, Storage.probes, Storage.clips, Storage.stills].flatMap { folder in
             let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path)
             return (names ?? []).sorted()
         }
@@ -107,11 +180,25 @@ extension AppModel {
     private var testStatus: [String: String] {
         [
             "recording": String(isRecording), "streaming": String(isStreaming),
+            "screen": playingTake == nil ? openScreen : "player", "busy": isBusy ?? "",
+            "method": method.rawValue, "encodeVideo": String(recordEncoded),
+            "whiteBalance": whiteBalanceLocked ? String(Int(temperature)) : "auto",
+            "focus": focusLocked ? String(format: "%.2f", lensPosition) : "auto",
+            "look": processing.monitor.rawValue, "lut": selectedLUT.isEmpty ? "none" : selectedLUT,
+            "stopAfter": String(recordSeconds),
+            "presets": (["Stock"] + presets.map(\.name)).joined(separator: ", "),
+            "defaultPreset": defaultPreset.isEmpty ? "none" : defaultPreset,
             "elapsed": String(recordElapsed), "lens": currentLensLabel,
             "codec": encoderPreset.id, "size": encoderSize.label, "aspect": widescreen ? "16:9" : "4:3",
             "frameRate": frameRateLabel, "curve": processing.curve.label, "gamut": processing.gamut.label,
             "pipeline": processing.pipeline.rawValue, "tools": toolsLabel,
             "fixedFrameTime": String(fixedFrameTime), "uncompressedAudio": String(pcmAudio),
+            "distortionCorrection": String(distortionCorrection),
+            "efficientWhenHot": String(processing.efficientWhenHot), "isoAuto": String(isoAuto),
+            "fileTag": fileTag.rawValue, "frameGuide": frameGuide.rawValue,
+            "desqueeze": String(processing.desqueeze), "copyMs": String(format: "%.1f", pipelineStats.copyMs),
+            "queueMs": String(format: "%.1f", pipelineStats.queueMs),
+            "drawMs": String(format: "%.1f", pipelineStats.drawMs),
             "saveGyro": String(saveGyroLog), "captureTiming": String(logCaptureTiming),
             "fps": String(format: "%.2f", stats.rollingFPS), "drops": String(takeDrops),
             "gpuMs": String(format: "%.1f", pipelineStats.gpuRecentMs),
@@ -159,6 +246,17 @@ extension AppModel {
         case "saveGyro": return flag { saveGyroLog = $0 }
         case "captureTiming": return flag { logCaptureTiming = $0 }
         case "fixedFrameTime": return flag { fixedFrameTime = $0 }
+        case "distortionCorrection": return flag { distortionCorrection = $0 }
+        case "efficientWhenHot": return flag { processing.efficientWhenHot = $0 }
+        case "isoAuto":
+            guard exposureLocked else { return "isoAuto needs a set shutter first" }
+            return flag { isoAuto = $0 }
+        case "frameGuide": return pick(FrameGuide.allCases, \.rawValue) { frameGuide = $0 }
+        case "fileTag": return pick(FileTag.allCases, \.rawValue) { fileTag = $0 }
+        case "desqueeze":
+            guard let amount = Double(value), (1...2).contains(amount) else { return "desqueeze takes 1 to 2" }
+            processing.desqueeze = amount
+            return nil
         case "keepRecordingWhenHot": return flag { processing.reduceLoadWhenHot = $0 }
         case "autoDuringTake": return flag { lockAtRoll = !$0 }
         case "tools":
@@ -168,6 +266,54 @@ extension AppModel {
                 return "tools takes none or: \(Tool.allCases.map(\.rawValue).joined(separator: ","))"
             }
             for tool in Tool.allCases where isOn(tool) != wanted.contains(tool.rawValue) { toggle(tool) }
+            return nil
+        case "method": return pick(CaptureMethod.allCases, \.rawValue) { method = $0 }
+        case "encodeVideo": return flag { recordEncoded = $0 }
+        case "writeFrames": return flag { writeFrames = $0 }
+        case "look": return pick(MonitorMode.allCases, \.rawValue) { processing.monitor = $0 }
+        case "lut":
+            if value == "none" {
+                selectedLUT = ""
+                return nil
+            }
+            return pick(lutNames, { $0 }) { selectedLUT = $0 }
+        case "lutMadeFor": return pick(["log", "rec709"], { $0 }) { processing.lutExpectsRec709 = $0 == "rec709" }
+        case "freezeViewfinder": return flag { processing.pauseMonitorWhileRecording = $0 }
+        case "punch":
+            guard let point = TestLinkAddress.point(value) else { return "punch takes x,y from 0 to 1" }
+            movePunch(to: CGPoint(x: point.x, y: point.y))
+            return nil
+        case "stopAfter":
+            guard let seconds = Double(value), seconds >= 0 else { return "stopAfter takes seconds, 0 for never" }
+            recordSeconds = seconds
+            return nil
+        case "whiteBalance":
+            if value == "auto" {
+                whiteBalanceLocked = false
+                return nil
+            }
+            guard let kelvin = Float(value), (2000...10000).contains(kelvin) else {
+                return "whiteBalance takes auto or 2000 to 10000"
+            }
+            temperature = kelvin
+            whiteBalanceLocked = true
+            return nil
+        case "tint":
+            guard let wanted = Float(value), (-150...150).contains(wanted) else { return "tint takes -150 to 150" }
+            tint = wanted
+            return nil
+        case "focus":
+            if value == "auto" {
+                releaseFocus()
+                return nil
+            }
+            guard let position = Float(value), (0...1).contains(position) else { return "focus takes auto or 0 to 1" }
+            lensPosition = position
+            focusLocked = true
+            return nil
+        case "exposureBias":
+            guard let stops = Float(value), (-2...2).contains(stops) else { return "exposureBias takes -2 to 2" }
+            exposureBias = stops
             return nil
         case "shutter":
             if value == "auto" {

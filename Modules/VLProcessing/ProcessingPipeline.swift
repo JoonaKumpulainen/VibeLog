@@ -2,6 +2,7 @@ import CoreMedia
 import CoreVideo
 import Metal
 import MetalKit
+import QuartzCore
 import VLCore
 import simd
 
@@ -126,6 +127,10 @@ public struct ProcessingSettings: Equatable, Sendable {
     public var demosaic = DemosaicMethod.malvar
     public var monitor = MonitorMode.rec709
     public var peakingSensitivity = PeakingSensitivity.low
+    /// Stretches the viewfinder across its short side for anamorphic lenses. The file stays as shot.
+    public var desqueeze = 1.0
+    /// Uses the Efficient path while the phone is hot, whichever pipeline is chosen.
+    public var efficientWhenHot = false
     /// On an iPhone 14 Pro, auto exposure on a plain surface read 0.37 linear at +0.5 stops,
     /// so -0.5 stops places it near 0.18. This is from a single measurement.
     public var exposureStops = -0.5
@@ -147,6 +152,11 @@ public struct PipelineStats: Sendable {
     public var dropped = 0
     /// Viewfinder draws given up so a take could keep its frames.
     public var monitorYields = 0
+    /// Recent time in each step of a frame, to show where it goes as the phone heats.
+    public var copyMs = 0.0
+    public var queueMs = 0.0
+    public var appendMs = 0.0
+    public var drawMs = 0.0
     public var gpuLastMs = 0.0
     public var gpuAverageMs = 0.0
     public var gpuRecentMs = 0.0
@@ -171,6 +181,7 @@ private struct FrameCapture {
     var iso: Float
     var whiteBalanceGains: [Float]
     var pts: Double
+    var copyMs: Double
 }
 
 // Must match ProcessParams in Shaders.metal.
@@ -202,6 +213,7 @@ private struct MonitorParams {
     var peaking: UInt32
     var peakStep: SIMD2<Float>
     var peakThreshold: Float
+    var desqueeze: Float
 }
 
 private struct CropParams {
@@ -438,6 +450,7 @@ public final class ProcessingPipeline: NSObject {
         inFlight += 1
         lock.unlock()
         encodeQueue.async { [self] in
+            let copyStart = CACurrentMediaTime()
             guard let input = copyToInput(frame) else {
                 logOnce("Cannot copy the RAW buffer to the GPU")
                 finishFrame(success: false)
@@ -445,7 +458,8 @@ public final class ProcessingPipeline: NSObject {
             }
             let capture = FrameCapture(
                 exposureSeconds: frame.exposureSeconds, iso: frame.iso,
-                whiteBalanceGains: frame.whiteBalanceGains, pts: frame.pts)
+                whiteBalanceGains: frame.whiteBalanceGains, pts: frame.pts,
+                copyMs: (CACurrentMediaTime() - copyStart) * 1000)
             // A separate step, so the capture buffer is released before any slow setup.
             encodeQueue.async { [self] in process(input, cfa: cfa, capture: capture) }
         }
@@ -499,7 +513,8 @@ public final class ProcessingPipeline: NSObject {
         }
         let sinkFrame = prepareSinkFrame(pts: capture.pts)
         lock.lock()
-        let efficient = settings.pipeline == .efficient && stillRequest == nil
+        let hotPath = hot && settings.efficientWhenHot
+        let efficient = (settings.pipeline == .efficient || hotPath) && stillRequest == nil
         lock.unlock()
 
         // Stills and resized recordings need the full image.
@@ -539,14 +554,19 @@ public final class ProcessingPipeline: NSObject {
         }
         let finalImage = image
         let finalStill = still
+        let committed = CACurrentMediaTime()
         commands.addCompletedHandler { [self] finished in
             let success = finished.status == .completed
+            let appendStart = CACurrentMediaTime()
             if success, let sinkFrame {
                 withExtendedLifetime((sinkFrame.wrappedLuma, sinkFrame.wrappedChroma)) {}
                 sinkFrame.sink.append(sinkFrame.buffer, at: sinkFrame.time)
             }
+            let steps = FrameSteps(
+                copyMs: capture.copyMs, queueMs: (finished.gpuStartTime - committed) * 1000,
+                appendMs: (CACurrentMediaTime() - appendStart) * 1000)
             let milliseconds = (finished.gpuEndTime - finished.gpuStartTime) * 1000
-            finishFrame(success: success, image: finalImage, gpuMs: milliseconds)
+            finishFrame(success: success, image: finalImage, gpuMs: milliseconds, steps: steps)
             finalStill?()
         }
         commands.commit()
@@ -775,7 +795,15 @@ public final class ProcessingPipeline: NSObject {
         }
     }
 
-    private func finishFrame(success: Bool, image: MTLTexture? = nil, gpuMs: Double = 0) {
+    private struct FrameSteps {
+        var copyMs: Double
+        var queueMs: Double
+        var appendMs: Double
+    }
+
+    private func finishFrame(
+        success: Bool, image: MTLTexture? = nil, gpuMs: Double = 0, steps: FrameSteps? = nil
+    ) {
         lock.lock()
         inFlight -= 1
         var schedule = false
@@ -787,6 +815,11 @@ public final class ProcessingPipeline: NSObject {
             stats.gpuAverageMs = gpuTotalMs / Double(stats.processed)
             stats.gpuRecentMs = stats.processed == 1 ? gpuMs : stats.gpuRecentMs * 0.95 + gpuMs * 0.05
             stats.gpuMaxMs = max(stats.gpuMaxMs, gpuMs)
+            if let steps {
+                stats.copyMs = stats.copyMs * 0.95 + steps.copyMs * 0.05
+                stats.queueMs = stats.queueMs * 0.95 + steps.queueMs * 0.05
+                stats.appendMs = stats.appendMs * 0.95 + steps.appendMs * 0.05
+            }
             let paused = settings.pauseMonitorWhileRecording && sink != nil
             // Two frames still waiting mean the GPU has stopped keeping up.
             let pace = pacer.decide(
@@ -878,7 +911,7 @@ extension ProcessingPipeline: MTKViewDelegate {
             // change for peaking to fire. The image is turned, so its first axis runs along the
             // drawable's height.
             peakStep: SIMD2(1 / Float(view.drawableSize.height), 1 / Float(view.drawableSize.width)),
-            peakThreshold: current.peakingSensitivity.threshold)
+            peakThreshold: current.peakingSensitivity.threshold, desqueeze: Float(current.desqueeze))
         encoder.setRenderPipelineState(monitorState)
         encoder.setFragmentTexture(image, index: 0)
         encoder.setFragmentTexture(rec709, index: 1)
@@ -886,6 +919,12 @@ extension ProcessingPipeline: MTKViewDelegate {
         encoder.setFragmentBytes(&parameters, length: MemoryLayout<MonitorParams>.stride, index: 0)
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         encoder.endEncoding()
+        commands.addCompletedHandler { [self] finished in
+            let milliseconds = (finished.gpuEndTime - finished.gpuStartTime) * 1000
+            lock.lock()
+            stats.drawMs = stats.drawMs * 0.95 + milliseconds * 0.05
+            lock.unlock()
+        }
         commands.present(drawable)
         commands.commit()
     }

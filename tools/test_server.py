@@ -5,12 +5,14 @@
     python3 tools/test_server.py send status
     python3 tools/test_server.py send set tools peaking,grid
     python3 tools/test_server.py send record 20 --wait
+    python3 tools/test_server.py suite tools/suites/heat_paths.json
 
 The phone connects out to `serve`, takes commands and sends files, which land in the results
 folder. `send` queues a command from this machine and prints the phone's reply. Traffic is plain
 HTTP with a token, so use it on your own network only.
 """
 import argparse
+import csv
 import hmac
 import json
 import os
@@ -54,6 +56,8 @@ class Link:
     def take(self, wait):
         deadline = time.time() + wait
         with self.changed:
+            if time.time() - self.last_seen > 60:
+                print("phone connected", flush=True)
             self.last_seen = time.time()
             while not self.commands:
                 left = deadline - time.time()
@@ -99,6 +103,7 @@ def make_handler(link):
             given = self.headers.get("Authorization", "")
             if hmac.compare_digest(given.encode(), f"Bearer {link.token}".encode()):
                 return True
+            print(f"refused a wrong token from {self.client_address[0]}", flush=True)
             self.answer(401, {"error": "bad token"})
             return False
 
@@ -191,7 +196,8 @@ def token_for(folder):
     path = folder / "token"
     if not path.exists():
         path.touch(mode=0o600)
-        path.write_text(secrets.token_urlsafe(16))
+        # Short enough to type on the phone. It only guards a private network.
+        path.write_text(f"{secrets.randbelow(10 ** 6):06d}")
     return path.read_text().strip()
 
 
@@ -218,8 +224,10 @@ def command_from(words):
         return {"action": action, "seconds": float(rest[0])}
     if action == "set":
         return {"action": action, "name": rest[0], "value": " ".join(rest[1:])}
-    if action == "sendFile":
-        return {"action": action, "name": rest[0]}
+    if action in ("sendFile", "applyPreset", "savePreset", "defaultPreset"):
+        return {"action": action, "name": " ".join(rest)}
+    if action in ("stream", "focusAt"):
+        return {"action": action, "value": rest[0]}
     return {"action": action}
 
 
@@ -247,6 +255,117 @@ def send(options):
         sys.exit(f"Server not reachable: {error.reason}")
 
 
+RESULT = re.compile(
+    r"(?P<written>[\d.]+) fps written, (?P<frames>\d+) frames, (?P<lost>\d+) lost .*"
+    r"capture (?P<capture>[\d.]+) fps fail (?P<failed>\d+) missed (?P<missed>\d+) duplicates (?P<duplicates>\d+)"
+    r" .*gpu (?P<gpu>[\d.]+) recent .*copy (?P<copy>[\d.]+) queue (?P<queue>[\d.]+) append (?P<append>[\d.]+)"
+    r" draw (?P<draw>[\d.]+) ms, viewfinder yields (?P<yields>\d+)")
+HEAT_FIELDS = ["time", "label", "thermal", "battery", "fps", "drops", "gpuMs", "queueMs", "drawMs", "freeGB"]
+RESULT_FIELDS = ["label", "seconds", "thermal_end", *RESULT.groupindex, "result"]
+
+
+class Suite:
+    """Runs a list of steps from a JSON file. Each step is one of:
+
+        {"set": {"lens": "1x", "tools": "none"}}
+        {"take": 20, "label": "ultra wide"}
+        {"cool": 30}    stops the stream, waits at least that many minutes and for nominal heat
+        {"wait": 5}     seconds
+
+    Results go to suite_*.csv and a reading every 10 seconds to heat_*.csv, in the results folder.
+    """
+
+    GIVE_UP_SECONDS = 300
+
+    def __init__(self, options):
+        self.options = options
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        self.results = open(options.folder / f"suite_{stamp}.csv", "w", newline="", encoding="utf-8")
+        self.heat = open(options.folder / f"heat_{stamp}.csv", "w", newline="", encoding="utf-8")
+        self.result_log = csv.DictWriter(self.results, RESULT_FIELDS)
+        self.heat_log = csv.DictWriter(self.heat, HEAT_FIELDS, extrasaction="ignore")
+        self.result_log.writeheader()
+        self.heat_log.writeheader()
+
+    def ask(self, command):
+        """Keeps trying while the phone is away, then stops the suite."""
+        deadline = time.time() + self.GIVE_UP_SECONDS
+        while True:
+            try:
+                return send_once(self.options, command)
+            except urllib.error.URLError:
+                if time.time() > deadline:
+                    sys.exit("The phone stopped answering")
+                time.sleep(5)
+
+    def status(self, label):
+        values = self.ask({"action": "status"})["values"]
+        self.heat_log.writerow({**values, "time": time.strftime("%H:%M:%S"), "label": label})
+        self.heat.flush()
+        return values
+
+    def set_values(self, values):
+        for name, value in values.items():
+            reply = self.ask({"action": "set", "name": name, "value": str(value)})
+            if not reply["ok"]:
+                sys.exit(f"{name}: {reply['message']}")
+        time.sleep(1)
+
+    def take(self, seconds, label):
+        print(f"take: {label}, {seconds} s", flush=True)
+        previous = self.status(label).get("lastResult", "")
+        reply = self.ask({"action": "record", "seconds": float(seconds)})
+        if not reply["ok"]:
+            sys.exit(f"{label}: {reply['message']}")
+        end = time.time() + seconds
+        while time.time() < end:
+            time.sleep(min(10, max(end - time.time(), 0.1)))
+            self.status(label)
+        while True:
+            values = self.status(label)
+            if values["recording"] == "false" and values.get("lastResult") != previous:
+                break
+            time.sleep(2)
+        result = values.get("lastResult", "")
+        parsed = RESULT.search(result)
+        row = {"label": label, "seconds": seconds, "thermal_end": values["thermal"], "result": result}
+        row.update(parsed.groupdict() if parsed else {})
+        self.result_log.writerow(row)
+        self.results.flush()
+        print(f"  {result[:150]}", flush=True)
+        time.sleep(3)
+
+    def cool(self, minutes):
+        print(f"cooling: at least {minutes} minutes and nominal heat", flush=True)
+        self.ask({"action": "stream", "value": "off"})
+        earliest = time.time() + minutes * 60
+        while True:
+            values = self.status("cooling")
+            if time.time() >= earliest and values["thermal"] == "nominal":
+                break
+            time.sleep(min(10, max(earliest - time.time(), 10)))
+        self.ask({"action": "stream", "value": "on"})
+        time.sleep(5)
+
+    def run(self, steps):
+        for step in steps:
+            if "set" in step:
+                self.set_values(step["set"])
+            elif "take" in step:
+                self.take(step["take"], step.get("label", "take"))
+            elif "cool" in step:
+                self.cool(step["cool"])
+            elif "wait" in step:
+                time.sleep(step["wait"])
+            else:
+                sys.exit(f"Unknown step: {step}")
+        print(f"results: {self.results.name}\nheat: {self.heat.name}", flush=True)
+
+
+def suite(options):
+    Suite(options).run(json.loads(Path(options.plan).read_text()))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
@@ -260,6 +379,10 @@ def main():
     sending.add_argument("--wait", action="store_true", help="after record, wait for the take to end")
     sending.add_argument("--timeout", type=float, default=30)
     sending.set_defaults(run=send)
+    suiting = commands.add_parser("suite")
+    suiting.add_argument("plan", type=Path)
+    suiting.add_argument("--timeout", type=float, default=30)
+    suiting.set_defaults(run=suite)
     options = parser.parse_args()
     options.run(options)
 

@@ -19,6 +19,22 @@ public enum FrameRates {
     }
 }
 
+/// Holds a set shutter by moving ISO toward the camera's metered exposure.
+public enum ShutterPriority {
+    /// Small errors are left alone, so ISO doesn't hunt during a take.
+    static let deadband: Float = 0.15
+    static let largestStep: Float = 1.0 / 3
+
+    /// `offset` is the camera's metered error in stops, positive when too bright. Nil means leave
+    /// ISO as it is.
+    public static func nextISO(current: Float, offset: Float, range: ClosedRange<Float>) -> Float? {
+        guard abs(offset) >= deadband else { return nil }
+        let step = min(max(-offset * 0.5, -largestStep), largestStep)
+        let next = min(max(current * pow(2, step), range.lowerBound), range.upperBound)
+        return next == current ? nil : next
+    }
+}
+
 /// The values dials snap to. A stop's label is empty when it only needs a tick.
 public enum ExposureScales {
     public struct Stop: Equatable, Sendable {

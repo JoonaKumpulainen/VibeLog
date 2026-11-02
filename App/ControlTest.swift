@@ -2,7 +2,7 @@ import Foundation
 import VLCore
 
 extension AppModel {
-    static let controlTestSeconds = 46.0
+    static let controlTestSeconds = 56.0
 
     /// Measures what changing each camera control costs during a recording. Every step logs
     /// frame and failure counts, so the gaps between steps show any lost frames.
@@ -21,7 +21,16 @@ extension AppModel {
             (32, "bias 0", { [camera] in camera.setExposureBias(0) }),
             (36, "focus auto", { [camera] in camera.setFocus(.auto, lensPosition: 0.8) }),
             (40, "meter center", { [camera] in camera.meter(at: center) }),
+            (44, "slow focus move", {}),
+            (52, "slow move done", {}),
         ]
+        // Two small changes a second, to see if a gentler move survives where a rack didn't.
+        for tick in 0..<16 {
+            let share = Float(tick) / 15
+            steps.append((44 + Double(tick) / 2, nil, { [camera] in
+                camera.setFocus(.locked, lensPosition: 0.4 + 0.1 * share)
+            }))
+        }
         // Dials send about ten changes a second.
         for tick in 0..<20 {
             let share = Float(tick) / 19

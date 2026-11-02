@@ -92,10 +92,10 @@ The rule for this phase: anything that adds to real-time GPU load must prove it 
 - **Vignette correction:** apply the `FixVignetteRadial` values already found in the photo metadata.
 - **Gyro logging:** added: CoreMotion data at 100 Hz in a Gyroflow `.gcsv` next to each clip. Its cost and axes still need checking on the phone and in Gyroflow.
 - **Stabilization check:** find out whether optical stabilization is active during RAW capture, and how it affects gyro stabilization.
-- **Exposure modes:** a 180-degree button, lock at start and auto during a take are in. Shutter priority and auto exposure with an EV slider are left.
-- **Focus while recording:** test whether focus can change during capture.
+- **Exposure modes:** a 180-degree button, lock at start and auto during a take are in. Shutter priority and an EV dial are added, untested.
+- **Focus while recording:** the control test now includes a slow focus move. Its result is pending.
 - **Audio:** PCM recording and level meters are in, and PCM sounded clean over a 10-minute take. External microphones are left.
-- **Native gamuts:** S-Gamut3 and ARRI Wide Gamut 3 are in, as a color space picker that sets the curve. Options for how the file is tagged are left.
+- **Native gamuts:** S-Gamut3 and ARRI Wide Gamut 3 are in, as a color space picker that sets the curve. File tag options are added, untested.
 - **Color accuracy:** measure against a chart, and confirm the exposure default.
 - **Lenses:** test recording on the ultra wide and tele, each with its own calibration.
 
@@ -104,8 +104,8 @@ The rule for this phase: anything that adds to real-time GPU load must prove it 
 - Focus peaking and a focus punch-in: done.
 - Focus peaking sensitivity: a low and high switch in Settings, so it's there but out of the way. Added, untested.
 - RAW histogram, waveform and vectorscope.
-- Horizon indicator, using the Phase 6 motion data.
-- Frame guides, a 3x3 grid and anamorphic desqueeze.
+- Horizon indicator: the Level tool does this.
+- Frame guides, a 3x3 grid and anamorphic desqueeze: added, with frame guides and desqueeze untested.
 - LUTs baked into recordings, as an option.
 - Timecode and Apple Watch control, if they prove useful.
 

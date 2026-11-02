@@ -71,6 +71,7 @@ struct DiagnosticsView: View {
                 if model.method.isPhoto {
                     Toggle("Use Photo preset", isOn: $model.usePhotoPreset)
                     Toggle("Fixed frame time at 30 fps", isOn: $model.fixedFrameTime)
+                    Toggle("Lens distortion correction", isOn: $model.distortionCorrection)
                 }
                 if !model.method.isPhoto || !model.usePhotoPreset {
                     Picker("Format", selection: $model.formatIndex) {
@@ -87,6 +88,7 @@ struct DiagnosticsView: View {
                 if model.method.isPhoto {
                     Toggle("GPU pipeline", isOn: $model.processing.enabled)
                 }
+                Toggle("Efficient path when hot", isOn: $model.processing.efficientWhenHot)
                 Toggle("Encode video (off: RAW dump)", isOn: $model.recordEncoded)
                 if !model.recordEncoded {
                     Toggle("Write frames to disk", isOn: $model.writeFrames)
@@ -97,6 +99,7 @@ struct DiagnosticsView: View {
             }
         }
         .onAppear { model.diagnosticsOpened() }
+        .onDisappear { model.diagnosticsClosed() }
         .navigationTitle("Diagnostics")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showLog) {

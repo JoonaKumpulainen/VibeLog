@@ -1021,6 +1021,25 @@ final class TakeAccountingTests: XCTestCase {
         XCTAssertEqual(draws.count, 10)
     }
 
+    func testShutterPriorityMovesISOTowardTheMeter() {
+        let range: ClosedRange<Float> = 50...3200
+        XCTAssertNil(ShutterPriority.nextISO(current: 400, offset: 0.1, range: range))
+        XCTAssertLessThan(try XCTUnwrap(ShutterPriority.nextISO(current: 400, offset: 1, range: range)), 400)
+        XCTAssertGreaterThan(try XCTUnwrap(ShutterPriority.nextISO(current: 400, offset: -1, range: range)), 400)
+        XCTAssertEqual(ShutterPriority.nextISO(current: 3000, offset: -4, range: range), 3200)
+        XCTAssertNil(ShutterPriority.nextISO(current: 3200, offset: -4, range: range))
+    }
+
+    func testFileTagsOnlyChangeTheTags() throws {
+        let preset = try XCTUnwrap(EncoderPreset.all.first { $0.id == "prores422hq" })
+        let hlg = preset.outputSettings(width: 8, height: 8, tag: .hlg)
+        let properties = try XCTUnwrap(hlg[AVVideoColorPropertiesKey] as? [String: String])
+        XCTAssertEqual(properties[AVVideoTransferFunctionKey], AVVideoTransferFunction_ITU_R_2100_HLG)
+        let plain = preset.outputSettings(width: 8, height: 8)
+        let nominal = try XCTUnwrap(plain[AVVideoColorPropertiesKey] as? [String: String])
+        XCTAssertEqual(nominal[AVVideoColorPrimariesKey], AVVideoColorPrimaries_ITU_R_2020)
+    }
+
     func testPeakingThresholds() {
         XCTAssertEqual(PeakingSensitivity.low.threshold, 0.1)
         XCTAssertLessThan(PeakingSensitivity.high.threshold, PeakingSensitivity.low.threshold)
@@ -1048,6 +1067,22 @@ final class TestLinkTests: XCTestCase {
         XCTAssertEqual(TestLinkAddress.safeName("../../secret"), "secret")
         XCTAssertNil(TestLinkAddress.safeName(".."))
         XCTAssertNil(TestLinkAddress.safeName(""))
+    }
+
+    func testPreviewIsASmallJPEG() throws {
+        let still = ProcessedStill(
+            pixels: Data(count: 64 * 48 * 8), width: 64, height: 48, settings: ProcessingSettings(),
+            exposureSeconds: 0.01, iso: 100, whiteBalanceGains: [1, 1, 1])
+        let data = try XCTUnwrap(StillExporter.preview(still, width: 16))
+        XCTAssertEqual(Array(data.prefix(2)), [0xFF, 0xD8])
+    }
+
+    func testPoints() {
+        let point = TestLinkAddress.point("0.25, 0.5")
+        XCTAssertEqual(point?.x, 0.25)
+        XCTAssertEqual(point?.y, 0.5)
+        XCTAssertNil(TestLinkAddress.point("0.5"))
+        XCTAssertNil(TestLinkAddress.point("0.5,2"))
     }
 
     func testCommandsDecodeWithoutOptionalFields() throws {
@@ -1093,6 +1128,9 @@ final class AppConfigTests: XCTestCase {
         XCTAssertEqual(config.peakingSensitivity, "low")
         XCTAssertTrue(config.fixedFrameTime)
         XCTAssertEqual(config.testServer, "")
+        XCTAssertTrue(config.distortionCorrection)
+        XCTAssertFalse(config.efficientWhenHot)
+        XCTAssertEqual(config.fileTag, "rec2020")
     }
 
     private let night = FormatPreset(

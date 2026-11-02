@@ -19,10 +19,12 @@ public final class VideoEncoder: VideoFrameSink {
         public var metadata: [String: String]
         /// Clockwise turn for playback, in degrees. The pixels stay as the sensor recorded them.
         public var rotationDegrees: Int
+        public var fileTag: FileTag
 
         public init(
             url: URL, preset: EncoderPreset, size: EncoderSize, frameRate: Double = 30, audio: Bool,
-            pcmAudio: Bool = false, realTime: Bool = true, metadata: [String: String] = [:], rotationDegrees: Int = 0
+            pcmAudio: Bool = false, realTime: Bool = true, metadata: [String: String] = [:], rotationDegrees: Int = 0,
+            fileTag: FileTag = .rec2020
         ) {
             self.url = url
             self.preset = preset
@@ -32,6 +34,7 @@ public final class VideoEncoder: VideoFrameSink {
             self.pcmAudio = pcmAudio
             self.realTime = realTime
             self.metadata = metadata
+            self.fileTag = fileTag
             self.rotationDegrees = rotationDegrees
         }
     }
@@ -102,7 +105,8 @@ public final class VideoEncoder: VideoFrameSink {
         writer.movieFragmentInterval = CMTime(seconds: 10, preferredTimescale: 600)
 
         let settings = config.preset.outputSettings(
-            width: config.size.width, height: config.size.height, frameRate: config.frameRate)
+            width: config.size.width, height: config.size.height, frameRate: config.frameRate,
+            tag: config.fileTag)
         guard writer.canApply(outputSettings: settings, forMediaType: .video) else {
             throw Failure.unsupportedSettings
         }

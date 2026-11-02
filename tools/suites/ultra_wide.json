@@ -1,0 +1,11 @@
+[
+  {"set": {"lens": "0.5x", "tools": "none", "captureTiming": true, "shutter": "120"}},
+  {"wait": 4},
+  {"set": {"distortionCorrection": true}},
+  {"wait": 5},
+  {"take": 20, "label": "ultra wide, correction on"},
+  {"set": {"distortionCorrection": false}},
+  {"wait": 5},
+  {"take": 20, "label": "ultra wide, correction off"},
+  {"set": {"distortionCorrection": true, "shutter": "auto", "captureTiming": false, "lens": "1x"}}
+]

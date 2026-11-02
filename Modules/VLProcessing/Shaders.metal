@@ -30,6 +30,7 @@ struct MonitorParams {
     uint peaking;  // 1 marks fine detail, for judging focus.
     float2 peakStep;  // One drawable pixel at full view, in the image's coordinates.
     float peakThreshold;  // The edge strength peaking marks.
+    float desqueeze;  // Widens the picture by narrowing its short side, with black beside it.
 };
 
 struct CropParams {
@@ -245,7 +246,11 @@ fragment float4 monitorFragment(VertexOut in [[stage_in]],
                                 texture3d<float> custom [[texture(2)]],
                                 constant MonitorParams &m [[buffer(0)]]) {
     constexpr sampler linearSampler(filter::linear, address::clamp_to_edge);
-    float2 shown = m.viewOrigin + in.uv * m.viewScale;
+    float across = 0.5 + (in.uv.x - 0.5) * m.desqueeze;
+    if (across < 0.0 || across > 1.0) {
+        return float4(0.0, 0.0, 0.0, 1.0);
+    }
+    float2 shown = m.viewOrigin + float2(across, in.uv.y) * m.viewScale;
     float2 rotated = float2(shown.y, 1.0 - shown.x);
     float3 logColor = image.sample(linearSampler, rotated).rgb;
     float3 color = logColor;

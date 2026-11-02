@@ -84,6 +84,13 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var peakingSensitivity = "low"
     /// Holds the sensor at one frame time at 30 fps, as every other rate does.
     public var fixedFrameTime = true
+    /// Lets the camera apply lens distortion correction, as it does by default.
+    public var distortionCorrection = true
+    /// Moves to the Efficient path while the phone is hot.
+    public var efficientWhenHot = false
+    public var frameGuide = "2.39"
+    public var desqueeze = 1.0
+    public var fileTag = "rec2020"
     /// Where the test link connects. It's never switched on from here.
     public var testServer = ""
     public var testToken = ""
@@ -128,6 +135,11 @@ public struct AppConfig: Codable, Equatable, Sendable {
         defaultPreset = read(.defaultPreset, defaults.defaultPreset)
         peakingSensitivity = read(.peakingSensitivity, defaults.peakingSensitivity)
         fixedFrameTime = read(.fixedFrameTime, defaults.fixedFrameTime)
+        distortionCorrection = read(.distortionCorrection, defaults.distortionCorrection)
+        efficientWhenHot = read(.efficientWhenHot, defaults.efficientWhenHot)
+        frameGuide = read(.frameGuide, defaults.frameGuide)
+        desqueeze = read(.desqueeze, defaults.desqueeze)
+        fileTag = read(.fileTag, defaults.fileTag)
         testServer = read(.testServer, defaults.testServer)
         testToken = read(.testToken, defaults.testToken)
     }

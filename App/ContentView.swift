@@ -104,7 +104,8 @@ struct CameraScreen: View {
         .overlay {
             LiveFrameGuides(
                 level: hold.level, grid: model.isOn(.grid), center: model.isOn(.center),
-                showsLevel: model.isOn(.level), gravityDegrees: hold.hold.gravityDegrees)
+                showsLevel: model.isOn(.level), gravityDegrees: hold.hold.gravityDegrees,
+                guideRatio: model.frameGuideRatio)
             if model.isRecording {
                 Rectangle()
                     .strokeBorder(Tokens.record, lineWidth: 2)

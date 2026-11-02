@@ -17,6 +17,7 @@ public final class CameraController: NSObject {
 
     private let queue = DispatchQueue(label: "vibelog.session", qos: .userInitiated)
     private var device: AVCaptureDevice?
+    private var priorityTimer: DispatchSourceTimer?
     private var input: AVCaptureDeviceInput?
     private var photoOutput: AVCapturePhotoOutput?
     private var videoOutput: AVCaptureVideoDataOutput?
@@ -150,6 +151,39 @@ public final class CameraController: NSObject {
                 let clampedISO = min(max(iso, format.minISO), format.maxISO)
                 device.setExposureModeCustom(duration: duration, iso: clampedISO, completionHandler: nil)
             }
+        }
+    }
+
+    /// Keeps the shutter and moves ISO four times a second, to follow the camera's meter.
+    public func setShutterPriority(seconds: Double, iso: Float) {
+        setExposure(.locked, seconds: seconds, iso: iso)
+        queue.async { [self] in
+            priorityTimer?.cancel()
+            let timer = DispatchSource.makeTimerSource(queue: queue)
+            timer.schedule(deadline: .now() + 0.25, repeating: 0.25)
+            timer.setEventHandler { [weak self] in self?.stepPriorityISO() }
+            timer.resume()
+            priorityTimer = timer
+        }
+    }
+
+    public func stopShutterPriority() {
+        queue.async { [self] in
+            priorityTimer?.cancel()
+            priorityTimer = nil
+        }
+    }
+
+    /// Runs on `queue`.
+    private func stepPriorityISO() {
+        guard let device, device.exposureMode == .custom else { return }
+        let format = device.activeFormat
+        guard let iso = ShutterPriority.nextISO(
+            current: device.iso, offset: device.exposureTargetOffset, range: format.minISO...format.maxISO)
+        else { return }
+        withLockedDevice { device in
+            device.setExposureModeCustom(
+                duration: AVCaptureDevice.currentExposureDuration, iso: iso, completionHandler: nil)
         }
     }
 
@@ -402,6 +436,7 @@ public final class CameraController: NSObject {
         let timing = FrameRates.frameTime(fps)
         let frameTime = CMTime(value: timing.value, timescale: timing.timescale)
         let fixesFrameTime = fps < 30 || options.config.fixedFrameTime
+        let correctsDistortion = options.config.distortionCorrection
         do {
             try device.lockForConfiguration()
             // The longest duration goes first, because the shortest can't pass it.
@@ -411,6 +446,10 @@ public final class CameraController: NSObject {
                     device.activeVideoMinFrameDuration = frameTime
                 }
                 device.activeMaxExposureDuration = frameTime
+                if device.isGeometricDistortionCorrectionSupported {
+                    device.isGeometricDistortionCorrectionEnabled = correctsDistortion
+                    Log.shared.info("Distortion correction \(correctsDistortion ? "on" : "off")")
+                }
             }
             device.unlockForConfiguration()
             if let exception {

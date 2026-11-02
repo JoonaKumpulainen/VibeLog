@@ -1,6 +1,6 @@
 # VibeLog handoff
 
-For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of early Phase 6. Phase 5 is built, and only a few phone checks remain. The latest build is `fc8fc51`, which passed CI with 73 tests, and the owner is partway through testing it on the phone. Everything listed under **Unbuilt changes** is not yet built, and none of it has been compiled. The last logged session came from `9f9a456`.
+For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of early Phase 6. Phase 5 is built, and only a few phone checks remain. The latest build is `a2d2cab`, which passed CI with 93 tests and hasn't been tested on the phone. Earlier phone results came from `fc8fc51`. The last logged session came from `9f9a456`.
 
 ## What this is
 
@@ -31,7 +31,7 @@ An iPhone camera app that records full-sensor RAW frames, processes them on the 
 | `Modules/VLProcessing` | Log curves, color math, monitor LUT, `.cube` parser, Metal pipeline, still export, `Shaders.metal` |
 | `Modules/VLRecording` | RAW dump writer, `VideoEncoder`, encoder presets, encoder benchmark, `TakeLibrary` |
 | `Modules/ObjCGuard` | Catches Objective-C exceptions from AVFoundation, runtime scan |
-| `Tests/VLTests` | 93 tests, including real GPU tests on the simulator |
+| `Tests/VLTests` | 97 tests, including real GPU tests on the simulator |
 | `tools/inspect_clip.py` | Summarizes a RAW clip and exports a frame |
 | `tools/test_server.py` | The test link's server, which sends the phone commands and collects its files |
 
@@ -61,10 +61,14 @@ Modules are dynamic frameworks. Swift is in Swift 5 mode.
 - **Color space:** the owner reported that S-Gamut3 with S-Log3 works. LogC3 takes recorded, but ARRI Wide Gamut 3 hasn't been graded.
 - **Ultra wide falls short of 30 fps:** every take on it missed frames, while the main camera held 30.00 fps after a start hitch of 133 to 200 ms. Locked 20-second ProRes 422 HQ takes wrote 18.94 fps at 1/30 s, 20.45 at 1/60 and 20.37 at 1/120. HEVC and ProRes 4444 gave 20.0 fps at 1/120, and auto at 1/33 gave 24.7. So neither shutter nor codec sets the limit. GPU time stayed near 14 ms at the start of those takes with no drops, so nor does the GPU. The camera delivers the frames late, and `PhotoRawDriver` has no per-lens logic. The cause is unproven. See **Variable frame timing**. `missed` understates this lens, because it compares gaps with the take's median: take `190710` lost about a third of its frames and logged `missed 2`.
 - **Ultra wide long run:** 10:08 of ProRes 4444 in LogC3 and Maximum quality at 23.29 fps written, 14173 frames and 190.7 MB/s. Encoder drops were 0, but 441 frames dropped at the GPU and 33 photos failed. Heat reached serious after 65 seconds. From about 2 minutes in, GPU time jumped from 28 ms to about 65 ms for long stretches with a return to 28 ms in between, which looks like GPU throttling, and every loss came during the slow stretches. An earlier 7:42 take ran serious for 2:40 at 20 fps with no drops. This doesn't test 30 fps.
-- **Monitoring cost:** in the 10-minute take, all tools except zebras took GPU time from 13.5 ms to about 29 ms, which fits within 33.3 ms while the GPU runs at full speed.
-- **Main camera, Maximum quality, 10 minutes:** take `192944`, 1x, ProRes 422 HQ, uncompressed audio and all tools except zebras, ran 10:01. The camera delivered 29.99 fps with `missed 5`, and the encoder dropped nothing, but the file wrote 28.11 fps because 1128 frames (6%) dropped at the GPU. The first 6:20 lost none. Heat reached fair at 38 seconds and serious at 1:48. At 6:20, GPU time jumped from about 27 ms to 52 ms, then to about 70 ms by 8:30, with no other change, which looks like GPU throttling. Tools are the likely reason it can't absorb that, but no 10-minute take with tools off has run in Maximum quality. Recording frames should outrank monitoring, so a viewfinder that gives way before the file does is worth building.
+- **Monitoring cost:** none measurable, and earlier notes blaming tools were wrong. At serious heat, 40-second 1x takes showed GPU 28.1 ms with all tools except zebras and 28.4 ms with none, and at fair heat 25.2 ms with none. GPU time climbs from about 13 ms to about 25 ms within 10 seconds of any take, with or without tools, for a reason not yet known. The figure only times the compute pass, not the viewfinder draw, so the tools' full cost needs a long take. All three takes lost 0 frames with the test link connected.
+- **Gyro cost:** none seen. Two 40-second 1x takes, gyro on and off, both wrote 1200 frames with 0 lost.
+- **Main camera, Maximum quality, 10 minutes:** take `192944`, 1x, ProRes 422 HQ, uncompressed audio and all tools except zebras, ran 10:01. The camera delivered 29.99 fps with `missed 5`, and the encoder dropped nothing, but the file wrote 28.11 fps because 1128 frames (6%) dropped at the GPU. The first 6:20 lost none. Heat reached fair at 38 seconds and serious at 1:48. At 6:20, GPU time jumped from about 27 ms to 52 ms, then to about 70 ms by 8:30, with no other change, which looks like GPU throttling. Tools were first blamed for this, but a later comparison showed no measurable difference, so the slowdown itself is the problem. `a2d2cab` has the viewfinder yield in that case, which still needs a long take.
+- **Viewfinder yields didn't save a long take:** take `210133` on `a2d2cab`, 1x, ProRes 422 HQ, Maximum quality, uncompressed audio and all tools except zebras, began at nominal heat but only about 2 minutes after leaving fair, following a run of short takes. The camera delivered 29.99 fps with `missed 8`, but 1982 frames (12%) dropped at the GPU and the file wrote 26.35 fps. Heat reached serious at 1:30 and critical at 9:05, the first critical seen, so the app ended the take. GPU time left about 30 ms at about 3 minutes and settled near 78 ms. The viewfinder gave up 11909 draws and losses still grew, so the compute work itself is what slows. Starting heat differs from `192944`, so it isn't a direct comparison, and that take's lower loss may only reflect a cooler phone.
 - **Tele:** take `194057` delivered 29.86 fps. It started at serious heat, and GPU time reached 66 ms once tools were on, so 68 frames dropped at the GPU over 21 seconds. Take `194232`, in the same conditions, logged 664 frames at 29.98 fps, but 151 were duplicates with the same timestamp as the frame before, so the file wrote 23.13 fps. `missed` showed 0.
-- **Variable frame timing:** in builds up to `fc8fc51`, 30 fps left the sensor's frame time at 1/30 to 1/15 s, while every other rate was fixed. The sensor may have been slowing down on the ultra wide and tele, which would explain both the late frames and the duplicates. `applyFrameRate` now fixes 30 fps too, unbuilt and untested, and **Fixed frame time at 30 fps** in Diagnostics switches it back. All the long runs above used the old timing, so the main camera at 30 fps needs checking again. Another session's reading of the sensor timestamps disagrees with this theory for locked takes, so don't count on it.
+- **Frame time doesn't set the lens limit:** on `a2d2cab`, 20-second takes at 1/120 s wrote 21.33 fps fixed and 21.50 variable on the ultra wide, and 29.91 both ways on the tele. Fixed stays the default until the 1x long run says otherwise, and the Diagnostics switch can go once it does.
+- **Why the ultra wide is slow:** **Log capture timing** shows the camera stays not ready for about 45 ms after each request on the ultra wide, against 30 to 32 ms on the 1x and tele. Requests are held for it, so frames land 1 or 2 sensor frames apart on a steady 33 ms grid, averaging about 21 fps. The sensor isn't slowing. The ultra wide is also the only lens whose format reports `gdc fov`, so geometric distortion correction is the first suspect, which is untested. `device.isGeometricDistortionCorrectionEnabled = false` would test it.
+- **Tele:** two 20-second takes at 1/120 s kept every frame at 29.91 fps with no duplicates. The earlier 23 fps duplicates take hasn't repeated.
 - **Auto during a take:** the owner reported that auto exposure and white balance work. It hasn't been in a logged test, so its cost isn't measured.
 - **Long run in Efficient:** 10:12 of ProRes 422 HQ at full size with 0 `DROP`, 18338 frames and 172 MB/s, in a dark scene at 1/31 s and ISO 8710. Heat reached serious at 5 minutes, with **Keep recording when hot** on and no failure. The file wrote 29.97 fps, about 16 frames fewer than 30 fps gives, and the rolling rate dipped to 29.49 in 8 of 122 samples. `DROP` doesn't count frames the camera never delivered, so result lines now log `missed` and `gap`.
 - **Library and peaking:** the owner reported both working. Delete removes a take with its metadata.
@@ -92,7 +96,7 @@ Modules are dynamic frameworks. Swift is in Swift 5 mode.
 
 New additions follow the design rules in [ROADMAP.md](ROADMAP.md). `CameraGeometry.topShare` sets the picture's top and bottom edges, and that share is an estimate of the Camera app's split, not a measurement. The config's `toolbar` and `telemetry` fields are no longer used by the app.
 
-### Unbuilt changes
+### New in `a2d2cab`, untested on the phone
 
 - **Presets:** a default preset and a built-in Stock.
 - **Fixed frame time at 30 fps:** on by default, with a Diagnostics switch.
@@ -103,28 +107,41 @@ New additions follow the design rules in [ROADMAP.md](ROADMAP.md). `CameraGeomet
 - **Test link:** see below.
 - **From other sessions:** the 48mm RAW probe and **Log capture timing**.
 
+### Built after `a2d2cab`
+
+- **Efficient path when hot:** a Diagnostics switch, off by default. While the phone is hot, frames use the Efficient path whichever pipeline is chosen. `tools/suites/heat_paths.json` tests it.
+- **Frame steps:** `Recording` and result lines log `steps copy, queue, append, draw` in ms, to show where GPU time goes as heat rises.
+- **Lens distortion correction:** a Diagnostics switch, on by default, because the ultra wide's 45 ms wait may come from it. `tools/suites/ultra_wide.json` tests it.
+- **Suites:** `tools/test_server.py suite <plan.json>` runs takes and cooling breaks, stopping the stream to cool, and writes `suite_*.csv` and `heat_*.csv`. A cooling step waits for a minimum time as well as nominal heat, because `210133` showed nominal alone isn't cool.
+- **Slow focus move:** the control test is now 56 seconds, with 16 small focus changes over its last stretch, to see if a gentler move keeps its frames. A long-standing focus block during takes stays until that passes.
+- **Shutter priority:** with a set shutter, ISO's **AUTO** makes ISO follow the meter, using `ShutterPriority.nextISO` four times a second. Like other auto exposure, it freezes at the start of a take unless **Auto exposure and white balance during a take** is on. Its frame cost is unmeasured.
+- **EV dial:** an **EV** button on the ISO dial, shown while the camera picks ISO, outside takes. In shutter priority it depends on the camera's meter including the bias, which is unproven.
+- **Frame guides:** the **GUIDE** tool marks 2.39, 2.00, 1.85 or 1.00:1, chosen in Settings. The existing **LEVEL** tool is the horizon indicator.
+- **Anamorphic desqueeze:** viewfinder only, in Settings, and it adds no texture reads.
+- **File tag:** Settings under Image offers Rec.2020 (the old behavior), Rec.709 or Rec.2020 HLG. It changes tags only, and which one suits an editor is unchecked.
+
+- **Test link:** stream control, the settings and actions above, a preview still, RAW clip fetching, and a report of the open screen. The `sendPreview` still works without any sign on the phone, which `TEST_LINK.md` states.
+- **Fixes:** the timing file now sends once it's written, and `record` works for RAW dumps.
+
 ### Test link
 
-**Test link** in Diagnostics connects the phone to `tools/test_server.py` on the owner's computer, so a session can run tests itself. It's off at every launch, and can't be switched on from the server.
+**Test link** in Diagnostics connects the phone to `tools/test_server.py` on the owner's computer, so a session can run tests itself. [TEST_LINK.md](TEST_LINK.md) covers privacy, running the server and removing it. It's off at every launch, and can't be switched on from the server.
 
 - **Setup:** run `python3 tools/test_server.py serve`, which prints the address and token, and keeps files in `~/VibeLogTest`. Enter both in Diagnostics and turn on **Connect**. iOS asks for Local Network permission the first time. The computer's firewall must allow port 8765.
-- **Commands:** `python3 tools/test_server.py send status`, `send set <name> <value>`, `send record <seconds> --wait`, `send stop`, `send controlTest`, `send zoomProbe`, `send sendLog`, `send listFiles` and `send sendFile <name>`. `set` takes lens, frameRate, codec, size, aspect, curve, gamut, pipeline, debayer, peaking, exposureOffset, shutter, iso, uncompressedAudio, saveGyro, captureTiming, fixedFrameTime, keepRecordingWhenHot, autoDuringTake and tools. A wrong value replies with the choices.
-- **Limits:** the app only acts on the fixed list in `App/TestCommands.swift`. Nothing there deletes a take. Only tools change during a take. Files wait until a take ends, and videos only go by `sendFile`. It's plain HTTP with a token, so it suits a private network only. The phone must be awake, with VibeLog open, and someone must point it at the scene.
-- **Cost:** one idle request stays open during a take, on its own queue. That's untested, so turn the link off for takes that prove frame counts until it has its own comparison.
+- **Commands:** `python3 tools/test_server.py send status`, `send set <name> <value>`, `send record <seconds> --wait` and the rest in [TEST_LINK.md](TEST_LINK.md). `set` takes lens, frameRate, codec, size, aspect, curve, gamut, pipeline, debayer, peaking, exposureOffset, shutter, iso, uncompressedAudio, saveGyro, captureTiming, fixedFrameTime, keepRecordingWhenHot, autoDuringTake, distortionCorrection, efficientWhenHot, isoAuto, frameGuide, fileTag, desqueeze, tools, method, encodeVideo, writeFrames, look, lut, lutMadeFor, freezeViewfinder, punch, stopAfter, whiteBalance, tint, focus and exposureBias. A wrong value replies with the choices.
+- **Limits:** the app only acts on the fixed list in `App/TestCommands.swift`. Nothing there deletes a take. Only tools, look and punch-in change during a take. Files wait until a take ends, and videos only go by `sendFile`. It's plain HTTP with a token, so it suits a private network only. The phone must be awake, with VibeLog open, and someone must point it at the scene.
+- **Cost:** one idle request stays open during a take, on its own queue. 40-second takes lost nothing with it connected, but no take has compared it with the link off.
+- **Proven:** it connected on the phone, ran these tests, and delivered logs, sidecars, gyro and timing files.
 
 ### Waiting on the phone
 
 Run these in order. The owner has limited time, so short tests come first, and the session log and sidecars should come back with the results.
 
-1. **Test link, once built:** connect it, then run `send status` and a 20-second `send record`. Do the log and sidecar arrive?
-2. **Presets, once built:** save, apply and overwrite one. **Stock** stays at the top with no **Delete**, and the name **Stock** can't be saved. **Set as default** from a row's menu, change the format, then reopen the app: it should open on that preset. Delete it by menu and by swipe; deleting the default returns to the last choices used. Do saved presets persist?
-3. **Gyro cost:** Does a 2-minute take with **Save gyro data** on show the same `DROP` as one with it off?
-4. **Decimal frame rates:** what does an editor report for a 23.98 and a 29.97 file? Files use each frame's real capture time, not a fixed grid. The `Frame timing:` log line shows what the sensor accepted.
-5. **ARRI Wide Gamut 3:** does the viewfinder look unchanged, and does the file read correctly when graded that way?
-6. **Fixed frame timing:** record 20 seconds each at 29.97 on the ultra wide and the tele, on a cool phone, with tools off. On `fc8fc51`, near 29.97 fps written with no duplicates means the fixed frame time should solve both lenses. On the next build, repeat this at 30 fps: `Frame timing:` should read 0.0333 to 0.0333. Also check that a 1-minute 1x take at 30 fps still holds in dim light, because the sensor can no longer stretch a frame.
-7. **Long test with tools off:** repeat `192944` with every monitoring tool off, starting cool, at 1x. It needs about 100 GB free. Does it keep all its frames once the GPU slows?
-8. **48mm RAW probe:** prop the phone on a still, detailed scene and tap **Run 48mm RAW probe** in Diagnostics. Each `48mm probe:` log line gives the real frame size, `35mm=` focal length, and `field=`. `cropped` at 2x with 4032x3024 frames would mean true 48mm RAW is available. `same` means RAW ignores the zoom, and `gaps` shows how fast 8064x6048 is if it works. If neither works, 2x falls back to a digital crop limited to about 1080p.
-9. **Ultra wide capture timing:** turn on **Log capture timing** in Diagnostics and record 20 seconds on the ultra wide at 1/120 s. The `Capture timing:` log line shows frame gaps, how long requests took and how long the camera wasn't ready. Many `held` counts mean the app's requests are waiting on the camera. Few `held` with gaps of 33 and 67 ms mean the camera skips frames it was asked for. Send the `.timing.csv` too.
+1. **Presets, once built:** save, apply and overwrite one. **Stock** stays at the top with no **Delete**, and the name **Stock** can't be saved. **Set as default** from a row's menu, change the format, then reopen the app: it should open on that preset. Delete it by menu and by swipe; deleting the default returns to the last choices used. Do saved presets persist?
+2. **Decimal frame rates:** what does an editor report for a 23.98 and a 29.97 file? Files use each frame's real capture time, not a fixed grid. The `Frame timing:` log line shows what the sensor accepted.
+3. **ARRI Wide Gamut 3:** does the viewfinder look unchanged, and does the file read correctly when graded that way?
+4. **Long test on `a2d2cab`:** 10 minutes at 1x, ProRes 422 HQ, Maximum quality, starting at nominal heat, once with tools and once without. Try **Efficient** next, from a fully cool phone. `210133` showed the viewfinder yield doesn't protect a Maximum quality take, and the earlier Efficient run kept every frame for 10:12. If Efficient holds, consider switching to its direct path when hot. If the yield keeps failing, remove it, because it nearly freezes the viewfinder for no gain. It needs about 100 GB per take, and the link can run it.
+5. **48mm RAW probe:** prop the phone on a still, detailed scene and tap **Run 48mm RAW probe** in Diagnostics. Each `48mm probe:` log line gives the real frame size, `35mm=` focal length, and `field=`. `cropped` at 2x with 4032x3024 frames would mean true 48mm RAW is available. `same` means RAW ignores the zoom, and `gaps` shows how fast 8064x6048 is if it works. If neither works, 2x falls back to a digital crop limited to about 1080p.
 
 For vignette correction, also ask for a short RAW clip's `reference.dng` and `reference_metadata.json`. Turn off **Encode video** in Diagnostics to record one.
 
@@ -134,8 +151,8 @@ For vignette correction, also ask for a short RAW clip's `reference.dng` and `re
 - **Color space:** a picker in Settings under Image, always shown. Each choice names what it pairs with, so Apple Log's lack of a gamut of its own shows by omission. Choosing a gamut other than Rec.2020 sets its curve. The saved `nativeGamut` setting then follows the curve: Apple Log falls back to Rec.2020, and S-Log3 or LogC3 return to their own gamut. `Gamut.fromRec2020` builds each matrix from published primaries, and the pipeline multiplies it after the DNG matrix, which adds no GPU work. The Rec.709 monitor LUT and still export follow the setting. Sidecars and `still.json` name the gamut, and the file's own tag stays nominal Rec.2020 because it can't name these gamuts. The `.cube` conversion LUTs receive the recorded gamut, and stills keep the file name `log_rec2020.png` either way.
 - **Needs samples first:** vignette correction needs a real `reference.dng` to find the `FixVignetteRadial` values, and highlight reconstruction needs clips with clipped highlights. Color accuracy needs a chart. Any real-time GPU work then needs a frame-cost test.
 - **Needs the phone:** lens tests, the stabilization check and focus while recording.
-- **Focus peaking sensitivity:** Low keeps the old threshold of 0.1 and High uses 0.05, set in Settings under Viewfinder. It's a `MonitorParams` field, so it adds no GPU work. Unbuilt and untested.
-- **Settings pauses the stream:** opening Settings stops the stream, unless a take is running, and closing it resumes. Opening Diagnostics resumes it for good, because its tools need it. Looks and LUTs therefore can't be previewed behind the sheet. Unbuilt and untested.
+- **Focus peaking sensitivity:** Low keeps the old threshold of 0.1 and High uses 0.05, set in Settings under Viewfinder. It's a `MonitorParams` field, so it adds no GPU work. Untested on the phone.
+- **Settings pauses the stream:** opening Settings stops the stream, unless a take is running, and closing it resumes. Opening Diagnostics resumes it for good, because its tools need it. Looks and LUTs therefore can't be previewed behind the sheet. Untested on the phone.
 - **Not started:** shutter priority, which needs an ISO loop during capture and its own frame-cost test, auto exposure with an EV slider, external microphones and file tagging options.
 
 ### How the camera screen works
