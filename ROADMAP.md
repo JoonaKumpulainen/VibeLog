@@ -30,12 +30,13 @@ Everything added from here on follows these rules, so the app stays one instrume
 |---|---|
 | A setting changed between shots | The format panel, as a list entry or a new column |
 | A setting changed rarely | Settings, in the section it belongs to, with search terms |
+| A setting only needed for fine tuning | **Advanced** in Settings, with what replaces it when hot beside it |
 | A value changed while shooting | The control bar. It holds four values, so a fifth needs one to leave |
 | A way to adjust a control bar value | That value's dial, as a tray button |
 | A monitoring aid | `Tool`, which adds it to the MON tray and the tool row. Add a dial button if it serves one control |
 | A live reading | The tray during a take, or a status line if it's worth a permanent line |
 | Something that could spoil a take | A warning chip while it's a risk, and a notice card when it happens |
-| A test or measurement | Diagnostics, never the camera screen |
+| A test or measurement | Diagnostics, under **Advanced**, never the camera screen |
 
 Only one thing occupies the tray at a time. Status keeps three lines on each side of the Dynamic Island, so a new line has to replace one.
 
@@ -55,6 +56,7 @@ Each setting has one home. Settings can link to the format panel, but never repe
 - Give it an accessibility label and value.
 - Respect Reduce Motion for any animation.
 - Say what it costs. Anything adding real-time GPU work follows the Phase 6 rule below and gets a test on the phone.
+- Decide if a new setting belongs in presets, and add it to "What presets keep" in the handoff. It's in if it describes how you work, and out if it belongs to the shot in front of the camera.
 - Update this file, the handoff and the README in the same change.
 
 ## Pipelines
