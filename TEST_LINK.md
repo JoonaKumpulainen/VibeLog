@@ -32,23 +32,26 @@ Data only goes to the server you entered, and only while **Connect** is on.
 
 | Data | When it's sent | What's in it |
 |---|---|---|
-| Status replies | On each command | Lens, format, tools, frame rate, heat, battery, free storage, the last take's result |
-| Session log | After each take, or by command, with **Send logs and sidecars** on | Phone model, iOS version, camera settings, errors, take names and times |
+| Status replies | On each command | Lens, format, exposure, white balance, focus and tools, which screen is open, preset names, LUT name, frame rate, heat, battery, free storage, the last take's result |
+| File lists | When the server asks | The names of files in those five folders, which include the date and time of each take |
+| Session log | After each take with **Send logs and sidecars** on, or whenever the server asks | Phone model, iOS version, camera settings, battery, heat, free storage, errors, take names and times |
 | Sidecars (`.json`) | After each take, with **Send logs and sidecars** on | The take's format, settings and frame counts |
-| Gyro logs (`.gcsv`) | After each take, with **Send gyro and timing files** on | How the phone moved during the take |
+| Gyro logs (`.gcsv`) | After each take, with **Send gyro and timing files** on, or by name | How the phone moved during the take |
 | Capture timing (`.timing.csv`) | After each take, with the same switch on, if **Log capture timing** is on | Timing of each frame request |
 | Preview pictures and saved stills | Only when the server asks | What the camera sees at that moment |
 | RAW clip references | Only when the server asks | One RAW frame of the newest clip, and its metadata |
 | Videos and any other listed file | Only when the server asks for one by name | The full video and its sound |
 
-Turning off the two **Send** switches stops the automatic files. It doesn't stop the server asking for a file by name, so turn off **Connect** if you don't want that.
+No location is sent, because the app doesn't record it. Video files can still hold whatever the camera saw and the microphone heard.
+
+Turning off the two **Send** switches stops the automatic files. It doesn't stop the server asking for a file by name, or for a log, preview or status, so turn off **Connect** if you don't want that.
 
 Traffic is **plain HTTP**. The token controls who may connect, but nothing is encrypted, so anyone able to watch your network could read the token and the data. That's why it belongs on a network you trust.
 
 ## What stays on each device
 
 - **Phone:** the server address and token stay in `VibeLog.config.json` in the VibeLog folder, as plain text. They can be read in the Files app, and they go into any phone backup.
-- **Computer:** `~/VibeLogTest` holds everything received, the token and `replies.jsonl`, which is a log of every reply, including status.
+- **Computer:** `~/VibeLogTest` holds everything received, including previews and any fetched videos, plus the token, `replies.jsonl`, which is a log of every reply, including status, and each suite's `suite_*.csv` and `heat_*.csv`. It stays there until you delete it.
 
 Nothing is sent to the VibeLog project or to anyone else.
 
@@ -176,7 +179,7 @@ This builds an app with no network code and no Local Network permission. Recordi
 ### 1. Delete these files
 
 ```bash
-git rm App/TestLink.swift App/TestCommands.swift Modules/VLCore/TestLinkMessages.swift tools/test_server.py
+git rm -r App/TestLink.swift App/TestCommands.swift Modules/VLCore/TestLinkMessages.swift tools/test_server.py tools/suites
 ```
 
 ### 2. Remove the permission
