@@ -1,0 +1,8 @@
+[
+  {"cool": 30},
+  {"set": {"lens": "1x", "pipeline": "maximum", "uncompressedAudio": true, "distortionCorrection": false, "fixedFrameTime": true, "shutter": "auto", "tools": "falseColor,peaking,grid,center,level,frameGuide", "efficientWhenHot": true, "bilinearWhenHot": true}},
+  {"set": {"disconnectAppPreview": true}},
+  {"wait": 5},
+  {"take": 600, "label": "Apple's preview disconnected"},
+  {"set": {"disconnectAppPreview": false}}
+]

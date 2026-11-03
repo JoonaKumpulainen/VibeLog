@@ -55,6 +55,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var stopAfterSeconds = 0.0
     public var logCurve = "Apple Log"
     public var nativeGamut = false
+    /// Each curve records its own gamut, so either choice sets the other.
+    public var pairsGamut = true
     public var pipeline = "maximum"
     public var debayer = "Malvar-He-Cutler"
     public var exposureOffset = -0.5
@@ -110,6 +112,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         stopAfterSeconds = read(.stopAfterSeconds, defaults.stopAfterSeconds)
         logCurve = read(.logCurve, defaults.logCurve)
         nativeGamut = read(.nativeGamut, defaults.nativeGamut)
+        pairsGamut = read(.pairsGamut, defaults.pairsGamut)
         pipeline = read(.pipeline, defaults.pipeline)
         debayer = read(.debayer, defaults.debayer)
         exposureOffset = read(.exposureOffset, defaults.exposureOffset)

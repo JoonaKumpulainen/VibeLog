@@ -97,14 +97,24 @@ public enum EncoderProbe {
         CVPixelBufferLockBaseAddress(buffer, [])
         defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
         var noise = UInt32(truncatingIfNeeded: seed &* 2_654_435_761 &+ 1)
-        for plane in 0..<CVPixelBufferGetPlaneCount(buffer) {
-            guard let base = CVPixelBufferGetBaseAddressOfPlane(buffer, plane) else { continue }
-            let stride = CVPixelBufferGetBytesPerRowOfPlane(buffer, plane)
-            let rows = CVPixelBufferGetHeightOfPlane(buffer, plane)
+        // Packed AYCbCr has no planes, and its alpha stays opaque as it does in a take.
+        let packed = CVPixelBufferGetPixelFormatType(buffer) == kCVPixelFormatType_4444AYpCbCr16
+        let planes: [(UnsafeMutableRawPointer?, Int, Int)] = packed
+            ? [(CVPixelBufferGetBaseAddress(buffer), CVPixelBufferGetBytesPerRow(buffer), CVPixelBufferGetHeight(buffer))]
+            : (0..<CVPixelBufferGetPlaneCount(buffer)).map {
+                (CVPixelBufferGetBaseAddressOfPlane(buffer, $0), CVPixelBufferGetBytesPerRowOfPlane(buffer, $0),
+                 CVPixelBufferGetHeightOfPlane(buffer, $0))
+            }
+        for (base, stride, rows) in planes {
+            guard let base else { continue }
             let columns = stride / 2
             for y in 0..<rows {
                 let row = (base + y * stride).assumingMemoryBound(to: UInt16.self)
                 for x in 0..<columns {
+                    if packed && x % 4 == 0 {
+                        row[x] = .max
+                        continue
+                    }
                     noise = noise &* 1_664_525 &+ 1_013_904_223
                     let wave = (x &* 3 &+ y &* 5 &+ seed &* 40) & 511
                     let value = 256 + wave + Int((noise >> 28) & 15)

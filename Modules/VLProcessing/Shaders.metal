@@ -75,11 +75,33 @@ static inline float encodeLogC3(float x) {
     return 5.367655 * x + 0.092809;
 }
 
+static inline float encodeSLog2(float x) {
+    x = x / 0.9 * 155.0 / 219.0;
+    float y = x >= 0.0 ? 0.432699 * log10(x + 0.037584) + 0.646596 : x * 5.0 + 0.030001222851889303;
+    return (y * 876.0 + 64.0) / 1023.0;
+}
+
+static inline float encodeLogC4(float x) {
+    if (x >= -0.01805699611991131) return (log2(2231.8263090676883 * x + 64.0) - 6.0) / 14.0 * 0.9071358748778103 + 0.09286412512218964;
+    return (x + 0.01805699611991131) / 0.1135972086105891;
+}
+
+static inline float encodeCanonLog3(float x) {
+    x = x / 0.9;
+    if (x < -0.014) return -0.36726845 * log10(-x * 14.98325 + 1.0) + 0.12783901;
+    if (x <= 0.014) return 1.9754798 * x + 0.12512219;
+    return 0.36726845 * log10(x * 14.98325 + 1.0) + 0.12240537;
+}
+
+// Matches LogCurve's raw values.
 static inline float encodeLog(float x, uint curve) {
     switch (curve) {
         case 0:
         case 3: return encodeAppleLog(x);
         case 1: return encodeSLog3(x);
+        case 4: return encodeSLog2(x);
+        case 5: return encodeLogC4(x);
+        case 6: return encodeCanonLog3(x);
         default: return encodeLogC3(x);
     }
 }
@@ -224,6 +246,34 @@ kernel void processDirect(texture2d<ushort, access::read> raw [[texture(0)]],
     float cb = (rgb.b - y) / 1.8814;
     float cr = (rgb.r - y) / 1.4746;
     chroma.write(float4(msbAligned(512.0 + 896.0 * cb), msbAligned(512.0 + 896.0 * cr), 0.0, 0.0), gid);
+}
+
+// One 4:4:4 pixel as 16-bit AYCbCr, for ProRes 4444. Codes keep their fraction, so the
+// encoder gets its full 12 bits rather than 10. Video range is the 10-bit range scaled by 64.
+static inline float4 packedPixel(float3 rgb) {
+    float y = rec2020Luma(rgb);
+    float cb = (rgb.b - y) / 1.8814;
+    float cr = (rgb.r - y) / 1.4746;
+    float3 codes = clamp(float3(64.0 + 876.0 * y, 512.0 + 896.0 * cb, 512.0 + 896.0 * cr), 4.0, 1019.0);
+    return float4(1.0, codes * 64.0 / 65535.0);
+}
+
+kernel void encodePacked(texture2d<float, access::sample> image [[texture(0)]],
+                         texture2d<float, access::write> packed [[texture(1)]],
+                         constant CropParams &crop [[buffer(0)]],
+                         uint2 gid [[thread_position_in_grid]]) {
+    float2 uv = crop.uvOffset + crop.uvScale * (float2(gid) + 0.5) / float2(packed.get_width(), packed.get_height());
+    packed.write(packedPixel(saturate(logSample(image, uv))), gid);
+}
+
+// The efficient path for packed 4:4:4: one thread per pixel, the same math as processDirect.
+kernel void processDirectPacked(texture2d<ushort, access::read> raw [[texture(0)]],
+                                texture2d<float, access::write> packed [[texture(1)]],
+                                constant ProcessParams &u [[buffer(0)]],
+                                constant DirectParams &d [[buffer(1)]],
+                                uint2 gid [[thread_position_in_grid]]) {
+    int2 size = int2(raw.get_width(), raw.get_height());
+    packed.write(packedPixel(saturate(logPixel(raw, int2(gid) + d.sourceOrigin, size, u))), gid);
 }
 
 struct VertexOut {

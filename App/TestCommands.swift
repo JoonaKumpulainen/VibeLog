@@ -193,6 +193,7 @@ extension AppModel {
             "elapsed": String(recordElapsed), "lens": currentLensLabel,
             "codec": encoderPreset.id, "size": encoderSize.label, "aspect": widescreen ? "16:9" : "4:3",
             "frameRate": frameRateLabel, "curve": processing.curve.label, "gamut": processing.gamut.label,
+            "pairsGamut": String(processing.pairsGamut),
             "pipeline": processing.pipeline.rawValue, "tools": toolsLabel,
             "fixedFrameTime": String(fixedFrameTime), "uncompressedAudio": String(pcmAudio),
             "distortionCorrection": String(distortionCorrection),
@@ -204,6 +205,7 @@ extension AppModel {
             "queueMs": String(format: "%.1f", pipelineStats.queueMs),
             "drawMs": String(format: "%.1f", pipelineStats.drawMs),
             "saveGyro": String(saveGyroLog), "captureTiming": String(logCaptureTiming),
+            "disconnectAppPreview": String(disconnectAppPreview), "appPreview": appPreviewConnected ? "connected" : "disconnected",
             "fps": String(format: "%.2f", stats.rollingFPS), "drops": String(takeDrops),
             "gpuMs": String(format: "%.1f", pipelineStats.gpuRecentMs),
             "thermal": status.thermal, "battery": status.battery, "freeGB": String(status.freeDiskGB),
@@ -239,6 +241,7 @@ extension AppModel {
         case "aspect": return pick(["4:3", "16:9"], { $0 }) { widescreen = $0 == "16:9" }
         case "curve": return pick(LogCurve.allCases, \.label) { processing.curve = $0 }
         case "gamut": return pick(Gamut.allCases, \.label) { processing.gamut = $0 }
+        case "pairsGamut": return flag { processing.pairsGamut = $0 }
         case "pipeline": return pick(PipelineMode.allCases, \.rawValue) { processing.pipeline = $0 }
         case "debayer": return pick(DemosaicMethod.allCases, \.label) { processing.demosaic = $0 }
         case "peaking": return pick(PeakingSensitivity.allCases, \.rawValue) { processing.peakingSensitivity = $0 }
@@ -278,6 +281,7 @@ extension AppModel {
             return nil
         case "method": return pick(CaptureMethod.allCases, \.rawValue) { method = $0 }
         case "encodeVideo": return flag { recordEncoded = $0 }
+        case "disconnectAppPreview": return flag { disconnectAppPreview = $0 }
         case "writeFrames": return flag { writeFrames = $0 }
         case "look": return pick(MonitorMode.allCases, \.rawValue) { processing.monitor = $0 }
         case "lut":

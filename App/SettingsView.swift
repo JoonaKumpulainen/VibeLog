@@ -87,7 +87,7 @@ struct SettingsView: View {
     private static let desqueezeTerms = "anamorphic desqueeze squeeze lens"
     private static let viewfinderTerms = [lookTerms, lutTerms, pauseTerms, peakingTerms, guideTerms, desqueezeTerms].joined(separator: " ")
     private static let offsetTerms = "exposure offset stops brightness baked"
-    private static let gamutTerms = "color colour space gamut native s-gamut3 s-log3 arri wide logc3 awg3 rec.2020"
+    private static let gamutTerms = "color colour space gamut native pair sync s-gamut3 s-gamut s-log3 s-log2 arri wide logc3 logc4 awg3 awg4 canon cinema rec.2020"
     private static let tagTerms = "file tag color colour rec.709 rec.2020 hlg editor"
     private static let processingTerms = "pipeline debayer demosaic quality processing efficient bilinear malvar hot advanced"
     private static let distortionTerms = "lens distortion correction ultra wide advanced"
@@ -146,7 +146,7 @@ struct SettingsView: View {
         Section {
             ForEach(model.presets) { presetRow($0) }
                 .onDelete { model.deletePresets(at: $0) }
-            Button("Save current format") {
+            Button("Save current settings") {
                 presetName = ""
                 namingPreset = true
             }
@@ -164,7 +164,7 @@ struct SettingsView: View {
         } message: {
             Text("Keeps every setting except the test link. A name in use is replaced.")
         }
-        .confirmationDialog("Reset all settings?", isPresented: $confirmingReset, titleVisibility: .visible) {
+        .alert("Reset all settings?", isPresented: $confirmingReset) {
             Button("Reset", role: .destructive) { model.resetSettings() }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -198,6 +198,8 @@ struct SettingsView: View {
             }
             .buttonStyle(.borderless)
             Menu {
+                Button("Update to current settings") { model.update(preset) }
+                    .disabled(model.isCurrent(preset))
                 Button(isDefault ? "Remove default" : "Set as default") {
                     model.defaultPreset = isDefault ? "" : preset.name
                 }
@@ -332,7 +334,8 @@ struct SettingsView: View {
 
     private var gamutDetail: String {
         guard let curve = model.processing.gamut.curve else {
-            return "Apple Log, S-Log3 and LogC3 can record this. Apple Log 2 can't, so choosing this from it moves to Apple Log."
+            if model.processing.pairsGamut { return "Sets the log curve to Apple Log, which records Rec.2020." }
+            return "Every curve but Apple Log 2 can record this. Apple Log 2 can't, so choosing this from it moves to Apple Log."
         }
         return "Sets the log curve to \(curve.label), which this gamut belongs to."
     }
@@ -354,6 +357,11 @@ struct SettingsView: View {
                     ForEach(Gamut.allCases) { Text($0.pairedLabel).tag($0) }
                 } label: {
                     explained("Color space", gamutDetail)
+                }
+                Toggle(isOn: $model.processing.pairsGamut) {
+                    explained(
+                        "Pair curve and color space",
+                        "Choosing a log curve also chooses its color space, and the other way round. Off, any curve can record Rec.2020.")
                 }
             }
             if matches(Self.tagTerms) {

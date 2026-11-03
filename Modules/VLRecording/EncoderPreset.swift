@@ -50,6 +50,9 @@ public struct EncoderPreset: Identifiable, Hashable, Sendable {
     public let profile: String?
     public let bitrate: Int?
 
+    /// The color depth the encoder receives. ProRes 4444 is fed 16 bits and keeps 12.
+    public var bitDepth: Int { pixelFormat == kCVPixelFormatType_4444AYpCbCr16 ? 12 : 10 }
+
     public static let all: [EncoderPreset] = [
         EncoderPreset(
             id: "hevc420", label: "HEVC 10-bit 4:2:0", codec: .hevc,
@@ -69,9 +72,10 @@ public struct EncoderPreset: Identifiable, Hashable, Sendable {
         EncoderPreset(
             id: "prores422hq", label: "ProRes 422 HQ", codec: .proRes422HQ,
             pixelFormat: kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange, profile: nil, bitrate: nil),
+        // 16-bit input, so ProRes keeps its 12 bits of color. The alpha it carries is always opaque.
         EncoderPreset(
             id: "prores4444", label: "ProRes 4444", codec: .proRes4444,
-            pixelFormat: kCVPixelFormatType_444YpCbCr10BiPlanarVideoRange, profile: nil, bitrate: nil),
+            pixelFormat: kCVPixelFormatType_4444AYpCbCr16, profile: nil, bitrate: nil),
     ]
 
     func outputSettings(

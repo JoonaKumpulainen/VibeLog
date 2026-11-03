@@ -285,7 +285,7 @@ RESULT = re.compile(
     r" draw (?P<draw>[\d.]+) ms, viewfinder yields (?P<yields>\d+)")
 HEAT_FIELDS = [
     "time", "label", "thermal", "battery", "fps", "drops", "yields", "gpuMs", "copyMs", "queueMs", "drawMs", "freeGB",
-    "distortionCorrection", "efficientWhenHot"]
+    "distortionCorrection", "efficientWhenHot", "bilinearWhenHot", "appPreview"]
 RESULT_FIELDS = ["label", "seconds", "thermal_end", *RESULT.groupindex, "result"]
 
 

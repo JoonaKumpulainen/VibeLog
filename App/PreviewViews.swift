@@ -3,9 +3,13 @@ import MetalKit
 import SwiftUI
 import VLProcessing
 
-/// The ISP preview from the capture session.
+/// The ISP preview from the capture session. Hidden, it stays connected and keeps working;
+/// disconnected, it leaves the session, which never changes during a take.
 struct SessionPreview: UIViewRepresentable {
     let session: AVCaptureSession
+    var hidden = false
+    var connected = true
+    var holdsState = false
 
     final class PreviewView: UIView {
         override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
@@ -21,13 +25,18 @@ struct SessionPreview: UIViewRepresentable {
 
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
-        view.previewLayer.session = session
+        view.previewLayer.session = connected ? session : nil
         view.previewLayer.videoGravity = .resizeAspect
         view.backgroundColor = .black
+        view.isHidden = hidden
         return view
     }
 
     func updateUIView(_ view: PreviewView, context: Context) {
+        view.isHidden = hidden
+        if !holdsState, connected != (view.previewLayer.session != nil) {
+            view.previewLayer.session = connected ? session : nil
+        }
         view.setNeedsLayout()
     }
 }

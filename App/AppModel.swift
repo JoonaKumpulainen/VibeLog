@@ -10,10 +10,14 @@ import VLRecording
 extension LogCurve {
     var shortLabel: String {
         switch self {
+        // Each brand's own spelling, in capitals. Apple has no short name of its own.
         case .appleLog: return "ALOG"
-        case .sLog3: return "SLOG3"
-        case .logC3: return "LOGC3"
         case .appleLog2: return "ALOG2"
+        case .sLog3: return "S-LOG3"
+        case .sLog2: return "S-LOG2"
+        case .logC3: return "LOGC3"
+        case .logC4: return "LOGC4"
+        case .canonLog3: return "C-LOG3"
         }
     }
 }
@@ -85,6 +89,8 @@ final class AppModel: ObservableObject {
     @Published var pipelineStats = PipelineStats()
 
     @Published var recordEncoded = true
+    /// Measures what Apple's preview costs while hidden. It resets at launch, like the other tests.
+    @Published var disconnectAppPreview = false
     /// Saves when each photo was requested and arrived, beside each encoded take.
     @Published var logCaptureTiming = false
     /// The best preset proven at full size on an iPhone 14 Pro at 30 fps.
@@ -316,6 +322,9 @@ final class AppModel: ObservableObject {
 
     var showsFullView: Bool { fullView && widescreen }
 
+    /// Apple's preview leaves the session while the Metal monitor replaces it, if Diagnostics asks.
+    var appPreviewConnected: Bool { !disconnectAppPreview || !monitorIsProcessed }
+
     /// The Metal monitor is on screen, rather than the ISP preview.
     var monitorIsProcessed: Bool {
         method.isPhoto && processing.enabled && processing.monitor != .isp
@@ -404,6 +413,7 @@ final class AppModel: ObservableObject {
         config.stopAfterSeconds = recordSeconds
         config.logCurve = processing.curve.label
         config.nativeGamut = processing.nativeGamut
+        config.pairsGamut = processing.pairsGamut
         config.pipeline = processing.pipeline.rawValue
         config.debayer = processing.demosaic.label
         config.exposureOffset = processing.exposureStops
@@ -467,6 +477,8 @@ final class AppModel: ObservableObject {
         if FrameRates.all.contains(saved.frameRate) { frameRate = saved.frameRate }
         recordSeconds = saved.stopAfterSeconds
         processing.curve = LogCurve.allCases.first { $0.label == saved.logCurve } ?? processing.curve
+        // Before the saved gamut choice, which turning pairing off would replace.
+        processing.pairsGamut = saved.pairsGamut
         processing.nativeGamut = saved.nativeGamut
         processing.pipeline = PipelineMode(rawValue: saved.pipeline) ?? processing.pipeline
         processing.demosaic = DemosaicMethod.allCases.first { $0.label == saved.debayer } ?? processing.demosaic
@@ -512,6 +524,11 @@ final class AppModel: ObservableObject {
         } else {
             presets.append(saved)
         }
+    }
+
+    /// Keeps the name, place and default, with the current choices.
+    func update(_ saved: FormatPreset) {
+        savePreset(named: saved.name)
     }
 
     func deletePresets(at offsets: IndexSet) {
@@ -1199,6 +1216,8 @@ final class AppModel: ObservableObject {
             "tools": toolsLabel,
             "frameTime": fixedFrameTime ? "fixed" : "variable at 30 fps",
             "distortionCorrection": distortionCorrection ? "on" : "off, so the lens's distortion stays in the picture",
+            "bitDepth": String(encoderPreset.bitDepth),
+            "appPreview": appPreviewConnected ? "connected" : "disconnected",
             "fileTag": fileTag.label,
             "desqueeze": processing.desqueeze == 1 ? "off" : String(processing.desqueeze),
             "hotPath": processing.efficientWhenHot ? "Efficient when hot" : "stays on the chosen pipeline",
@@ -1246,7 +1265,7 @@ final class AppModel: ObservableObject {
             isRecording = true
             let seconds = takeSeconds ?? recordSeconds
             takeSeconds = nil
-            Log.shared.info("Encoding \(name): lens \(currentLensLabel), \(encoderPreset.label) \(outputSize.label) at \(frameRateLabel) fps, frame time \(metadata["frameTime"] ?? "?"), audio \(metadata["audio"] ?? "?"), gyro \(metadata["gyroLog"] ?? "?"), tools \(toolsLabel), exposure \(metadata["exposureDuringTake"] ?? "?"), white balance \(metadata["whiteBalanceDuringTake"] ?? "?"), \(processing.curve.label), \(processing.pipeline.label) pipeline, \(seconds > 0 ? "\(seconds)s" : "until stopped"), battery \(SystemStatus.batteryText), thermal \(SystemStatus.thermalName), free \(SystemStatus.freeDisk / 1_000_000_000) GB")
+            Log.shared.info("Encoding \(name): lens \(currentLensLabel), \(encoderPreset.label) \(encoderPreset.bitDepth)-bit \(outputSize.label) at \(frameRateLabel) fps, frame time \(metadata["frameTime"] ?? "?"), audio \(metadata["audio"] ?? "?"), gyro \(metadata["gyroLog"] ?? "?"), tools \(toolsLabel), exposure \(metadata["exposureDuringTake"] ?? "?"), white balance \(metadata["whiteBalanceDuringTake"] ?? "?"), \(processing.curve.label), \(processing.pipeline.label) pipeline, \(seconds > 0 ? "\(seconds)s" : "until stopped"), battery \(SystemStatus.batteryText), thermal \(SystemStatus.thermalName), free \(SystemStatus.freeDisk / 1_000_000_000) GB")
             guard seconds > 0 else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self, weak encoder] in
                 guard let self, let encoder, self.activeEncoder === encoder else { return }

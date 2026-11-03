@@ -1,0 +1,10 @@
+[
+  {"cool": 30},
+  {"set": {"lens": "1x", "pipeline": "maximum", "uncompressedAudio": true, "distortionCorrection": false, "fixedFrameTime": true, "shutter": "auto", "tools": "falseColor,peaking,grid,center,level,frameGuide", "disconnectAppPreview": false}},
+  {"set": {"efficientWhenHot": true, "bilinearWhenHot": false}},
+  {"take": 600, "label": "Efficient when hot, Bilinear when hot off"},
+  {"cool": 30},
+  {"set": {"efficientWhenHot": false, "bilinearWhenHot": true}},
+  {"take": 600, "label": "Efficient when hot off, Bilinear when hot"},
+  {"set": {"efficientWhenHot": true, "bilinearWhenHot": true}}
+]

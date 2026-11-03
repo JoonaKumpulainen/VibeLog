@@ -261,12 +261,27 @@ final class LogCurveTests: XCTestCase {
         XCTAssertEqual(LogCurve.appleLog.encode(0.18), 0.4882724585, accuracy: 1e-8)
         XCTAssertEqual(LogCurve.sLog3.encode(0.18), 420.0 / 1023, accuracy: 1e-9)
         XCTAssertEqual(LogCurve.logC3.encode(0.18), 0.3910068, accuracy: 1e-6)
+        // colour-science's examples for each.
+        XCTAssertEqual(LogCurve.sLog2.encode(0.18), 0.3395325, accuracy: 1e-6)
+        XCTAssertEqual(LogCurve.logC4.encode(0.18), 0.2783958, accuracy: 1e-6)
+        XCTAssertEqual(LogCurve.canonLog3.encode(0.18), 0.3433894, accuracy: 1e-6)
     }
 
     func testPublishedCodeValues() {
         XCTAssertEqual(LogCurve.sLog3.encode(0) * 1023, 95, accuracy: 1e-6)
         XCTAssertEqual(LogCurve.sLog3.encode(0.9) * 1023, 598, accuracy: 1)
         XCTAssertEqual(LogCurve.logC3.encode(0), 0.092809, accuracy: 1e-9)
+        XCTAssertEqual(LogCurve.sLog2.encode(0) * 1023, 90, accuracy: 0.5)
+        XCTAssertEqual(LogCurve.sLog2.encode(0.9) * 1023, 582, accuracy: 0.5)
+        XCTAssertEqual(LogCurve.logC4.encode(0), 95.0 / 1023, accuracy: 1e-9)
+        XCTAssertEqual(LogCurve.canonLog3.encode(0), 0.12512219, accuracy: 1e-9)
+    }
+
+    func testEveryCurveRisesThroughItsShadows() {
+        for curve in LogCurve.allCases {
+            let samples = stride(from: -0.02, through: 0.05, by: 0.001).map(curve.encode)
+            XCTAssertTrue(zip(samples, samples.dropFirst()).allSatisfy { $0 <= $1 }, "\(curve)")
+        }
     }
 
     func testRoundTrips() {
@@ -279,7 +294,7 @@ final class LogCurveTests: XCTestCase {
 
     func testCurvesAreContinuousAtTheirKnees() {
         for curve in LogCurve.allCases {
-            for knee in [0.01, 0.01125, 0.010591] {
+            for knee in [0.01, 0.01125, 0.010591, 0, 0.0126, -0.0126, -0.018057] {
                 XCTAssertEqual(curve.encode(knee - 1e-7), curve.encode(knee + 1e-7), accuracy: 1e-4, "\(curve)")
             }
         }
@@ -421,6 +436,8 @@ final class PipelineGPUTests: XCTestCase {
         let pipeline = try makePipeline()
         var settings = ProcessingSettings()
         settings.exposureStops = 0
+        // Only the curve under test, in Rec.2020.
+        settings.pairsGamut = false
         for curve in LogCurve.allCases {
             for demosaic in DemosaicMethod.allCases {
                 settings.curve = curve
@@ -482,6 +499,36 @@ final class PipelineGPUTests: XCTestCase {
         XCTAssertEqual(chromaValue[1] >> 6, 512)
     }
 
+    /// Packed output keeps the fraction of a 10-bit code: 400.25 is 12-bit 1601, where 10 bits would round it.
+    func testPackedConversionKeepsTwelveBits() throws {
+        let pipeline = try makePipeline()
+        let device = pipeline.device
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .rgba16Unorm, width: 8, height: 8, mipmapped: false)
+        descriptor.usage = .shaderRead
+        let image = try XCTUnwrap(device.makeTexture(descriptor: descriptor))
+        let level = UInt16((336.25 / 876 * 65535).rounded())
+        let pixels = [UInt16](repeating: level, count: 8 * 8 * 4)
+        pixels.withUnsafeBytes {
+            image.replace(region: MTLRegionMake2D(0, 0, 8, 8), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: 64)
+        }
+        descriptor.usage = .shaderWrite
+        let packed = try XCTUnwrap(device.makeTexture(descriptor: descriptor))
+        let queue = try XCTUnwrap(device.makeCommandQueue())
+        let commands = try XCTUnwrap(queue.makeCommandBuffer())
+        XCTAssertTrue(pipeline.encodePacked(into: commands, image: image, packed: packed))
+        commands.commit()
+        commands.waitUntilCompleted()
+        XCTAssertEqual(commands.status, .completed)
+
+        var value: [UInt16] = [0, 0, 0, 0]
+        packed.getBytes(&value, bytesPerRow: 64, from: MTLRegionMake2D(4, 4, 1, 1), mipmapLevel: 0)
+        XCTAssertEqual(value[0], .max)
+        XCTAssertEqual(value[1] >> 4, 1601)
+        XCTAssertEqual(value[2] >> 4, 2048)
+        XCTAssertEqual(value[3] >> 4, 2048)
+    }
+
     /// Noisy Bayer data through both pipelines must give the same planes to within rounding.
     private func comparePipelines(
         lumaHeight: Int, chromaWidth: Int, chromaHeight: Int, demosaic: DemosaicMethod, curve: LogCurve
@@ -517,6 +564,8 @@ final class PipelineGPUTests: XCTestCase {
         let fullChroma = try plane(.rg16Unorm, chromaWidth, chromaHeight)
         let directLuma = try plane(.r16Unorm, size, lumaHeight)
         let directChroma = try plane(.rg16Unorm, chromaWidth, chromaHeight)
+        let fullPacked = try plane(.rgba16Unorm, size, lumaHeight)
+        let directPacked = try plane(.rgba16Unorm, size, lumaHeight)
         let image = try XCTUnwrap(device.makeTexture(
             descriptor: ProcessingPipeline.outputDescriptor(width: size, height: size)))
 
@@ -527,6 +576,9 @@ final class PipelineGPUTests: XCTestCase {
         XCTAssertTrue(pipeline.encodeYCbCr(into: commands, image: image, luma: fullLuma, chroma: fullChroma))
         XCTAssertTrue(pipeline.encodeDirect(
             into: commands, input: input, luma: directLuma, chroma: directChroma, cfa: .bggr, gains: gains))
+        XCTAssertTrue(pipeline.encodePacked(into: commands, image: image, packed: fullPacked))
+        XCTAssertTrue(pipeline.encodeDirectPacked(
+            into: commands, input: input, packed: directPacked, cfa: .bggr, gains: gains))
         commands.commit()
         commands.waitUntilCompleted()
         XCTAssertEqual(commands.status, .completed)
@@ -544,6 +596,14 @@ final class PipelineGPUTests: XCTestCase {
         let label = "\(demosaic) \(curve) \(lumaHeight) \(chromaWidth)x\(chromaHeight)"
         XCTAssertLessThanOrEqual(worstDifference(values(fullLuma, channels: 1), values(directLuma, channels: 1)), 1, label)
         XCTAssertLessThanOrEqual(worstDifference(values(fullChroma, channels: 2), values(directChroma, channels: 2)), 1, label)
+
+        // Packed 4:4:4: both paths agree, alpha is opaque, and luma matches the 10-bit plane.
+        let full = values(fullPacked, channels: 4)
+        let direct = values(directPacked, channels: 4)
+        XCTAssertLessThanOrEqual(worstDifference(full, direct), 1, label)
+        XCTAssertTrue(stride(from: 0, to: full.count, by: 4).allSatisfy { full[$0] == .max && direct[$0] == .max }, label)
+        let packedLuma = stride(from: 1, to: full.count, by: 4).map { full[$0] }
+        XCTAssertLessThanOrEqual(worstDifference(packedLuma, values(fullLuma, channels: 1)), 1, label)
     }
 
     func testEfficientPipelineMatchesAt422() throws {
@@ -741,14 +801,70 @@ final class VideoEncoderTests: XCTestCase {
         XCTAssertTrue(EncoderSize.all.allSatisfy { $0.widescreen.height % 2 == 0 })
     }
 
-    func testPresetsAreUniqueAnd10Bit() {
+    func testPresetsAreUniqueWithKnownFormats() {
         XCTAssertEqual(Set(EncoderPreset.all.map(\.id)).count, EncoderPreset.all.count)
         let formats: Set<OSType> = [
             kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange,
             kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange,
             kCVPixelFormatType_444YpCbCr10BiPlanarVideoRange,
+            kCVPixelFormatType_4444AYpCbCr16,
         ]
         XCTAssertTrue(EncoderPreset.all.allSatisfy { formats.contains($0.pixelFormat) })
+        XCTAssertEqual(EncoderPreset.all.filter { $0.bitDepth == 12 }.map(\.id), ["prores4444"])
+    }
+
+    /// A gradient finer than 10 bits must come back from a ProRes 4444 file with its in-between steps.
+    func testProRes4444FileKeepsTwelveBits() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
+        let preset = try XCTUnwrap(EncoderPreset.all.first { $0.id == "prores4444" })
+        let encoder: VideoEncoder
+        do {
+            encoder = try VideoEncoder(config: .init(
+                url: url, preset: preset, size: EncoderSize(width: 256, height: 64), audio: false, realTime: false))
+        } catch {
+            throw XCTSkip("\(preset.label) is not available here: \(error)")
+        }
+        for index in 0..<4 {
+            let buffer = try XCTUnwrap(encoder.nextPixelBuffer())
+            XCTAssertEqual(CVPixelBufferGetPixelFormatType(buffer), kCVPixelFormatType_4444AYpCbCr16)
+            CVPixelBufferLockBaseAddress(buffer, [])
+            let base = try XCTUnwrap(CVPixelBufferGetBaseAddress(buffer))
+            let stride = CVPixelBufferGetBytesPerRow(buffer)
+            for y in 0..<64 {
+                let row = (base + y * stride).assumingMemoryBound(to: UInt16.self)
+                for x in 0..<256 {
+                    // Luma climbs one 12-bit step per column, a quarter of a 10-bit code.
+                    row[x * 4] = .max
+                    row[x * 4 + 1] = UInt16(1600 + x) << 4
+                    row[x * 4 + 2] = 2048 << 4
+                    row[x * 4 + 3] = 2048 << 4
+                }
+            }
+            CVPixelBufferUnlockBaseAddress(buffer, [])
+            encoder.append(buffer, at: CMTime(value: Int64(index), timescale: 30))
+        }
+        let result = await withCheckedContinuation { continuation in
+            encoder.finish { continuation.resume(returning: $0) }
+        }
+        if result.failure != nil { throw XCTSkip("Encoder failed here: \(result.failure ?? "")") }
+
+        let asset = AVURLAsset(url: url)
+        let track = try XCTUnwrap(try await asset.loadTracks(withMediaType: .video).first)
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_4444AYpCbCr16,
+        ])
+        reader.add(output)
+        XCTAssertTrue(reader.startReading())
+        let sample = try XCTUnwrap(output.copyNextSampleBuffer())
+        let decoded = try XCTUnwrap(CMSampleBufferGetImageBuffer(sample))
+        CVPixelBufferLockBaseAddress(decoded, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(decoded, .readOnly) }
+        let row = try XCTUnwrap(CVPixelBufferGetBaseAddress(decoded))
+            .advanced(by: 32 * CVPixelBufferGetBytesPerRow(decoded)).assumingMemoryBound(to: UInt16.self)
+        let lumaSteps = Set((16..<240).map { Int(row[$0 * 4 + 1]) >> 4 })
+        // 224 columns span 56 10-bit codes. Many more distinct levels means 12 bits survived.
+        XCTAssertGreaterThan(lumaSteps.count, 150, "\(lumaSteps.count) distinct luma levels")
     }
 
     func testWriterAcceptsBothAudioFormats() throws {
@@ -789,6 +905,35 @@ final class VideoEncoderTests: XCTestCase {
         let asset = AVURLAsset(url: url)
         let tracks = try await asset.loadTracks(withMediaType: .video)
         XCTAssertEqual(tracks.count, 1)
+    }
+
+    /// Editors read the rate from the track, so a 23.98 file must not come out as 24.
+    func testDecimalRateFileReadsAsDecimal() async throws {
+        for fps in [24000.0 / 1001, 30000.0 / 1001] {
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
+            let preset = EncoderPreset.all[0]
+            let encoder: VideoEncoder
+            do {
+                encoder = try VideoEncoder(config: .init(
+                    url: url, preset: preset, size: EncoderSize(width: 640, height: 480), frameRate: fps,
+                    audio: false, realTime: false))
+            } catch {
+                throw XCTSkip("\(preset.label) is not available here: \(error)")
+            }
+            // Capture times on the nanosecond clock, as the pipeline gives them.
+            for index in 0..<48 {
+                let buffer = try XCTUnwrap(encoder.nextPixelBuffer())
+                encoder.append(buffer, at: CMTime(seconds: 1000 + Double(index) / fps, preferredTimescale: 1_000_000_000))
+            }
+            let result = await withCheckedContinuation { continuation in
+                encoder.finish { continuation.resume(returning: $0) }
+            }
+            if result.failure != nil { throw XCTSkip("Encoder failed here: \(result.failure ?? "")") }
+            let track = try XCTUnwrap(try await AVURLAsset(url: url).loadTracks(withMediaType: .video).first)
+            let (scale, rate) = try await track.load(.naturalTimeScale, .nominalFrameRate)
+            XCTAssertEqual(scale, FrameRates.mediaTimeScale(fps))
+            XCTAssertEqual(Double(rate), fps, accuracy: 0.005)
+        }
     }
 }
 
@@ -920,6 +1065,10 @@ final class ExposureScalesTests: XCTestCase {
         XCTAssertTrue(FrameRates.frameTime(24000.0 / 1001) == (1001, 24000))
         XCTAssertTrue(FrameRates.frameTime(30000.0 / 1001) == (1001, 30000))
         XCTAssertTrue(FrameRates.frameTime(25) == (1, 25))
+        for fps in FrameRates.all {
+            let time = FrameRates.frameTime(fps)
+            XCTAssertEqual(Int64(FrameRates.mediaTimeScale(fps)) * time.value % Int64(time.timescale), 0)
+        }
     }
 
     func testDecimalRatesKeepShutterLabelsUnique() {
@@ -1218,6 +1367,7 @@ final class GamutTests: XCTestCase {
     func testPrimariesLandOnTheirOwnAxis() {
         let cases: [(Gamut, Double, Double)] = [
             (.sGamut3, 0.730, 0.280), (.arriWideGamut3, 0.6840, 0.3130), (.appleWideGamut, 0.725, 0.301),
+            (.sGamut, 0.730, 0.280), (.arriWideGamut4, 0.7347, 0.2653), (.cinemaGamut, 0.74, 0.27),
         ]
         for (gamut, x, y) in cases {
             let red = gamut.fromRec2020 * ColorMath.xyzToRec2020 * xyz(x, y)
@@ -1237,6 +1387,7 @@ final class GamutTests: XCTestCase {
 
     func testNativeGamutFollowsTheCurve() {
         var settings = ProcessingSettings()
+        settings.pairsGamut = false
         settings.curve = .sLog3
         XCTAssertEqual(settings.gamut, .rec2020)
         settings.nativeGamut = true
@@ -1247,8 +1398,43 @@ final class GamutTests: XCTestCase {
         XCTAssertEqual(settings.gamut, .rec2020)
     }
 
+    func testPairingMakesEitherChoiceSetTheOther() {
+        var settings = ProcessingSettings()
+        XCTAssertTrue(settings.pairsGamut)
+        for curve in LogCurve.allCases {
+            settings.curve = curve
+            XCTAssertEqual(settings.gamut, curve.nativeGamut, "\(curve)")
+        }
+        for gamut in Gamut.allCases {
+            settings.gamut = gamut
+            XCTAssertEqual(settings.curve.nativeGamut, gamut, "\(gamut)")
+        }
+        settings.gamut = .rec2020
+        XCTAssertEqual(settings.curve, .appleLog)
+    }
+
+    func testTurningPairingOffKeepsThePair() {
+        var settings = ProcessingSettings()
+        settings.curve = .logC4
+        settings.pairsGamut = false
+        XCTAssertEqual(settings.gamut, .arriWideGamut4)
+        settings.gamut = .rec2020
+        XCTAssertEqual(settings.curve, .logC4)
+        XCTAssertEqual(settings.gamut, .rec2020)
+    }
+
+    func testEveryGamutAndCurvePairBothWays() {
+        for gamut in Gamut.allCases {
+            if let curve = gamut.curve { XCTAssertEqual(curve.nativeGamut, gamut) }
+        }
+        for curve in LogCurve.allCases where curve.nativeGamut != .rec2020 {
+            XCTAssertEqual(curve.nativeGamut.curve, curve)
+        }
+    }
+
     func testChoosingAGamutSetsItsCurve() {
         var settings = ProcessingSettings()
+        settings.pairsGamut = false
         settings.gamut = .arriWideGamut3
         XCTAssertEqual(settings.curve, .logC3)
         XCTAssertEqual(settings.gamut, .arriWideGamut3)

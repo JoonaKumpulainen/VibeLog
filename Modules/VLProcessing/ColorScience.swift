@@ -51,9 +51,12 @@ public enum ColorMath {
 /// The primaries a log image can be recorded in, all with a D65 white.
 public enum Gamut: String, CaseIterable, Identifiable, Sendable {
     case rec2020
-    case sGamut3
-    case arriWideGamut3
     case appleWideGamut
+    case sGamut3
+    case sGamut
+    case arriWideGamut3
+    case arriWideGamut4
+    case cinemaGamut
 
     public var id: String { rawValue }
 
@@ -63,6 +66,9 @@ public enum Gamut: String, CaseIterable, Identifiable, Sendable {
         case .sGamut3: return "S-Gamut3"
         case .arriWideGamut3: return "ARRI Wide Gamut 3"
         case .appleWideGamut: return "Apple Wide Gamut"
+        case .sGamut: return "S-Gamut"
+        case .arriWideGamut4: return "ARRI Wide Gamut 4"
+        case .cinemaGamut: return "Cinema Gamut"
         }
     }
 
@@ -73,6 +79,9 @@ public enum Gamut: String, CaseIterable, Identifiable, Sendable {
         case .sGamut3: return .sLog3
         case .arriWideGamut3: return .logC3
         case .appleWideGamut: return .appleLog2
+        case .sGamut: return .sLog2
+        case .arriWideGamut4: return .logC4
+        case .cinemaGamut: return .canonLog3
         }
     }
 
@@ -83,6 +92,9 @@ public enum Gamut: String, CaseIterable, Identifiable, Sendable {
         case .sGamut3: return "S-Gamut3 · S-Log3"
         case .arriWideGamut3: return "ARRI Wide Gamut 3 · LogC3"
         case .appleWideGamut: return "Apple Wide Gamut · Apple Log 2"
+        case .sGamut: return "S-Gamut · S-Log2"
+        case .arriWideGamut4: return "ARRI Wide Gamut 4 · LogC4"
+        case .cinemaGamut: return "Cinema Gamut · Canon Log 3"
         }
     }
 
@@ -93,6 +105,11 @@ public enum Gamut: String, CaseIterable, Identifiable, Sendable {
         case .sGamut3: return (SIMD2(0.730, 0.280), SIMD2(0.140, 0.855), SIMD2(0.100, -0.050))
         case .arriWideGamut3: return (SIMD2(0.6840, 0.3130), SIMD2(0.2210, 0.8480), SIMD2(0.0861, -0.1020))
         case .appleWideGamut: return (SIMD2(0.725, 0.301), SIMD2(0.221, 0.814), SIMD2(0.068, -0.076))
+        // The same primaries as S-Gamut3, named apart because each goes with its own curve.
+        case .sGamut: return (SIMD2(0.730, 0.280), SIMD2(0.140, 0.855), SIMD2(0.100, -0.050))
+        case .arriWideGamut4: return (SIMD2(0.7347, 0.2653), SIMD2(0.1424, 0.8576), SIMD2(0.0991, -0.0308))
+        // Green's y above 1 is Canon's published value.
+        case .cinemaGamut: return (SIMD2(0.74, 0.27), SIMD2(0.17, 1.14), SIMD2(0.08, -0.10))
         }
     }
 
@@ -117,6 +134,9 @@ extension LogCurve {
         case .sLog3: return .sGamut3
         case .logC3: return .arriWideGamut3
         case .appleLog2: return .appleWideGamut
+        case .sLog2: return .sGamut
+        case .logC4: return .arriWideGamut4
+        case .canonLog3: return .cinemaGamut
         }
     }
 }

@@ -126,6 +126,11 @@ public struct ProcessingSettings: Equatable, Sendable {
     public var curve = LogCurve.appleLog
     /// Records the curve's own gamut, when it has one, instead of Rec.2020.
     public var nativeGamut = false
+    /// Keeps each curve in its own gamut, so choosing either one chooses the other. Turning it off
+    /// keeps the pair on screen, rather than falling back to Rec.2020.
+    public var pairsGamut = true {
+        didSet { if oldValue, !pairsGamut { nativeGamut = true } }
+    }
     public var demosaic = DemosaicMethod.malvar
     public var monitor = MonitorMode.rec709
     public var peakingSensitivity = PeakingSensitivity.low
@@ -137,15 +142,16 @@ public struct ProcessingSettings: Equatable, Sendable {
     /// so -0.5 stops places it near 0.18. This is from a single measurement.
     public var exposureStops = -0.5
 
-    /// Choosing a gamut other than Rec.2020 also chooses its curve.
+    /// Choosing a gamut other than Rec.2020 also chooses its curve. Paired, Rec.2020 chooses Apple
+    /// Log, the curve whose own gamut it is.
     public var gamut: Gamut {
         // Apple Log 2 is defined by its gamut, so it can't record Rec.2020. That's Apple Log.
-        get { nativeGamut || curve == .appleLog2 ? curve.nativeGamut : .rec2020 }
+        get { pairsGamut || nativeGamut || curve == .appleLog2 ? curve.nativeGamut : .rec2020 }
         set {
             nativeGamut = newValue != .rec2020
             if let paired = newValue.curve {
                 curve = paired
-            } else if curve == .appleLog2 {
+            } else if pairsGamut || curve == .appleLog2 {
                 curve = .appleLog
             }
         }
@@ -235,12 +241,25 @@ private struct DirectParams {
 
 /// The encoder buffer for one frame, wrapped as textures the GPU can write.
 private struct SinkFrame {
+    enum Planes {
+        /// 10-bit luma and chroma, MSB-aligned in 16 bits.
+        case biplanar(luma: MTLTexture, chroma: MTLTexture)
+        /// 16-bit AYCbCr 4:4:4 in one plane, for ProRes 4444's 12 bits.
+        case packed(MTLTexture)
+
+        var width: Int {
+            switch self {
+            case .biplanar(let luma, _): return luma.width
+            case .packed(let packed): return packed.width
+            }
+        }
+    }
+
     var sink: VideoFrameSink
     var buffer: CVPixelBuffer
-    var wrappedLuma: CVMetalTexture
-    var wrappedChroma: CVMetalTexture
-    var luma: MTLTexture
-    var chroma: MTLTexture
+    /// Held until the GPU is done, so the cache doesn't reuse the textures.
+    var wrapped: [CVMetalTexture]
+    var planes: Planes
     var time: CMTime
 }
 
@@ -268,6 +287,8 @@ public final class ProcessingPipeline: NSObject {
     private let monitorKernelState: MTLComputePipelineState
     private let lumaState: MTLComputePipelineState
     private let chromaState: MTLComputePipelineState
+    private let packedState: MTLComputePipelineState
+    private let directPackedState: MTLComputePipelineState
     private let monitorState: MTLRenderPipelineState
     private let encodeQueue = DispatchQueue(label: "vibelog.process", qos: .userInitiated)
     private var textureCache: CVMetalTextureCache?
@@ -317,7 +338,9 @@ public final class ProcessingPipeline: NSObject {
                 let directKernel = library.makeFunction(name: "processDirect"),
                 let monitorKernel = library.makeFunction(name: "processMonitor"),
                 let lumaKernel = library.makeFunction(name: "encodeLuma"),
-                let chromaKernel = library.makeFunction(name: "encodeChroma")
+                let chromaKernel = library.makeFunction(name: "encodeChroma"),
+                let packedKernel = library.makeFunction(name: "encodePacked"),
+                let directPackedKernel = library.makeFunction(name: "processDirectPacked")
             else {
                 Log.shared.error("A pipeline shader is missing")
                 return nil
@@ -327,6 +350,8 @@ public final class ProcessingPipeline: NSObject {
             monitorKernelState = try device.makeComputePipelineState(function: monitorKernel)
             lumaState = try device.makeComputePipelineState(function: lumaKernel)
             chromaState = try device.makeComputePipelineState(function: chromaKernel)
+            packedState = try device.makeComputePipelineState(function: packedKernel)
+            directPackedState = try device.makeComputePipelineState(function: directPackedKernel)
             let descriptor = MTLRenderPipelineDescriptor()
             descriptor.vertexFunction = library.makeFunction(name: "monitorVertex")
             descriptor.fragmentFunction = library.makeFunction(name: "monitorFragment")
@@ -525,14 +550,20 @@ public final class ProcessingPipeline: NSObject {
         lock.unlock()
 
         // Stills and resized recordings need the full image.
-        let direct = efficient && (sinkFrame == nil || sinkFrame?.luma.width == input.width)
+        let direct = efficient && (sinkFrame == nil || sinkFrame?.planes.width == input.width)
         var image: MTLTexture?
         var still: (() -> Void)?
         var encoded: Bool
         if direct {
-            encoded = sinkFrame.map {
-                encodeDirect(into: commands, input: input, luma: $0.luma, chroma: $0.chroma, cfa: cfa,
-                             gains: capture.whiteBalanceGains)
+            encoded = sinkFrame.map { frame -> Bool in
+                switch frame.planes {
+                case .biplanar(let luma, let chroma):
+                    return encodeDirect(into: commands, input: input, luma: luma, chroma: chroma, cfa: cfa,
+                                        gains: capture.whiteBalanceGains)
+                case .packed(let packed):
+                    return encodeDirectPacked(into: commands, input: input, packed: packed, cfa: cfa,
+                                              gains: capture.whiteBalanceGains)
+                }
             } ?? true
             // Every other frame is enough for the monitor while recording.
             efficientFrames += 1
@@ -550,7 +581,12 @@ public final class ProcessingPipeline: NSObject {
             }
             encoded = encode(into: commands, input: input, output: output, cfa: cfa, gains: capture.whiteBalanceGains)
             if encoded, let sinkFrame {
-                encoded = encodeYCbCr(into: commands, image: output, luma: sinkFrame.luma, chroma: sinkFrame.chroma)
+                switch sinkFrame.planes {
+                case .biplanar(let luma, let chroma):
+                    encoded = encodeYCbCr(into: commands, image: output, luma: luma, chroma: chroma)
+                case .packed(let packed):
+                    encoded = encodePacked(into: commands, image: output, packed: packed)
+                }
             }
             still = encoded ? encodeStillReadback(commands, output: output, capture: capture) : nil
             image = output
@@ -566,7 +602,7 @@ public final class ProcessingPipeline: NSObject {
             let success = finished.status == .completed
             let appendStart = CACurrentMediaTime()
             if success, let sinkFrame {
-                withExtendedLifetime((sinkFrame.wrappedLuma, sinkFrame.wrappedChroma)) {}
+                withExtendedLifetime(sinkFrame.wrapped) {}
                 sinkFrame.sink.append(sinkFrame.buffer, at: sinkFrame.time)
             }
             let steps = FrameSteps(
@@ -609,10 +645,21 @@ public final class ProcessingPipeline: NSObject {
 
         func wrap(plane: Int, format: MTLPixelFormat) -> CVMetalTexture? {
             var texture: CVMetalTexture?
+            // A packed buffer has no planes, so plane sizes read as zero.
+            let planar = CVPixelBufferIsPlanar(buffer)
             let status = CVMetalTextureCacheCreateTextureFromImage(
-                nil, cache, buffer, nil, format, CVPixelBufferGetWidthOfPlane(buffer, plane),
-                CVPixelBufferGetHeightOfPlane(buffer, plane), plane, &texture)
+                nil, cache, buffer, nil, format,
+                planar ? CVPixelBufferGetWidthOfPlane(buffer, plane) : CVPixelBufferGetWidth(buffer),
+                planar ? CVPixelBufferGetHeightOfPlane(buffer, plane) : CVPixelBufferGetHeight(buffer), plane, &texture)
             return status == kCVReturnSuccess ? texture : nil
+        }
+        let time = CMTime(seconds: pts, preferredTimescale: 1_000_000_000)
+        if CVPixelBufferGetPixelFormatType(buffer) == kCVPixelFormatType_4444AYpCbCr16 {
+            guard let wrapped = wrap(plane: 0, format: .rgba16Unorm), let packed = CVMetalTextureGetTexture(wrapped) else {
+                logOnce("Cannot wrap the encoder's 16-bit pixel buffer as a texture")
+                return nil
+            }
+            return SinkFrame(sink: target, buffer: buffer, wrapped: [wrapped], planes: .packed(packed), time: time)
         }
         guard let wrappedLuma = wrap(plane: 0, format: .r16Unorm),
             let wrappedChroma = wrap(plane: 1, format: .rg16Unorm),
@@ -623,8 +670,8 @@ public final class ProcessingPipeline: NSObject {
             return nil
         }
         return SinkFrame(
-            sink: target, buffer: buffer, wrappedLuma: wrappedLuma, wrappedChroma: wrappedChroma,
-            luma: luma, chroma: chroma, time: CMTime(seconds: pts, preferredTimescale: 1_000_000_000))
+            sink: target, buffer: buffer, wrapped: [wrappedLuma, wrappedChroma],
+            planes: .biplanar(luma: luma, chroma: chroma), time: time)
     }
 
     /// The efficient path: writes the encoder's planes directly from the Bayer data, center
@@ -649,6 +696,30 @@ public final class ProcessingPipeline: NSObject {
         let height = max(directState.maxTotalThreadsPerThreadgroup / width, 1)
         encoder.dispatchThreads(
             MTLSize(width: chroma.width, height: chroma.height, depth: 1),
+            threadsPerThreadgroup: MTLSize(width: width, height: height, depth: 1))
+        encoder.endEncoding()
+        return true
+    }
+
+    /// The efficient path for packed 4:4:4, center cropping like `encodeDirect`.
+    @discardableResult
+    func encodeDirectPacked(
+        into commands: MTLCommandBuffer, input: MTLTexture, packed: MTLTexture, cfa: CFAPattern, gains: [Float]
+    ) -> Bool {
+        guard let encoder = commands.makeComputeCommandEncoder() else { return false }
+        var parameters = makeParameters(cfa: cfa, gains: gains)
+        var direct = DirectParams(
+            sourceOrigin: SIMD2(Int32((input.width - packed.width) / 2), Int32((input.height - packed.height) / 2)),
+            chromaStep: SIMD2(1, 1))
+        encoder.setComputePipelineState(directPackedState)
+        encoder.setTexture(input, index: 0)
+        encoder.setTexture(packed, index: 1)
+        encoder.setBytes(&parameters, length: MemoryLayout<ProcessParams>.stride, index: 0)
+        encoder.setBytes(&direct, length: MemoryLayout<DirectParams>.stride, index: 1)
+        let width = directPackedState.threadExecutionWidth
+        let height = max(directPackedState.maxTotalThreadsPerThreadgroup / width, 1)
+        encoder.dispatchThreads(
+            MTLSize(width: packed.width, height: packed.height, depth: 1),
             threadsPerThreadgroup: MTLSize(width: width, height: height, depth: 1))
         encoder.endEncoding()
         return true
@@ -694,6 +765,26 @@ public final class ProcessingPipeline: NSObject {
                 MTLSize(width: target.width, height: target.height, depth: 1),
                 threadsPerThreadgroup: MTLSize(width: width, height: height, depth: 1))
         }
+        encoder.endEncoding()
+        return true
+    }
+
+    /// Converts a log image to packed 16-bit AYCbCr 4:4:4. Separate so tests can use plain textures.
+    @discardableResult
+    func encodePacked(into commands: MTLCommandBuffer, image: MTLTexture, packed: MTLTexture) -> Bool {
+        guard let encoder = commands.makeComputeCommandEncoder() else { return false }
+        var crop = Self.centerCrop(
+            imageAspect: Float(image.width) / Float(image.height),
+            targetAspect: Float(packed.width) / Float(packed.height))
+        encoder.setComputePipelineState(packedState)
+        encoder.setTexture(image, index: 0)
+        encoder.setTexture(packed, index: 1)
+        encoder.setBytes(&crop, length: MemoryLayout<CropParams>.stride, index: 0)
+        let width = packedState.threadExecutionWidth
+        let height = max(packedState.maxTotalThreadsPerThreadgroup / width, 1)
+        encoder.dispatchThreads(
+            MTLSize(width: packed.width, height: packed.height, depth: 1),
+            threadsPerThreadgroup: MTLSize(width: width, height: height, depth: 1))
         encoder.endEncoding()
         return true
     }

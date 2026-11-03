@@ -112,6 +112,7 @@ public final class VideoEncoder: VideoFrameSink {
         }
         videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
         videoInput.expectsMediaDataInRealTime = config.realTime
+        videoInput.mediaTimeScale = FrameRates.mediaTimeScale(config.frameRate)
         videoInput.transform = CGAffineTransform(rotationAngle: CGFloat(config.rotationDegrees) * .pi / 180)
         guard writer.canAdd(videoInput) else { throw Failure.unsupportedSettings }
         writer.add(videoInput)

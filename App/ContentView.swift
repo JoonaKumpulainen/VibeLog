@@ -98,7 +98,10 @@ struct CameraScreen: View {
     /// three quarters of the sensor height, which is the picture's width.
     private func viewfinder(_ size: CGSize) -> some View {
         ZStack {
-            SessionPreview(session: model.camera.session)
+            // Apple's picture would show until the first Metal draw, so it stays hidden behind it.
+            SessionPreview(
+                session: model.camera.session, hidden: model.monitorIsProcessed,
+                connected: model.appPreviewConnected, holdsState: model.isRecording)
             if let pipeline = model.pipeline, model.monitorIsProcessed {
                 ProcessedMonitor(pipeline: pipeline)
             }

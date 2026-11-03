@@ -17,6 +17,12 @@ public enum FrameRates {
         let whole = Int32(fps.rounded())
         return isDecimal(fps) ? (1001, whole * 1000) : (1, whole)
     }
+
+    /// The video track's ticks per second. A decimal frame lasts a whole 1001 ticks at this scale,
+    /// where the writer's default of 600 rounds 23.98 to 24 and 29.97 to 30.
+    public static func mediaTimeScale(_ fps: Double) -> Int32 {
+        Int32(fps.rounded()) * 1000
+    }
 }
 
 /// Holds a set shutter by moving ISO toward the camera's metered exposure.

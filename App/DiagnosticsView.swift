@@ -94,6 +94,15 @@ struct DiagnosticsView: View {
                 if model.recordEncoded {
                     Toggle("Log capture timing", isOn: $model.logCaptureTiming)
                 }
+                Toggle(isOn: $model.disconnectAppPreview) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Disconnect Apple's preview")
+                        Text("Takes the hidden preview off the camera while VibeLog's own viewfinder shows, to measure its heat. It stays connected for the ISP preview look.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .disabled(model.isRecording)
             }
         }
         .onAppear { model.diagnosticsOpened() }
