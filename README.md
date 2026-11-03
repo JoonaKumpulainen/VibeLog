@@ -2,7 +2,7 @@
 
 See [ROADMAP.md](ROADMAP.md) for the plan.
 
-iPhone 14 Pro camera app, working towards RAW Bayer capture processed on the GPU and recorded as log video. **Phase 1 only answers one question: can we get a continuous RAW stream, and how fast?**
+iPhone 14 Pro camera app that captures 12 MP RAW Bayer frames at up to 30 fps, processes them on the GPU and records log video in ProRes or HEVC, or a look baked in. The goal is the full quality of the sensor, and where quality and convenience conflict, quality wins. [HANDOFF.md](HANDOFF.md) records what's been proven on the phone.
 
 ## Install on the phone
 
@@ -22,13 +22,13 @@ Turn the ring/silent switch to silent first. On iOS 17 the shutter sound is only
 
 The camera opens live, and the controls turn to match how you hold the phone, even with the rotation lock on. Recordings carry the hold they started in, so they play upright.
 
-Status sits in the corners beside the Dynamic Island. Beneath the picture are the tray, the four values and the record row. **ISO**, **SHUTTER**, **WB** and **FOCUS** open a dial that snaps to common values. On a dial, **FINE** switches to fine steps and **AUTO** hands the value back to the camera. The **SHUTTER** dial's **180°** sets a shutter of half the frame time. The **WB** dial also sets tint, and the **FOCUS** dial has punch-in, which opens on the last focus point and moves with a drag, and **PEAK**, which marks sharp detail in cyan. **FORMAT** opens slidable columns for codec, chroma, size, log curve, aspect and frame rate, including 23.98 and 29.97. Amber values were set by you, **A** means automatic and a lock means frozen for the take. **EV** shows any exposure offset, and tapping it resets the offset. **MON** swaps the tool row for the monitor look and tools. The thumbnail plays the last take, and back from there are all your takes, each with its details, **Share** and **Delete**. **Select** or a long press deletes takes from the grid, along with their details. The takes and player turn with the phone. After 2 minutes untouched, the camera pauses to save heat and a tap wakes it, which you can change under Viewfinder in Settings. At 16:9, the expand button in the tool row gives a larger picture with only record, the clock and status. Tap the picture to focus and meter there, then drag to set exposure. Pinch or tap the lens value to switch camera. Settings pauses the camera while it's open, unless a take is running, and **Focus peaking sensitivity** is there under Viewfinder, with the **GUIDE** tool's frame guide and anamorphic desqueeze. With a set shutter, **AUTO** on the **ISO** dial gives shutter priority, and **EV** on that dial sets where auto exposure aims. **File tag** under Image sets what the file tells an editor.
+Status sits in the corners beside the Dynamic Island. Beneath the picture are the tray, the four values and the record row. **ISO**, **SHUTTER**, **WB** and **FOCUS** open a dial that snaps to common values. On a dial, **FINE** switches to fine steps and **AUTO** hands the value back to the camera. The **SHUTTER** dial's **180°** sets a shutter of half the frame time. The **WB** dial also sets tint, and the **FOCUS** dial has punch-in, which opens on the last focus point and moves with a drag, and **PEAK**, which marks sharp detail in cyan. **FORMAT** opens slidable columns for codec, chroma, size, log curve, aspect and frame rate: 24, 25 or 30. Amber values were set by you, **A** means automatic and a lock means frozen for the take. **EV** shows any exposure offset, and tapping it resets the offset. **MON** swaps the tool row for the monitor tools, and its **LOOK** opens the look panel: a carousel of LOG, REC.709, ACES 2.0, ACES 1.3 and your LUTs, each shown on the picture as it reaches the middle, with **BAKE** in the header to record that look into takes. **Cancel** puts back what was there and **Select** keeps it. The thumbnail plays the last take, and back from there are all your takes, each with its details, **Share** and **Delete**. **Select** or a long press deletes takes from the grid, along with their details. The takes and player turn with the phone. After 2 minutes untouched, the camera pauses to save heat and a tap wakes it, which you can change under Viewfinder in Settings. At 16:9, the expand button in the tool row gives a larger picture with only record, the clock and status. Tap the picture to focus and meter there, then drag to set exposure. Pinch or tap the lens value to switch camera. Settings pauses the camera while it's open, unless a take is running, and **Focus peaking sensitivity** is there under Viewfinder, with the **GUIDE** tool's frame guide and anamorphic desqueeze. With a set shutter, **AUTO** on the **ISO** dial gives shutter priority, and **EV** on that dial sets where auto exposure aims. **File tag** under Image sets what the file tells an editor.
 
 **Presets** in Settings save and recall how you work: every setting except the test link. They don't keep what belongs to a shot, such as lens, shutter, ISO, white balance or focus. Any preset can be the default the app opens with, and without one the app opens on your last choices. **Reset all settings** returns everything to the app's own values, keeping presets, takes and the test link. Settings and toolbar choices save to `VibeLog.config.json` in the VibeLog folder. You can edit it in the Files app, and missing keys take their defaults.
 
 During a recording you can change ISO, shutter, white balance and the monitor tools. Focus and exposure drag are off, because focus changes lost frames in testing. Everything else is locked until recording stops. Exposure and white balance freeze at the start of a take unless **Auto exposure and white balance during a take** is on, which keeps them following the scene and lets **AUTO** work on those dials. Auto never picks a shutter slower than one frame, but it can flicker under mains lights.
 
-**Advanced** in Settings holds the pipeline, debayer and lens distortion correction, and each of the first two has a switch for what replaces it when the phone is hot. **Diagnostics** is inside it:
+**Advanced** in Settings holds the pipeline, debayer and lens distortion correction, and each of the first two has a switch for what replaces it when the phone is hot. **Efficient when hot** is on and **Bilinear when hot** is off by default, which held 10 minutes at serious heat with full detail. **12-bit ProRes 4444** feeds ProRes 4444 16 bits, so it keeps 12 bits of color, at about the same size. **Color spaces and LUTs** sets which color space each curve records, which curve each color space records, and a LUT for each curve, all kept in presets. **Diagnostics** is inside it too:
 
 | Tool | What it does |
 |---|---|
@@ -37,6 +37,7 @@ During a recording you can change ISO, shutter, white balance and the monitor to
 | **Run control test** | Records 56 seconds and changes focus and exposure on a schedule. Each change is logged with frame and failure counts. |
 | **Run probe** | Logs every camera, format and RAW type, checks RAW availability for each session setup, tries Bayer formats on the video output, and scans AVCapture for RAW-related selectors. Saves `probes/probe_*.txt`. Takes up to a few minutes. |
 | **Test link** | Connects to `tools/test_server.py` on your computer, which can change settings, start takes and collect logs. It can't delete takes, and it's off at every launch. Use it on your own network only. [TEST_LINK.md](TEST_LINK.md) covers privacy, the server and removing it. |
+| **Disconnect Apple's preview** | Takes the hidden ISP preview off the camera while VibeLog's own viewfinder shows, to measure its heat. Off at every launch. |
 | **Fixed frame time at 30 fps** | Holds the sensor at 1/30 s. Off lets it stretch to 1/15 s, as older builds did. |
 | **Start stream** / **Stop stream** | Starts or stops the selected method without saving. |
 | **Encode video** | Off records a RAW dump to `clips/clip_*/`. Turn off **Write frames to disk** to measure capture speed alone. |
@@ -55,25 +56,27 @@ Methods:
 
 Photo methods feed a GPU pipeline: black level, white balance, debayer, camera RAW to linear Rec.2020 using the DNG's color matrices, exposure, then a log curve. **Pipeline** is **Maximum quality** by default; **Efficient** does the same math with less GPU work, as described in the roadmap. **Monitor** shows the result in Rec.709, decoded per pixel on the GPU, as plain log, or switches back to the ISP preview. **Save still** saves the next processed frame to `stills/`. The overlay's `gpu` line shows the time per frame and any frames the pipeline dropped.
 
-The log image is Rec.2020 with the chosen curve by default. **Color space** in Settings can record Apple Wide Gamut, S-Gamut3 or ARRI Wide Gamut 3 instead, which also sets the matching curve, and the sidecar names the gamut. Curve constants match colour-science's implementations of the vendor formulas.
+Curves are Apple Log, Apple Log 2, S-Log3, S-Log2, LogC3, LogC4 and Canon Log 3. **Pair curve and color space**, on by default, records each in its own color space: Rec.2020, Apple Wide Gamut, S-Gamut3.Cine (S-Log3's default, with S-Gamut3 also available), S-Gamut, ARRI Wide Gamut 3 and 4, or Cinema Gamut. Choosing either sets the other, and **Color space** under Image picks directly. The sidecar names both. Curve constants match colour-science's implementations of the vendor formulas.
 
 ## Encoding
 
-With **Encode video** on, recording writes the log image to `videos/video_*.mov` with microphone audio, plus a `.json` sidecar naming the curve and gamut. **Run encoder test** benchmarks every codec and size on synthetic frames, without the camera, and saves `probes/encoders_*.txt`. Support differs by phone, so check that before trusting a preset.
+With **Encode video** on, recording writes the log image to `videos/video_*.mov` with stereo microphone audio, plus a `.json` sidecar naming the curve, gamut, look, and the take's shutter, ISO and white balance with how each behaved. **Run encoder test** benchmarks every codec and size on synthetic frames, without the camera, and saves `probes/encoders_*.txt`. Support differs by phone, so check that before trusting a preset.
 
 The default is ProRes 422 HQ at 4032x3024. On an iPhone 14 Pro it recorded 60 seconds at about 30 fps, using about 160 MB/s or 9.5 GB per minute. HEVC only just reaches 30 fps at this size even with nothing else running.
 
-The file is tagged Rec.2020, but its transfer tag is nominal. Apply the log curve named in the sidecar when grading.
+The file is tagged Rec.2020, but its transfer tag is nominal. Apply the log curve named in the sidecar when grading. **File tag** under Image can tag Rec.709 instead, which also encodes in Rec.709's YCbCr matrix. A baked take is a finished Rec.709 picture, tagged so, with no log kept: **Bake** switches the codec to HEVC 4:2:0, about 25 to 30 MB/s against 160 for ProRes 422 HQ, and greys out **Color space**.
 
 ## Long recordings and monitoring
 
-**Stop after** defaults to **Never** and goes up to 30 minutes. Recording stops safely if the thermal state turns critical or less than 10 GB is free, because writes slow down on a nearly full phone. Files are written in 10-second fragments, so a killed app should lose only the last few seconds. **Freeze viewfinder during a take** freezes the preview to save power and heat. **Uncompressed audio** records 24-bit PCM instead of AAC. **Save gyro data** writes a `.gcsv` beside each take, which Gyroflow finds by itself when you open the video. **Bilinear when hot** and **Slow viewfinder when hot** switch to the bilinear debayer and a slower monitor once the thermal state is serious.
+**Stop after** defaults to **Never** and goes up to 30 minutes. Recording stops safely if the thermal state turns critical or less than 10 GB is free, because writes slow down on a nearly full phone. Files are written in 10-second fragments, so a killed app should lose only the last few seconds. **Freeze viewfinder during a take** freezes the preview to save power and heat. **Stereo audio**, on by default, records left and right from the built-in microphones, with a meter for each. **Uncompressed audio** records 24-bit PCM instead of AAC. **Save gyro data** writes a `.gcsv` beside each take, which Gyroflow finds by itself when you open the video. **Efficient when hot**, **Bilinear when hot** and **Slow viewfinder when hot** switch to the Efficient path, the bilinear debayer and a slower monitor once the thermal state is serious.
 
 On an iPhone 14 Pro, ProRes 422 HQ at full size with reduced load held 30 fps for over 8 minutes at serious thermal state. Without it, heat cut GPU speed and frames began to drop at 5 minutes. Recording near an empty battery can stall the encoder, so start with a good charge.
 
 **Aspect** records open gate, the sensor's full 4:3 frame, or a 16:9 center crop, and the monitor dims the area outside it. **Exposure tool** adds zebras where the sensor clips, or false color: blue is four stops under middle gray, green is middle gray, pink is about one stop over, yellow is well above that, and red is clipped. These show exposure of the signal, not of the graded image.
 
-**Import .cube LUT** replaces the Rec.709 monitor LUT, for monitoring only: it isn't baked into recordings. Set **LUT made for** to Log for conversion LUTs, which take the recorded log image in the chosen curve and gamut, or to Rec.709 for look LUTs, which are applied after the built-in Rec.709 conversion. 3D LUTs up to size 129 work; 1D LUTs do not.
+**Import .cube LUT** adds a LUT to the viewfinder's looks, and with **Bake** on, to the file. Set **LUT made for** to Log for conversion LUTs, which take the recorded log image in the chosen curve and gamut, or to Rec.709 for look LUTs, which are applied after the built-in Rec.709 view. 3D LUTs up to size 129 work; 1D LUTs do not. The built-in **ACES 2.0** and **ACES 1.3** looks are the Academy's Rec.709 output transforms, built on the phone for the curve and color space recorded, and always work on log.
+
+**Export** in the player writes a copy of a log take with a look baked in, after a preview with a time slider: the Rec.709 view, an ACES look or a LUT, in HEVC 4:2:0 or ProRes 422 HQ, tagged Rec.709, with the take's audio. The copy is `videos/video_*_look.mov`, and the take itself isn't changed.
 
 ## Files (Files app > On My iPhone > VibeLog)
 
@@ -82,6 +85,7 @@ benchmarks.csv              one row per recording
 logs/session_*.log
 probes/probe_*.txt
 videos/video_*.mov          encoded log video with audio, plus .json and .gcsv
+videos/video_*_look.mov     an exported copy with a look baked in
 luts/                       imported .cube files
 stills/still_*/             log_rec2020.png (16-bit), rec709_half.png, still.json
 clips/clip_*/
@@ -105,7 +109,7 @@ python3 tools/inspect_clip.py path/to/clip_x --png frame.png
 |---|---|
 | `Modules/VLCore` | Frames, stats, DNG tag reader, logging, device status |
 | `Modules/VLCapture` | Session, capture methods, manual controls, audio, probe |
-| `Modules/VLProcessing` | Log curves, color math, monitor LUT, Metal pipeline, still export |
+| `Modules/VLProcessing` | Log curves, color math, Metal pipeline, looks and the ACES ports, export with look, still export |
 | `Modules/VLRecording` | RAW dump writer, video encoder, encoder benchmark |
 | `Modules/ObjCGuard` | Catches AVFoundation's Objective-C exceptions, runtime scan |
 | `App` | SwiftUI UI, overlay and wiring |

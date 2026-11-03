@@ -1,6 +1,6 @@
 # VibeLog handoff
 
-For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of early Phase 6. Phase 5 is built, and only a few phone checks remain. The latest build is `c459497`, which passed CI with 107 tests, one skipped because the simulator has no ProRes encoder, and hasn't been tested on the phone. Results from earlier builds are under **Session on `623c5a9`**. The latest phone results came from `021248e`. The last logged session came from `9f9a456`.
+For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of early Phase 6. Phase 5 is built, and only a few phone checks remain. The latest build is `ad509d3`, which passed CI with 120 tests, one skipped because the simulator has no ProRes encoder, and hasn't been tested on the phone. It holds everything under **New since `c459497`**; `c1e1041` in between had stereo and baking, and its phone results are below. Results from earlier builds are under **Session on `623c5a9`**. The latest phone results came from `021248e`. The last logged session came from `9f9a456`.
 
 ## What this is
 
@@ -28,10 +28,10 @@ An iPhone camera app that records full-sensor RAW frames, processes them on the 
 | `App/` | SwiftUI UI, `AppModel`, `FrameRouter`, camera screen, format panel, library, Settings, Diagnostics, `DesignTokens` |
 | `Modules/VLCore` | Frames, stats, DNG reader, RAW levels, logging, storage, device status, `VideoFrameSink`, `GyroLog` |
 | `Modules/VLCapture` | Session, photo RAW driver, video driver, manual controls, audio, `MotionLogger`, probe |
-| `Modules/VLProcessing` | Log curves, color math, monitor LUT, `.cube` parser, Metal pipeline, still export, `Shaders.metal` |
+| `Modules/VLProcessing` | Log curves, color math, `GamutPairing`, `.cube` parser, Metal pipeline with `LookParams`, `ACES2.swift`, `ACES13.swift`, `BuiltInLook`, `LookExporter`, still export, `Shaders.metal` |
 | `Modules/VLRecording` | RAW dump writer, `VideoEncoder`, encoder presets, encoder benchmark, `TakeLibrary` |
 | `Modules/ObjCGuard` | Catches Objective-C exceptions from AVFoundation, runtime scan |
-| `Tests/VLTests` | 107 tests, including real GPU tests on the simulator |
+| `Tests/VLTests` | 120 tests, including real GPU tests on the simulator |
 | `tools/inspect_clip.py` | Summarizes a RAW clip and exports a frame |
 | `tools/test_server.py` | The test link's server, which sends the phone commands and collects its files |
 
@@ -166,7 +166,7 @@ New additions follow the design rules in [ROADMAP.md](ROADMAP.md). `CameraGeomet
 **Test link** in Diagnostics connects the phone to `tools/test_server.py` on the owner's computer, so a session can run tests itself. [TEST_LINK.md](TEST_LINK.md) covers privacy, running the server and removing it. It's off at every launch, and can't be switched on from the server.
 
 - **Setup:** run `python3 tools/test_server.py serve`, which prints the address and token, and keeps files in `~/VibeLogTest`. `/home` on this machine has no room for clips, so `~/.vibelog_test_folder` points it at the larger drive. Enter both in Diagnostics and turn on **Connect**. iOS asks for Local Network permission the first time. The computer's firewall must allow port 8765.
-- **Commands:** `python3 tools/test_server.py send status`, `send set <name> <value>`, `send record <seconds> --wait` and the rest in [TEST_LINK.md](TEST_LINK.md). `set` takes lens, frameRate, codec, size, aspect, curve, gamut, pipeline, debayer, peaking, exposureOffset, shutter, iso, uncompressedAudio, saveGyro, captureTiming, fixedFrameTime, slowViewfinderWhenHot, bilinearWhenHot, autoDuringTake, distortionCorrection, efficientWhenHot, isoAuto, frameGuide, fileTag, desqueeze, tools, method, encodeVideo, writeFrames, look, lut, lutMadeFor, freezeViewfinder, disconnectAppPreview, pairsGamut, punch, stopAfter, whiteBalance, tint, focus and exposureBias. A wrong value replies with the choices.
+- **Commands:** `python3 tools/test_server.py send status`, `send set <name> <value>`, `send record <seconds> --wait` and the rest in [TEST_LINK.md](TEST_LINK.md). `set` takes lens, frameRate, codec, size, aspect, curve, gamut, pipeline, debayer, peaking, exposureOffset, shutter, iso, uncompressedAudio, saveGyro, captureTiming, fixedFrameTime, slowViewfinderWhenHot, bilinearWhenHot, autoDuringTake, distortionCorrection, efficientWhenHot, isoAuto, frameGuide, fileTag, desqueeze, tools, method, encodeVideo, writeFrames, look, lut, lutMadeFor, freezeViewfinder, disconnectAppPreview, pairsGamut, twelveBitProRes, bakeLook, stereoAudio, idlePauseMinutes, punch, stopAfter, whiteBalance, tint, focus and exposureBias. A wrong value replies with the choices. `lut` also takes `ACES 2.0` and `ACES 1.3`, and `frameRate` matches by label.
 - **Limits:** the app only acts on the fixed list in `App/TestCommands.swift`. Nothing there deletes a take. Only tools, look and punch-in change during a take. Files wait until a take ends, and videos only go by `sendFile`. It's plain HTTP with a token, so it suits a private network only. The phone must be awake, with VibeLog open, and someone must point it at the scene.
 - **Cost:** one idle request stays open during a take, on its own queue. 40-second takes lost nothing with it connected, but no take has compared it with the link off.
 - **Proven:** it connected on the phone, ran these tests, and delivered logs, sidecars, gyro and timing files.
@@ -195,7 +195,7 @@ New additions follow the design rules in [ROADMAP.md](ROADMAP.md). `CameraGeomet
 - **12-bit HEVC trial:** the encoder test also runs ProRes 4444 and HEVC 4:4:4 from 16-bit input, writes 12-bit detail into the frames, reads the first frame back, and reports `kept 12 bits` or `kept 10 bits`. Run it with the link's `encoderTest` and read the `Encoder test:` lines. A **12-bit HEVC** switch follows only if HEVC keeps 12.
 - **Viewfinder math on the GPU:** the Rec.709 look no longer uses the 33-point LUT, whose error differed by curve, up to 19/255 for LogC4. `monitorDisplay` in the shader decodes the curve, converts the gamut to Rec.709 and applies the same highlight roll-off per pixel, matching `MonitorTransform.display`, and a GPU test checks the two agree within one 8-bit step for every curve. It's a few more operations per drawable pixel, so check `draw` time in a take against earlier figures, about 6 ms. A custom `.cube` still goes through its own LUT. The look is now called **Rec.709**.
 
-### New since `c459497`, not built
+### New since `c459497`, built as `c1e1041` and `ad509d3`, untested on the phone
 
 - **Stereo audio:** **Stereo audio** under Recording, on by default and kept in presets. `AudioCapture` asks iOS 18 for the built-in microphones' stereo mode (`AVCaptureDeviceInput.multichannelAudioMode = .stereo`), and the writer records 2 channels, AAC at 384 kbps or 24-bit PCM at about 1 GB an hour. Off records mono as before. If the microphone gives mono anyway, the writer converts, and the `Audio format:` log line shows what arrived. Which side is left in each landscape hold is unknown: the channels are recorded as the microphone gives them. The owner wants it on by default if it works.
 - **Two level meters:** left and right bars, each with its letter inside, dark where the bar is lit and faint where it isn't, turning upright with the hold. Mono shows the same level on both. `AudioLevels.channelPeaks` in `VLCore` reads each channel.
@@ -211,12 +211,35 @@ New additions follow the design rules in [ROADMAP.md](ROADMAP.md). `CameraGeomet
 - **The screen shifted left during takes:** the owner's screenshot from `c459497`, with seven tools on, showed the picture, status and tray moved about 36 points left, cut off at the right. During a take the mic meter replaces the lenses in the tray, and the row's even split let the tools take about 41 points each before the meter claimed its 132, so the row ran about 50 points past the screen. The HUD then widened the screen's stack, and centering it moved everything, the picture included. Now the meter is sized first with `layoutPriority`, its minimum is 96 points, and the HUD is fixed to the screen's size, so no row can move the picture again. Not built.
 - **Focus peaking thresholds:** the owner found peaking too strong and raised Low from 0.1 to 0.2 and High from 0.05 to 0.1.
 
+### Planned: look adjustments, not started
+
+The owner wants sliders that grade the built-in looks, set while watching the viewfinder before a take and baked in with it. Agreed design:
+
+- **Where the grade sits:** in scene-linear, before the ACES output transform, inside the LUT `BuiltInLook.lut(curve:gamut:size:)` already builds. Each grid point is decoded, taken to linear Rec.2020, graded, then sent through ACES. ACES then still rolls highlights off and compresses gamut, so pushes stay smooth, the way Resolve works under ACES. It adds no GPU work: the viewfinder, baking and export each still do one LUT lookup a pixel.
+- **First build, the global sliders:** exposure, contrast around 0.18, temperature and tint, and saturation, in that order of use. Contrast pivots at middle gray in log2, saturation works against Rec.2020 luminance, and white balance is a Bradford shift of the white, as `ColorMath.bradford` does.
+- **Second build, per colour:** hue, saturation and brightness for red, orange, yellow, green, cyan, blue, magenta and skin, in a perceptual space, ACES 2.0's JMh from `ACES2OutputTransform.rgbToJMh` or Oklab, with soft overlapping hue weights so ranges blend without edges. Then optional shadow, midtone and highlight wheels.
+- **Live while dragging:** a 65-point LUT takes about a second, so while a slider moves, build a 17 or 33-point LUT at utility priority, then the 65-point one on release, and don't rebuild while a slider holds still. The camera streams meanwhile, so it must not starve capture: check `Recording:` timing and photo failures while dragging, on the phone.
+- **On the camera screen:** an **ADJUST** page in the LOOK panel, over the controls like the rest, with Cancel, BAKE and Select in the header. Select keeps the grade. It's locked during takes, like the curve and BAKE, and the take's LUT is frozen in `setSink` already, so a bake never changes mid-take.
+- **Saving:** the grade is part of the look: kept in presets and linkable per curve like any LUT, in `AppConfig`, with an entry in **What presets keep**. A **Save as .cube** for Resolve would be cheap.
+- **Scope:** the built-in looks and the plain Rec.709 view only. Grading under an imported `.cube` means grading before someone else's look, which is possible but less predictable, and left for later.
+- **Tests:** a neutral grade must leave the look exactly as it is, exposure must move middle gray by the right stops through the tone curve, and saturation 0 must give neutral output. The owner judges how it looks, so slider ranges and hue widths start conservative and are tuned from the phone.
+
+### Stabilization check, in progress
+
+Before building stabilized export, find out whether optical stabilization moves the picture during RAW capture, which the gyro can't see, and the sensor's rolling-shutter readout time. The owner recorded `video_20261103_235155.mov`, a 6-second 4032x2268 HEVC take with its `.gcsv`, propped on a surface with short shakes at about 4 to 5.5 seconds, and is checking it in Gyroflow.
+
+- **Gyroflow setup:** set the frame rate to 30 by hand, since Gyroflow read it as "---". Its only lens profile, "iphone 14 pro 30", is for Apple's 3840x2160 video with distortion corrected, not VibeLog's uncorrected 4032-wide frames, so judge the centre of the frame or make a VibeLog profile with Gyroflow's lens calibration. Use a fixed zoom and 4032x2268 output.
+- **Export trouble on the owner's Linux PC:** with **Use GPU encoding** on, Gyroflow wrote a corrupt HEVC file, all green with `cu_qp_delta` errors in ffmpeg, then failed outright: AMD's `libamfrt64.so.1` isn't installed, and VAAPI refuses 10-bit `yuv420p10le`. Turn GPU encoding off, or use ProRes or 8-bit H.264.
+- **What decides it:** steady after stabilizing means optical stabilization isn't in the way. A small float that follows the shakes means it is. A fast pan's leaning verticals give the readout time. No result yet.
+- **Then:** stabilized export, as a step before the look in `LookExporter`, from the `.gcsv`, with lookahead smoothing, an optional horizon lock, rolling-shutter correction per row and a crop set in the preview. Live baked stabilization was ruled out: it needs future frames, GPU time the hot path doesn't have, and bakes in a crop.
+
 ### Waiting on the phone
 
 Run these in order. The owner has limited time, so short tests come first, and the session log and sidecars should come back with the results.
 
-1. **ARRI Wide Gamut 3:** left for later at the owner's choice. Record it and grade it. Does the file read correctly when graded that way?
-2. **Stereo build:** after the long tests. Record a take in each landscape hold with a sound on one side, and check which channel it lands in, that sound and sync are right in stereo AAC and PCM, and that the two meters move apart.
+1. **Build `ad509d3`:** stereo AAC should now record, so record a take with **Stereo audio** on and **Uncompressed audio** off, in each landscape hold with a sound on one side, and check which channel it lands in, that sound and sync are right, and that the two meters move apart. With many tools on, the picture shouldn't shift during a take. Check the look panel's fade, the carousel upright and sideways, the BAKE toggle, and Cancel and Select turned. Compare **ACES 2.0** and **ACES 1.3** with REC.709 on the same scene, and read the `Built ACES 2.0 · ... in N s` log line. Check **Bake** under Image greying out Color space, and **Settings > About > Legal**. Over the link, check `draw` time and frame loss with an ACES look baked into a 60-second HEVC take.
+2. **Stabilization check:** the owner's Gyroflow result on `video_20261103_235155.mov`, under **Stabilization check** above.
+3. **ARRI Wide Gamut 3:** left for later at the owner's choice. Record it and grade it. Does the file read correctly when graded that way?
 
 For vignette correction, also ask for a short RAW clip's `reference.dng` and `reference_metadata.json`. Turn off **Encode video** in Diagnostics to record one.
 
@@ -262,10 +285,10 @@ Every new setting needs a decision here, in the same change that adds it. Ask wh
 
 | Group | Settings | In presets |
 |---|---|---|
-| Format | Codec, size, aspect, frame rate, log curve, color space, **Pair curve and color space**, the pairs and LUTs under **Color spaces and LUTs**, file tag, exposure offset | Yes |
+| Format | Codec, size, aspect, frame rate, log curve, color space, **Pair curve and color space**, the pairs and LUTs under **Color spaces and LUTs**, file tag, exposure offset, **Bake** | Yes |
 | Processing | Pipeline, **Efficient when hot**, debayer, **Bilinear when hot**, fixed frame time, lens distortion correction, **12-bit ProRes 4444** | Yes |
-| Recording | **Stop after**, auto during a take, uncompressed audio, gyro data, flicker-free shutter, **Slow viewfinder when hot** | Yes |
-| Viewfinder | Look, LUT and **LUT made for**, freeze during a take, peaking sensitivity, frame guide, desqueeze, **Pause camera when idle** | Yes |
+| Recording | **Stop after**, auto during a take, uncompressed audio, stereo audio, gyro data, flicker-free shutter, **Slow viewfinder when hot** | Yes |
+| Viewfinder | Look, LUT or ACES look and **LUT made for**, freeze during a take, peaking sensitivity, frame guide, desqueeze, **Pause camera when idle** | Yes |
 | Tools | Monitoring tools, zebras and false color | Yes |
 | The shot | Lens, shutter, ISO, shutter priority, white balance, tint, focus, exposure bias, punch-in position | No, these belong to the scene |
 | Test link | Server, token, connection, send switches | No, private to the device |
