@@ -29,7 +29,7 @@ public enum MonitorMode: String, CaseIterable, Identifiable, Sendable {
 
     public var label: String {
         switch self {
-        case .rec709: return "Rec.709 LUT"
+        case .rec709: return "Rec.709"
         case .log: return "Log"
         case .isp: return "ISP preview"
         }
@@ -123,13 +123,18 @@ public struct ProcessingSettings: Equatable, Sendable {
     public var bilinearWhenHot = true
     /// Look LUTs expect Rec.709; conversion LUTs expect the log image.
     public var lutExpectsRec709 = false
-    public var curve = LogCurve.appleLog
-    /// Records the curve's own gamut, when it has one, instead of Rec.2020.
-    public var nativeGamut = false
-    /// Keeps each curve in its own gamut, so choosing either one chooses the other. Turning it off
-    /// keeps the pair on screen, rather than falling back to Rec.2020.
-    public var pairsGamut = true {
-        didSet { if oldValue, !pairsGamut { nativeGamut = true } }
+    private var storedCurve = LogCurve.appleLog
+    private var storedGamut = Gamut.rec2020
+    /// Choosing a curve chooses its gamut from `pairing`, and choosing a gamut chooses its curve.
+    /// Off, either can change alone, within what `GamutPairing` allows.
+    public var pairsGamut = true
+    /// Editing the current curve's row moves the gamut with it.
+    public var pairing = GamutPairing.standard {
+        didSet {
+            if pairsGamut, pairing.gamut(for: storedCurve) != oldValue.gamut(for: storedCurve) {
+                storedGamut = pairing.gamut(for: storedCurve)
+            }
+        }
     }
     public var demosaic = DemosaicMethod.malvar
     public var monitor = MonitorMode.rec709
@@ -142,19 +147,30 @@ public struct ProcessingSettings: Equatable, Sendable {
     /// so -0.5 stops places it near 0.18. This is from a single measurement.
     public var exposureStops = -0.5
 
-    /// Choosing a gamut other than Rec.2020 also chooses its curve. Paired, Rec.2020 chooses Apple
-    /// Log, the curve whose own gamut it is.
-    public var gamut: Gamut {
-        // Apple Log 2 is defined by its gamut, so it can't record Rec.2020. That's Apple Log.
-        get { pairsGamut || nativeGamut || curve == .appleLog2 ? curve.nativeGamut : .rec2020 }
+    public var curve: LogCurve {
+        get { storedCurve }
         set {
-            nativeGamut = newValue != .rec2020
-            if let paired = newValue.curve {
-                curve = paired
-            } else if pairsGamut || curve == .appleLog2 {
-                curve = .appleLog
+            storedCurve = newValue
+            if pairsGamut || !GamutPairing.gamuts(for: newValue).contains(storedGamut) {
+                storedGamut = pairing.gamut(for: newValue)
             }
         }
+    }
+
+    public var gamut: Gamut {
+        get { storedGamut }
+        set {
+            storedGamut = newValue
+            if pairsGamut || !GamutPairing.curves(for: newValue).contains(storedCurve) {
+                storedCurve = pairing.curve(for: newValue)
+            }
+        }
+    }
+
+    /// Sets both as saved, without pairing. A pair that doesn't fit keeps the curve.
+    public mutating func restore(curve: LogCurve, gamut: Gamut) {
+        storedCurve = curve
+        storedGamut = GamutPairing.gamuts(for: curve).contains(gamut) ? gamut : pairing.gamut(for: curve)
     }
 
     public init() {}
@@ -227,6 +243,22 @@ private struct MonitorParams {
     var peakStep: SIMD2<Float>
     var peakThreshold: Float
     var desqueeze: Float
+    var curve: UInt32
+    var toRec709Row0: SIMD4<Float>
+    var toRec709Row1: SIMD4<Float>
+    var toRec709Row2: SIMD4<Float>
+
+    /// Fills the decode the viewfinder does in the shader, for a curve in its gamut.
+    mutating func setDisplay(curve: LogCurve, gamut: Gamut) {
+        self.curve = curve.rawValue
+        let matrix = ColorMath.rec2020ToRec709 * gamut.fromRec2020.inverse
+        func row(_ index: Int) -> SIMD4<Float> {
+            SIMD4(Float(matrix[0][index]), Float(matrix[1][index]), Float(matrix[2][index]), 0)
+        }
+        toRec709Row0 = row(0)
+        toRec709Row1 = row(1)
+        toRec709Row2 = row(2)
+    }
 }
 
 private struct CropParams {
@@ -276,7 +308,6 @@ private struct CustomLUT {
 public final class ProcessingPipeline: NSObject {
     public let device: MTLDevice
 
-    private static let lutSize = 33
     /// Three frames absorb the 69 ms GPU spikes seen while encoding.
     private static let maxInFlight = 3
     private static let outputCount = 4
@@ -310,9 +341,8 @@ public final class ProcessingPipeline: NSObject {
     private var efficientFrames = 0
     private var latest: MTLTexture?
     private var drawScheduled = false
-    private var lut: MTLTexture?
-    private var lutCurve: LogCurve?
-    private var lutGamut = Gamut.rec2020
+    /// Bound in place of a custom LUT, which the shader then never reads.
+    private var emptyLUT: MTLTexture?
     private var customLUT: CustomLUT?
     private var stats = PipelineStats()
     private var gpuTotalMs = 0.0
@@ -935,27 +965,44 @@ public final class ProcessingPipeline: NSObject {
         }
     }
 
-    private func currentLUT(curve: LogCurve, gamut: Gamut) -> MTLTexture? {
-        if lutCurve == curve, lutGamut == gamut, let lut { return lut }
-        let size = Self.lutSize
+    private func placeholderLUT() -> MTLTexture? {
+        if let emptyLUT { return emptyLUT }
         let descriptor = MTLTextureDescriptor()
         descriptor.textureType = .type3D
         descriptor.pixelFormat = .rgba16Unorm
-        descriptor.width = size
-        descriptor.height = size
-        descriptor.depth = size
+        descriptor.width = 2
+        descriptor.height = 2
+        descriptor.depth = 2
         descriptor.usage = .shaderRead
-        guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
-        let samples = MonitorTransform.lut(curve: curve, gamut: gamut, size: size)
-        samples.withUnsafeBytes { bytes in
-            texture.replace(
-                region: MTLRegionMake3D(0, 0, 0, size, size, size), mipmapLevel: 0, slice: 0,
-                withBytes: bytes.baseAddress!, bytesPerRow: size * 8, bytesPerImage: size * size * 8)
-        }
-        lut = texture
-        lutCurve = curve
-        lutGamut = gamut
-        return texture
+        emptyLUT = device.makeTexture(descriptor: descriptor)
+        return emptyLUT
+    }
+
+    /// Runs the viewfinder's Rec.709 math on a plain texture, so tests can check it against
+    /// `MonitorTransform.display`.
+    func encodeMonitorTransform(
+        into commands: MTLCommandBuffer, image: MTLTexture, output: MTLTexture, curve: LogCurve, gamut: Gamut
+    ) -> Bool {
+        guard let library = try? device.makeDefaultLibrary(bundle: Bundle(for: ProcessingPipeline.self)),
+            let function = library.makeFunction(name: "monitorTransformTest"),
+            let state = try? device.makeComputePipelineState(function: function),
+            let encoder = commands.makeComputeCommandEncoder()
+        else { return false }
+        var parameters = MonitorParams(
+            useLUT: 1, lutSize: 0, overlay: 0, cropFraction: 1, lutScale: .zero, lutOffset: .zero,
+            bandsLow: .zero, bandsHigh: .zero, viewOrigin: .zero, viewScale: 1, peaking: 0, peakStep: .zero,
+            peakThreshold: 0, desqueeze: 1, curve: 0, toRec709Row0: .zero, toRec709Row1: .zero,
+            toRec709Row2: .zero)
+        parameters.setDisplay(curve: curve, gamut: gamut)
+        encoder.setComputePipelineState(state)
+        encoder.setTexture(image, index: 0)
+        encoder.setTexture(output, index: 1)
+        encoder.setBytes(&parameters, length: MemoryLayout<MonitorParams>.stride, index: 0)
+        encoder.dispatchThreads(
+            MTLSize(width: image.width, height: image.height, depth: 1),
+            threadsPerThreadgroup: MTLSize(width: min(image.width, state.threadExecutionWidth), height: 1, depth: 1))
+        encoder.endEncoding()
+        return true
     }
 
     private func logOnce(_ message: String) {
@@ -984,7 +1031,7 @@ extension ProcessingPipeline: MTKViewDelegate {
         let viewScale = monitorScale
         let peaking = monitorPeaking
         lock.unlock()
-        guard current.monitor != .isp, let image, let rec709 = currentLUT(curve: current.curve, gamut: current.gamut),
+        guard current.monitor != .isp, let image, let placeholder = placeholderLUT(),
             let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
             let commands = queue.makeCommandBuffer(),
             let encoder = commands.makeRenderCommandEncoder(descriptor: pass)
@@ -999,21 +1046,22 @@ extension ProcessingPipeline: MTKViewDelegate {
         }
         var parameters = MonitorParams(
             useLUT: mode,
-            lutSize: Float(custom?.lut.size ?? Self.lutSize), overlay: current.overlay.rawValue,
+            lutSize: Float(custom?.lut.size ?? 2), overlay: current.overlay.rawValue,
             cropFraction: Float(current.cropFraction),
             lutScale: SIMD4(1 / (high - low), 0), lutOffset: SIMD4(low, 0),
             bandsLow: SIMD4(bands.blueBelow, bands.greenFrom, bands.greenTo, bands.pinkFrom),
-            bandsHigh: SIMD4(bands.pinkTo, bands.yellowFrom, bands.clip, Float(Self.lutSize)),
+            bandsHigh: SIMD4(bands.pinkTo, bands.yellowFrom, bands.clip, 0),
             viewOrigin: viewOrigin, viewScale: viewScale, peaking: peaking ? 1 : 0,
             // Fixed to the image, not the zoom: one sensor pixel apart, punch-in sees too little
             // change for peaking to fire. The image is turned, so its first axis runs along the
             // drawable's height.
             peakStep: SIMD2(1 / Float(view.drawableSize.height), 1 / Float(view.drawableSize.width)),
-            peakThreshold: current.peakingSensitivity.threshold, desqueeze: Float(current.desqueeze))
+            peakThreshold: current.peakingSensitivity.threshold, desqueeze: Float(current.desqueeze),
+            curve: 0, toRec709Row0: .zero, toRec709Row1: .zero, toRec709Row2: .zero)
+        parameters.setDisplay(curve: current.curve, gamut: current.gamut)
         encoder.setRenderPipelineState(monitorState)
         encoder.setFragmentTexture(image, index: 0)
-        encoder.setFragmentTexture(rec709, index: 1)
-        encoder.setFragmentTexture(custom?.texture ?? rec709, index: 2)
+        encoder.setFragmentTexture(custom?.texture ?? placeholder, index: 2)
         encoder.setFragmentBytes(&parameters, length: MemoryLayout<MonitorParams>.stride, index: 0)
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         encoder.endEncoding()

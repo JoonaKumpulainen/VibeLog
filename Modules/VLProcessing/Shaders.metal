@@ -31,6 +31,10 @@ struct MonitorParams {
     float2 peakStep;  // One drawable pixel at full view, in the image's coordinates.
     float peakThreshold;  // The edge strength peaking marks.
     float desqueeze;  // Widens the picture by narrowing its short side, with black beside it.
+    uint curve;  // The log curve to decode, as LogCurve's raw value.
+    float4 toRec709Row0;  // Linear in the recorded gamut to linear Rec.709.
+    float4 toRec709Row1;
+    float4 toRec709Row2;
 };
 
 struct CropParams {
@@ -276,6 +280,63 @@ kernel void processDirectPacked(texture2d<ushort, access::read> raw [[texture(0)
     packed.write(packedPixel(saturate(logPixel(raw, int2(gid) + d.sourceOrigin, size, u))), gid);
 }
 
+// The same decoders as LogCurve.decode, for the viewfinder.
+static inline float decodeLog(float y, uint curve) {
+    switch (curve) {
+        case 0:
+        case 3: {
+            float knee = 47.28711236 * (0.01 + 0.05641088) * (0.01 + 0.05641088);
+            if (y >= knee) return exp2((y - 0.69336945) / 0.08550479) - 0.00964052;
+            if (y >= 0.0) return sqrt(y / 47.28711236) - 0.05641088;
+            return -0.05641088;
+        }
+        case 1:
+            if (y >= 171.2102946929 / 1023.0) return pow(10.0f, (y * 1023.0 - 420.0) / 261.5) * 0.19 - 0.01;
+            return (y * 1023.0 - 95.0) * 0.01125 / (171.2102946929 - 95.0);
+        case 4: {
+            float v = (y * 1023.0 - 64.0) / 876.0;
+            float x = v >= 0.030001222851889303 ? pow(10.0f, (v - 0.646596) / 0.432699) - 0.037584
+                                                : (v - 0.030001222851889303) / 5.0;
+            return x * 219.0 / 155.0 * 0.9;
+        }
+        case 5:
+            if (y >= 0.0) return (exp2(14.0 * (y - 0.09286412512218964) / 0.9071358748778103 + 6.0) - 64.0) / 2231.8263090676883;
+            return y * 0.1135972086105891 - 0.01805699611991131;
+        case 6: {
+            float x;
+            if (y < 0.097465473) x = -(pow(10.0f, (0.12783901 - y) / 0.36726845) - 1.0) / 14.98325;
+            else if (y <= 0.15277891) x = (y - 0.12512219) / 1.9754798;
+            else x = (pow(10.0f, (y - 0.12240537) / 0.36726845) - 1.0) / 14.98325;
+            return x * 0.9;
+        }
+        default:
+            if (y > 5.367655 * 0.010591 + 0.092809) return (pow(10.0f, (y - 0.385537) / 0.247190) - 0.052272) / 5.555556;
+            return (y - 0.092809) / 5.367655;
+    }
+}
+
+// MonitorTransform.display: decode, convert to Rec.709, then roll highlights off to display white.
+static inline float3 monitorDisplay(float3 logColor, constant MonitorParams &m) {
+    float3 linear = float3(decodeLog(logColor.r, m.curve), decodeLog(logColor.g, m.curve),
+                           decodeLog(logColor.b, m.curve));
+    float3 rec709 = float3(dot(m.toRec709Row0.xyz, linear), dot(m.toRec709Row1.xyz, linear),
+                           dot(m.toRec709Row2.xyz, linear));
+    const float peak = 8.0;
+    const float shoulderB = 0.82 * peak / (peak - 1.0);
+    const float shoulderA = 0.18 + shoulderB;
+    float3 scene = max(rec709, 0.0);
+    float3 shaped = min(shoulderA * scene / (scene + shoulderB), 1.0);
+    return pow(shaped, 1.0 / 2.4);
+}
+
+// Only for tests, which compare the viewfinder's math with MonitorTransform.display.
+kernel void monitorTransformTest(texture2d<float, access::read> image [[texture(0)]],
+                                 texture2d<float, access::write> output [[texture(1)]],
+                                 constant MonitorParams &m [[buffer(0)]],
+                                 uint2 gid [[thread_position_in_grid]]) {
+    output.write(float4(monitorDisplay(image.read(gid).rgb, m), 1.0), gid);
+}
+
 struct VertexOut {
     float4 position [[position]];
     float2 uv;
@@ -293,7 +354,6 @@ vertex VertexOut monitorVertex(uint vertexID [[vertex_id]]) {
 // image is rotated 90 degrees for the portrait screen.
 fragment float4 monitorFragment(VertexOut in [[stage_in]],
                                 texture2d<float> image [[texture(0)]],
-                                texture3d<float> rec709 [[texture(1)]],
                                 texture3d<float> custom [[texture(2)]],
                                 constant MonitorParams &m [[buffer(0)]]) {
     constexpr sampler linearSampler(filter::linear, address::clamp_to_edge);
@@ -306,8 +366,7 @@ fragment float4 monitorFragment(VertexOut in [[stage_in]],
     float3 logColor = image.sample(linearSampler, rotated).rgb;
     float3 color = logColor;
     if (m.useLUT == 1 || m.useLUT == 3) {
-        float size = m.bandsHigh.w;
-        color = rec709.sample(linearSampler, (saturate(color) * (size - 1.0) + 0.5) / size).rgb;
+        color = monitorDisplay(saturate(color), m);
     }
     if (m.useLUT >= 2) {
         float3 normalized = saturate((color - m.lutOffset.rgb) * m.lutScale.rgb);

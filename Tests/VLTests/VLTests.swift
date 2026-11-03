@@ -370,9 +370,6 @@ final class MonitorTests: XCTestCase {
         XCTAssertEqual(peak.x, 1, accuracy: 1e-6)
     }
 
-    func testLUTSize() {
-        XCTAssertEqual(MonitorTransform.lut(curve: .sLog3, size: 5).count, 5 * 5 * 5 * 4)
-    }
 }
 
 final class PipelineGPUTests: XCTestCase {
@@ -432,16 +429,63 @@ final class PipelineGPUTests: XCTestCase {
         return pipeline
     }
 
+    /// The viewfinder decodes each curve on the GPU, which must match `MonitorTransform.display`.
+    func testViewfinderMatchesTheMonitorTransform() throws {
+        let pipeline = try makePipeline()
+        let device = pipeline.device
+        let samples: [SIMD3<Double>] = [
+            SIMD3(repeating: 0.18), SIMD3(repeating: 0.003), SIMD3(repeating: 2), SIMD3(0.036, 0.072, 0.45),
+            SIMD3(0.4, 0.1, 0.05), SIMD3(0.05, 0.3, 0.08), SIMD3(repeating: 0.02), SIMD3(repeating: 6),
+        ]
+        func texture(_ usage: MTLTextureUsage) throws -> MTLTexture {
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: .rgba16Unorm, width: samples.count, height: 1, mipmapped: false)
+            descriptor.usage = usage
+            return try XCTUnwrap(device.makeTexture(descriptor: descriptor))
+        }
+        let queue = try XCTUnwrap(device.makeCommandQueue())
+        for curve in LogCurve.allCases {
+            let gamut = curve.nativeGamut
+            let logs = samples.map { SIMD3(curve.encode($0.x), curve.encode($0.y), curve.encode($0.z)) }
+            let pixels = logs.flatMap { log in
+                [log.x, log.y, log.z, 1].map { UInt16((min(max($0, 0), 1) * 65535).rounded()) }
+            }
+            let image = try texture(.shaderRead)
+            pixels.withUnsafeBytes {
+                image.replace(
+                    region: MTLRegionMake2D(0, 0, samples.count, 1), mipmapLevel: 0, withBytes: $0.baseAddress!,
+                    bytesPerRow: samples.count * 8)
+            }
+            let output = try texture(.shaderWrite)
+            let commands = try XCTUnwrap(queue.makeCommandBuffer())
+            XCTAssertTrue(pipeline.encodeMonitorTransform(
+                into: commands, image: image, output: output, curve: curve, gamut: gamut))
+            commands.commit()
+            commands.waitUntilCompleted()
+            XCTAssertEqual(commands.status, .completed)
+            var result = [UInt16](repeating: 0, count: samples.count * 4)
+            output.getBytes(
+                &result, bytesPerRow: samples.count * 8, from: MTLRegionMake2D(0, 0, samples.count, 1), mipmapLevel: 0)
+            for (index, log) in logs.enumerated() {
+                let quantized = SIMD3(
+                    Double(pixels[index * 4]), Double(pixels[index * 4 + 1]), Double(pixels[index * 4 + 2])) / 65535
+                let expected = MonitorTransform.display(log: quantized, curve: curve, gamut: gamut)
+                let got = SIMD3(Double(result[index * 4]), Double(result[index * 4 + 1]), Double(result[index * 4 + 2])) / 65535
+                // Within one 8-bit step: the GPU works in 32-bit floats.
+                let worst = max(abs(got.x - expected.x), abs(got.y - expected.y), abs(got.z - expected.z))
+                XCTAssertLessThan(worst, 1.0 / 255, "\(curve) at \(log)")
+            }
+        }
+    }
+
     func testShaderMatchesSwiftCurves() throws {
         let pipeline = try makePipeline()
         var settings = ProcessingSettings()
         settings.exposureStops = 0
-        // Only the curve under test, in Rec.2020.
-        settings.pairsGamut = false
-        settings.nativeGamut = false
         for curve in LogCurve.allCases {
             for demosaic in DemosaicMethod.allCases {
-                settings.curve = curve
+                // Only the curve under test, in Rec.2020 where it can be.
+                settings.restore(curve: curve, gamut: .rec2020)
                 settings.demosaic = demosaic
                 pipeline.update(settings)
                 let result = try run(pipeline, level: 0.18, cfa: .bggr, gains: [2.5, 1, 1.7])
@@ -802,7 +846,7 @@ final class VideoEncoderTests: XCTestCase {
         XCTAssertTrue(EncoderSize.all.allSatisfy { $0.widescreen.height % 2 == 0 })
     }
 
-    func testPresetsAreUniqueWithKnownFormats() {
+    func testPresetsAreUniqueWithKnownFormats() throws {
         XCTAssertEqual(Set(EncoderPreset.all.map(\.id)).count, EncoderPreset.all.count)
         let formats: Set<OSType> = [
             kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange,
@@ -811,13 +855,19 @@ final class VideoEncoderTests: XCTestCase {
             kCVPixelFormatType_4444AYpCbCr16,
         ]
         XCTAssertTrue(EncoderPreset.all.allSatisfy { formats.contains($0.pixelFormat) })
-        XCTAssertEqual(EncoderPreset.all.filter { $0.bitDepth == 12 }.map(\.id), ["prores4444"])
+        XCTAssertTrue(EncoderPreset.all.allSatisfy { $0.bitDepth == 10 })
+        let prores4444 = try XCTUnwrap(EncoderPreset.all.first { $0.id == "prores4444" })
+        XCTAssertEqual(prores4444.twelveBit.bitDepth, 12)
+        XCTAssertEqual(prores4444.twelveBit.id, prores4444.id)
+        for preset in EncoderPreset.all where preset.id != "prores4444" {
+            XCTAssertEqual(preset.twelveBit, preset)
+        }
     }
 
     /// A gradient finer than 10 bits must come back from a ProRes 4444 file with its in-between steps.
     func testProRes4444FileKeepsTwelveBits() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
-        let preset = try XCTUnwrap(EncoderPreset.all.first { $0.id == "prores4444" })
+        let preset = try XCTUnwrap(EncoderPreset.all.first { $0.id == "prores4444" }).twelveBit
         let encoder: VideoEncoder
         do {
             encoder = try VideoEncoder(config: .init(
@@ -909,9 +959,9 @@ final class VideoEncoderTests: XCTestCase {
         XCTAssertEqual(tracks.count, 1)
     }
 
-    /// Editors read the rate from the track, so a 23.98 file must not come out as 24.
-    func testDecimalRateFileReadsAsDecimal() async throws {
-        for fps in [24000.0 / 1001, 30000.0 / 1001] {
+    /// Editors read the rate from the track, which must keep whole ticks per frame.
+    func testFileReadsAtItsFrameRate() async throws {
+        for fps in [24.0, 25, 24000.0 / 1001] {
             let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
             let preset = EncoderPreset.all[0]
             let encoder: VideoEncoder
@@ -1064,7 +1114,8 @@ final class ExposureScalesTests: XCTestCase {
     }
 
     func testDecimalRatesAreExactAndNamedLikeCameras() {
-        XCTAssertEqual(FrameRates.all.map(FrameRates.label), ["23.98", "24", "25", "29.97", "30"])
+        XCTAssertEqual(FrameRates.all.map(FrameRates.label), ["24", "25", "30"])
+        XCTAssertEqual(FrameRates.label(24000.0 / 1001), "23.98")
         XCTAssertTrue(FrameRates.frameTime(24000.0 / 1001) == (1001, 24000))
         XCTAssertTrue(FrameRates.frameTime(30000.0 / 1001) == (1001, 30000))
         XCTAssertTrue(FrameRates.frameTime(25) == (1, 25))
@@ -1290,6 +1341,10 @@ final class AppConfigTests: XCTestCase {
         settings.codec = "prores4444"
         settings.frameRate = 25
         settings.nativeGamut = true
+        settings.gamut = "S-Gamut3"
+        settings.curveGamuts = ["S-Log3": "S-Gamut3"]
+        settings.curveLUTs = [AppConfig.lutKey(curve: "S-Log3", gamut: "S-Gamut3"): "Night.cube"]
+        settings.twelveBitProRes = true
         settings.mainsHz = 60
         settings.pcmAudio = true
         settings.activeTools = ["grid"]
@@ -1310,6 +1365,10 @@ final class AppConfigTests: XCTestCase {
         XCTAssertTrue(config.pcmAudio)
         XCTAssertEqual(config.activeTools, ["grid"])
         XCTAssertEqual(config.overlay, 2)
+        XCTAssertEqual(config.gamut, "S-Gamut3")
+        XCTAssertEqual(config.curveGamuts, ["S-Log3": "S-Gamut3"])
+        XCTAssertEqual(config.curveLUTs.values.first, "Night.cube")
+        XCTAssertTrue(config.twelveBitProRes)
         XCTAssertEqual(config.testServer, "box:8765")
         XCTAssertEqual(config.testToken, "123")
         XCTAssertEqual(config.presets, [night])
@@ -1347,8 +1406,10 @@ final class AppleLog2Tests: XCTestCase {
 
     func testItAlwaysRecordsAppleWideGamut() {
         var settings = ProcessingSettings()
+        settings.pairsGamut = false
         settings.curve = .appleLog2
-        settings.nativeGamut = false
+        XCTAssertEqual(settings.gamut, .appleWideGamut)
+        settings.restore(curve: .appleLog2, gamut: .rec2020)
         XCTAssertEqual(settings.gamut, .appleWideGamut)
     }
 
@@ -1359,6 +1420,11 @@ final class AppleLog2Tests: XCTestCase {
         settings.gamut = .rec2020
         XCTAssertEqual(settings.curve, .appleLog)
         XCTAssertEqual(settings.gamut, .rec2020)
+        // Unpaired too: Apple Log 2 can't leave its gamut, so it becomes the pair's curve.
+        settings.curve = .appleLog2
+        settings.pairsGamut = false
+        settings.gamut = .rec2020
+        XCTAssertEqual(settings.curve, .appleLog)
     }
 }
 
@@ -1371,6 +1437,7 @@ final class GamutTests: XCTestCase {
         let cases: [(Gamut, Double, Double)] = [
             (.sGamut3, 0.730, 0.280), (.arriWideGamut3, 0.6840, 0.3130), (.appleWideGamut, 0.725, 0.301),
             (.sGamut, 0.730, 0.280), (.arriWideGamut4, 0.7347, 0.2653), (.cinemaGamut, 0.74, 0.27),
+            (.sGamut3Cine, 0.766, 0.275),
         ]
         for (gamut, x, y) in cases {
             let red = gamut.fromRec2020 * ColorMath.xyzToRec2020 * xyz(x, y)
@@ -1388,19 +1455,14 @@ final class GamutTests: XCTestCase {
         }
     }
 
-    func testNativeGamutFollowsTheCurve() {
+    func testSLog3RecordsSGamut3CineByDefault() {
         var settings = ProcessingSettings()
-        // Turning pairing off keeps the pair, so Rec.2020 is chosen after.
-        settings.pairsGamut = false
-        settings.nativeGamut = false
         settings.curve = .sLog3
-        XCTAssertEqual(settings.gamut, .rec2020)
-        settings.nativeGamut = true
+        XCTAssertEqual(settings.gamut, .sGamut3Cine)
+        // S-Gamut3 stays available, and keeps S-Log3.
+        settings.gamut = .sGamut3
+        XCTAssertEqual(settings.curve, .sLog3)
         XCTAssertEqual(settings.gamut, .sGamut3)
-        settings.curve = .logC3
-        XCTAssertEqual(settings.gamut, .arriWideGamut3)
-        settings.curve = .appleLog
-        XCTAssertEqual(settings.gamut, .rec2020)
     }
 
     func testPairingMakesEitherChoiceSetTheOther() {
@@ -1412,42 +1474,62 @@ final class GamutTests: XCTestCase {
         }
         for gamut in Gamut.allCases {
             settings.gamut = gamut
-            XCTAssertEqual(settings.curve.nativeGamut, gamut, "\(gamut)")
+            XCTAssertEqual(settings.curve, gamut.standardCurve, "\(gamut)")
+            XCTAssertEqual(settings.gamut, gamut, "\(gamut)")
         }
         settings.gamut = .rec2020
         XCTAssertEqual(settings.curve, .appleLog)
     }
 
-    func testTurningPairingOffKeepsThePair() {
+    func testUnpairedChoicesChangeAlone() {
         var settings = ProcessingSettings()
         settings.curve = .logC4
         settings.pairsGamut = false
         XCTAssertEqual(settings.gamut, .arriWideGamut4)
         settings.gamut = .rec2020
         XCTAssertEqual(settings.curve, .logC4)
+        settings.curve = .sLog3
         XCTAssertEqual(settings.gamut, .rec2020)
-    }
-
-    func testEveryGamutAndCurvePairBothWays() {
-        for gamut in Gamut.allCases {
-            if let curve = gamut.curve { XCTAssertEqual(curve.nativeGamut, gamut) }
-        }
-        for curve in LogCurve.allCases where curve.nativeGamut != .rec2020 {
-            XCTAssertEqual(curve.nativeGamut.curve, curve)
-        }
-    }
-
-    func testChoosingAGamutSetsItsCurve() {
-        var settings = ProcessingSettings()
-        settings.pairsGamut = false
         settings.gamut = .arriWideGamut3
-        XCTAssertEqual(settings.curve, .logC3)
-        XCTAssertEqual(settings.gamut, .arriWideGamut3)
-        settings.gamut = .sGamut3
         XCTAssertEqual(settings.curve, .sLog3)
+    }
+
+    func testEditedPairsAreFollowedAndSaved() {
+        var settings = ProcessingSettings()
+        settings.curve = .sLog3
+        settings.pairing.setGamut(.sGamut3, for: .sLog3)
+        // Editing the current curve's row moves the gamut with it.
+        XCTAssertEqual(settings.gamut, .sGamut3)
+        settings.pairing.setCurve(.canonLog3, for: .rec2020)
         settings.gamut = .rec2020
-        XCTAssertEqual(settings.curve, .sLog3)
-        XCTAssertEqual(settings.gamut, .rec2020)
+        XCTAssertEqual(settings.curve, .canonLog3)
+
+        let saved = GamutPairing(gamutLabels: settings.pairing.gamutLabels, curveLabels: settings.pairing.curveLabels)
+        XCTAssertEqual(saved, settings.pairing)
+        XCTAssertEqual(saved.gamut(for: .sLog3), .sGamut3)
+        XCTAssertEqual(saved.curve(for: .rec2020), .canonLog3)
+        XCTAssertEqual(saved.gamut(for: .logC3), .arriWideGamut3)
+        // Only changes are stored, so the standard table saves nothing.
+        XCTAssertTrue(GamutPairing.standard.gamutLabels.isEmpty)
+    }
+
+    func testPairsThatDontFitAreRefused() {
+        var pairing = GamutPairing.standard
+        pairing.setGamut(.appleWideGamut, for: .sLog3)
+        XCTAssertEqual(pairing.gamut(for: .sLog3), .sGamut3Cine)
+        pairing.setCurve(.appleLog2, for: .rec2020)
+        XCTAssertEqual(pairing.curve(for: .rec2020), .appleLog)
+        let read = GamutPairing(gamutLabels: ["S-Log3": "Apple Wide Gamut", "Gone": "Rec.2020"], curveLabels: [:])
+        XCTAssertEqual(read, .standard)
+    }
+
+    func testEveryStandardPairFits() {
+        for curve in LogCurve.allCases {
+            XCTAssertTrue(GamutPairing.gamuts(for: curve).contains(curve.nativeGamut), "\(curve)")
+        }
+        for gamut in Gamut.allCases {
+            XCTAssertTrue(GamutPairing.curves(for: gamut).contains(gamut.standardCurve), "\(gamut)")
+        }
     }
 
     func testMonitorKeepsGrayInEveryGamut() {

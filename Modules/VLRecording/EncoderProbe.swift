@@ -13,10 +13,14 @@ public enum EncoderProbe {
             report += encoderList()
             report.append("")
             report.append("preset, size, encoded fps, MB/s at 30 fps, result")
+            // The two 16-bit trials also report whether the file kept more than 10 bits.
+            let presets = EncoderPreset.all + [
+                EncoderPreset.all.first { $0.id == "prores4444" }?.twelveBit, EncoderPreset.hevc444From16Bit,
+            ].compactMap { $0 }
             for size in EncoderSize.all {
-                for preset in EncoderPreset.all {
+                for preset in presets {
                     progress("\(preset.label) \(size.label)")
-                    let line = "\(preset.label), \(size.label), \(measure(preset, size))"
+                    let line = "\(preset.label) \(preset.bitDepth)-bit input, \(size.label), \(measure(preset, size))"
                     report.append(line)
                     Log.shared.info("Encoder test: \(line)")
                 }
@@ -86,10 +90,59 @@ public enum EncoderProbe {
             return "0, 0, timed out"
         }
         let elapsed = Date().timeIntervalSince(start)
+        let packed = preset.pixelFormat == kCVPixelFormatType_4444AYpCbCr16
+        let depth = packed && result.failure == nil ? ", \(keptDepth(url))" : ""
         return String(
-            format: "%.1f, %.0f, %@", Double(result.framesWritten) / elapsed,
+            format: "%.1f, %.0f, %@%@", Double(result.framesWritten) / elapsed,
             result.megabytes / (Double(frameCount) / 30),
-            result.failure.map { "failed: \($0)" } ?? "ok \(result.framesWritten) frames")
+            result.failure.map { "failed: \($0)" } ?? "ok \(result.framesWritten) frames", depth)
+    }
+
+    /// Reads the first frame back as 16-bit and looks for luma steps finer than 10 bits, which
+    /// `fill` writes into packed buffers. A file that kept only 10 bits has none.
+    private static func keptDepth(_ url: URL) -> String {
+        let done = DispatchSemaphore(value: 0)
+        var answer = "depth unread"
+        Task {
+            defer { done.signal() }
+            do {
+                let asset = AVURLAsset(url: url)
+                guard let track = try await asset.loadTracks(withMediaType: .video).first else {
+                    answer = "depth: no track"
+                    return
+                }
+                let reader = try AVAssetReader(asset: asset)
+                let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
+                    kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_4444AYpCbCr16,
+                ])
+                reader.add(output)
+                guard reader.startReading(), let sample = output.copyNextSampleBuffer(),
+                    let image = CMSampleBufferGetImageBuffer(sample)
+                else {
+                    answer = "depth: unreadable"
+                    return
+                }
+                CVPixelBufferLockBaseAddress(image, .readOnly)
+                defer { CVPixelBufferUnlockBaseAddress(image, .readOnly) }
+                guard let base = CVPixelBufferGetBaseAddress(image) else { return }
+                let stride = CVPixelBufferGetBytesPerRow(image)
+                var fine = 0
+                var total = 0
+                for y in Swift.stride(from: 0, to: CVPixelBufferGetHeight(image), by: 64) {
+                    let row = (base + y * stride).assumingMemoryBound(to: UInt16.self)
+                    for x in Swift.stride(from: 0, to: CVPixelBufferGetWidth(image), by: 7) {
+                        total += 1
+                        if (row[x * 4 + 1] >> 4) & 3 != 0 { fine += 1 }
+                    }
+                }
+                let share = total > 0 ? 100 * fine / total : 0
+                answer = share > 10 ? "kept 12 bits (\(share)% finer than 10-bit)" : "kept 10 bits (\(share)%)"
+            } catch {
+                answer = "depth: \(error.localizedDescription)"
+            }
+        }
+        _ = done.wait(timeout: .now() + 60)
+        return answer
     }
 
     /// Writes a moving gradient with light noise, in-range for 10-bit video.
@@ -117,8 +170,12 @@ public enum EncoderProbe {
                     }
                     noise = noise &* 1_664_525 &+ 1_013_904_223
                     let wave = (x &* 3 &+ y &* 5 &+ seed &* 40) & 511
-                    let value = 256 + wave + Int((noise >> 28) & 15)
-                    row[x] = UInt16(value) << 6
+                    if packed {
+                        // 12-bit codes, so `keptDepth` can tell what the file kept.
+                        row[x] = UInt16((256 + wave) * 4 + Int((noise >> 26) & 63)) << 4
+                    } else {
+                        row[x] = UInt16(256 + wave + Int((noise >> 28) & 15)) << 6
+                    }
                 }
             }
         }

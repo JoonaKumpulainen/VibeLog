@@ -117,7 +117,7 @@ Other commands:
 | `focusAt 0.5,0.5` | Focuses and meters at a point |
 | `applyPreset <name>`, `savePreset <name>`, `defaultPreset <name or none>` | Manage presets |
 | `resetSettings` | Returns every setting to the app's own, keeping presets and the link |
-| `controlTest`, `encoderTest`, `probe`, `zoomProbe` | Run the Diagnostics tests |
+| `controlTest`, `encoderTest`, `probe` | Run the Diagnostics tests |
 | `sendPreview` | Sends a small JPEG of the scene |
 | `saveStill`, `sendStill` | Saves a full still, and sends the newest one |
 | `sendReference` | Sends the newest RAW clip's reference frame and metadata |

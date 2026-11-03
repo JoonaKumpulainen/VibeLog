@@ -50,8 +50,23 @@ public struct EncoderPreset: Identifiable, Hashable, Sendable {
     public let profile: String?
     public let bitrate: Int?
 
-    /// The color depth the encoder receives. ProRes 4444 is fed 16 bits and keeps 12.
+    /// The color depth the encoder keeps. Fed 16 bits, ProRes 4444 keeps 12.
     public var bitDepth: Int { pixelFormat == kCVPixelFormatType_4444AYpCbCr16 ? 12 : 10 }
+
+    /// ProRes 4444 fed 16-bit AYCbCr, with opaque alpha, so it keeps its 12 bits of color, proven
+    /// on an iPhone 14 Pro. Other presets stay as they are.
+    public var twelveBit: EncoderPreset {
+        guard codec == .proRes4444 else { return self }
+        return EncoderPreset(
+            id: id, label: label, codec: codec, pixelFormat: kCVPixelFormatType_4444AYpCbCr16,
+            profile: profile, bitrate: bitrate)
+    }
+
+    /// Only for the encoder test: whether HEVC writes more than 10 bits when given 16. Apple lists
+    /// no 12-bit HEVC profile, so the file may come out 10-bit without any error.
+    public static let hevc444From16Bit = EncoderPreset(
+        id: "hevc444-16", label: "HEVC 4:4:4 from 16-bit", codec: .hevc,
+        pixelFormat: kCVPixelFormatType_4444AYpCbCr16, profile: nil, bitrate: 300_000_000)
 
     public static let all: [EncoderPreset] = [
         EncoderPreset(
@@ -72,10 +87,9 @@ public struct EncoderPreset: Identifiable, Hashable, Sendable {
         EncoderPreset(
             id: "prores422hq", label: "ProRes 422 HQ", codec: .proRes422HQ,
             pixelFormat: kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange, profile: nil, bitrate: nil),
-        // 16-bit input, so ProRes keeps its 12 bits of color. The alpha it carries is always opaque.
         EncoderPreset(
             id: "prores4444", label: "ProRes 4444", codec: .proRes4444,
-            pixelFormat: kCVPixelFormatType_4444AYpCbCr16, profile: nil, bitrate: nil),
+            pixelFormat: kCVPixelFormatType_444YpCbCr10BiPlanarVideoRange, profile: nil, bitrate: nil),
     ]
 
     func outputSettings(

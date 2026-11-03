@@ -42,6 +42,9 @@ struct SettingsView: View {
                 if matches(Self.distortionTerms), !search.isEmpty {
                     Section("Advanced") { distortionRow }
                 }
+                if matches(Self.twelveBitTerms), !search.isEmpty {
+                    Section("Advanced") { twelveBitRow }
+                }
                 if matches("about version saved config file") {
                     aboutSection
                 }
@@ -87,10 +90,11 @@ struct SettingsView: View {
     private static let desqueezeTerms = "anamorphic desqueeze squeeze lens"
     private static let viewfinderTerms = [lookTerms, lutTerms, pauseTerms, peakingTerms, guideTerms, desqueezeTerms].joined(separator: " ")
     private static let offsetTerms = "exposure offset stops brightness baked"
-    private static let gamutTerms = "color colour space gamut native pair sync s-gamut3 s-gamut s-log3 s-log2 arri wide logc3 logc4 awg3 awg4 canon cinema rec.2020"
+    private static let gamutTerms = "color colour space gamut native pair sync s-gamut3 s-gamut3.cine cine s-gamut s-log3 s-log2 arri wide logc3 logc4 awg3 awg4 canon cinema rec.2020"
     private static let tagTerms = "file tag color colour rec.709 rec.2020 hlg editor"
     private static let processingTerms = "pipeline debayer demosaic quality processing efficient bilinear malvar hot advanced"
     private static let distortionTerms = "lens distortion correction ultra wide advanced"
+    private static let twelveBitTerms = "12-bit 12 bit prores 4444 depth color advanced"
     private static let imageTerms = [offsetTerms, gamutTerms, tagTerms].joined(separator: " ")
 
     /// Every word typed has to appear, so a phrase can come in any order.
@@ -101,7 +105,7 @@ struct SettingsView: View {
     private var hasResults: Bool {
         matches(Self.formatTerms) || matches(Self.presetTerms) || matches(Self.recordingTerms)
             || matches(Self.viewfinderTerms) || matches(Self.imageTerms) || matches(Self.processingTerms)
-            || matches(Self.distortionTerms) || matches("about version saved config file")
+            || matches(Self.distortionTerms) || matches(Self.twelveBitTerms) || matches("about version saved config file")
     }
 
     private static var version: String {
@@ -333,11 +337,16 @@ struct SettingsView: View {
     }
 
     private var gamutDetail: String {
-        guard let curve = model.processing.gamut.curve else {
-            if model.processing.pairsGamut { return "Sets the log curve to Apple Log, which records Rec.2020." }
-            return "Every curve but Apple Log 2 can record this. Apple Log 2 can't, so choosing this from it moves to Apple Log."
+        let processing = model.processing
+        guard processing.pairsGamut else {
+            return "Changes the color space alone. Apple Wide Gamut is only for Apple Log 2."
         }
-        return "Sets the log curve to \(curve.label), which this gamut belongs to."
+        return "Also sets the log curve, to \(processing.pairing.curve(for: processing.gamut).label) for this one. Pairs are set under Advanced."
+    }
+
+    private func gamutLabel(_ gamut: Gamut) -> String {
+        guard model.processing.pairsGamut else { return gamut.label }
+        return "\(gamut.label) · \(model.processing.pairing.curve(for: gamut).label)"
     }
 
     private var imageSection: some View {
@@ -354,14 +363,14 @@ struct SettingsView: View {
             }
             if matches(Self.gamutTerms) {
                 Picker(selection: $model.processing.gamut) {
-                    ForEach(Gamut.allCases) { Text($0.pairedLabel).tag($0) }
+                    ForEach(Gamut.allCases) { Text(gamutLabel($0)).tag($0) }
                 } label: {
                     explained("Color space", gamutDetail)
                 }
                 Toggle(isOn: $model.processing.pairsGamut) {
                     explained(
                         "Pair curve and color space",
-                        "Choosing a log curve also chooses its color space, and the other way round. Off, any curve can record Rec.2020.")
+                        "Choosing a log curve also chooses its color space, and the other way round. Off, either changes alone.")
                 }
             }
             if matches(Self.tagTerms) {
@@ -385,6 +394,12 @@ struct SettingsView: View {
         Form {
             Section("Processing") { processingRows }
             Section("Capture") { distortionRow }
+            Section("Recording") { twelveBitRow }
+            Section {
+                NavigationLink("Color spaces and LUTs") { PairingView() }
+            } footer: {
+                Text("Which color space each log curve records, and a viewfinder LUT for each. Kept in presets.")
+            }
             Section {
                 NavigationLink("Diagnostics") {
                     DiagnosticsView { dismiss() }
@@ -418,6 +433,15 @@ struct SettingsView: View {
         Toggle(isOn: $model.processing.bilinearWhenHot) {
             explained("Bilinear when hot", "Saves GPU time, but the picture turns softer partway through a take.")
         }
+    }
+
+    private var twelveBitRow: some View {
+        Toggle(isOn: $model.twelveBitProRes) {
+            explained(
+                "12-bit ProRes 4444",
+                "Keeps 12 bits of color instead of 10, for heavy grading. About the same file size, but more memory, and a 10-minute take is untested.")
+        }
+        .disabled(model.isRecording)
     }
 
     private var distortionRow: some View {

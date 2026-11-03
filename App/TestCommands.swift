@@ -150,10 +150,6 @@ extension AppModel {
             guard isStreaming, !isRecording else { return refused("Needs a running stream and no take") }
             runControlTest()
             return done()
-        case "zoomProbe":
-            guard !isRecording else { return refused("A take is running") }
-            runZoomRawProbe()
-            return done()
         case "sendLog":
             sendLog()
             return done()
@@ -196,7 +192,7 @@ extension AppModel {
             "pairsGamut": String(processing.pairsGamut),
             "pipeline": processing.pipeline.rawValue, "tools": toolsLabel,
             "fixedFrameTime": String(fixedFrameTime), "uncompressedAudio": String(pcmAudio),
-            "distortionCorrection": String(distortionCorrection),
+            "distortionCorrection": String(distortionCorrection), "twelveBitProRes": String(twelveBitProRes),
             "efficientWhenHot": String(processing.efficientWhenHot), "isoAuto": String(isoAuto),
             "bilinearWhenHot": String(processing.bilinearWhenHot),
             "yields": String(pipelineStats.monitorYields),
@@ -230,7 +226,7 @@ extension AppModel {
         }
         switch name {
         case "lens": return pick(lenses, \.zoomLabel) { lensID = $0.id }
-        // By label, since 23.98 as typed isn't exactly 24000/1001.
+        // By label, so a decimal rate would match as typed.
         case "frameRate": return pick(FrameRates.all, FrameRates.label) { frameRate = $0 }
         case "codec": return pick(EncoderPreset.all, \.id) { encoderPreset = $0 }
         case "size": return pick(EncoderSize.all, \.label) { encoderSize = $0 }
@@ -250,6 +246,7 @@ extension AppModel {
         case "captureTiming": return flag { logCaptureTiming = $0 }
         case "fixedFrameTime": return flag { fixedFrameTime = $0 }
         case "distortionCorrection": return flag { distortionCorrection = $0 }
+        case "twelveBitProRes": return flag { twelveBitProRes = $0 }
         case "efficientWhenHot": return flag { processing.efficientWhenHot = $0 }
         case "isoAuto":
             guard exposureLocked else { return "isoAuto needs a set shutter first" }

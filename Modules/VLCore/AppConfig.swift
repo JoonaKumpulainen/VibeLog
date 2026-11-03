@@ -54,9 +54,17 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var frameRate = 30.0
     public var stopAfterSeconds = 0.0
     public var logCurve = "Apple Log"
+    /// Read only from older files, which had no gamut of their own.
     public var nativeGamut = false
+    /// The recorded gamut's label. Empty in older files, which follow `nativeGamut`.
+    public var gamut = ""
     /// Each curve records its own gamut, so either choice sets the other.
     public var pairsGamut = true
+    /// Changes from the standard pairs, by label: curve to gamut, and gamut to curve.
+    public var curveGamuts: [String: String] = [:]
+    public var gamutCurves: [String: String] = [:]
+    /// A viewfinder LUT for a curve in a gamut, keyed by `AppConfig.lutKey`.
+    public var curveLUTs: [String: String] = [:]
     public var pipeline = "maximum"
     public var debayer = "Malvar-He-Cutler"
     public var exposureOffset = -0.5
@@ -85,6 +93,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var fixedFrameTime = true
     /// Lets the camera reshape frames to correct the lens. On, the ultra wide only reached 23 fps.
     public var distortionCorrection = false
+    /// ProRes 4444 at 12 bits instead of 10.
+    public var twelveBitProRes = false
     /// Moves to the Efficient path while the phone is hot.
     public var efficientWhenHot = true
     public var frameGuide = "2.39"
@@ -97,6 +107,9 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var testToken = ""
 
     public init() {}
+
+    /// A LUT belongs to a curve in one gamut, since a conversion LUT expects both.
+    public static func lutKey(curve: String, gamut: String) -> String { "\(curve) · \(gamut)" }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -113,6 +126,10 @@ public struct AppConfig: Codable, Equatable, Sendable {
         logCurve = read(.logCurve, defaults.logCurve)
         nativeGamut = read(.nativeGamut, defaults.nativeGamut)
         pairsGamut = read(.pairsGamut, defaults.pairsGamut)
+        gamut = read(.gamut, defaults.gamut)
+        curveGamuts = read(.curveGamuts, defaults.curveGamuts)
+        gamutCurves = read(.gamutCurves, defaults.gamutCurves)
+        curveLUTs = read(.curveLUTs, defaults.curveLUTs)
         pipeline = read(.pipeline, defaults.pipeline)
         debayer = read(.debayer, defaults.debayer)
         exposureOffset = read(.exposureOffset, defaults.exposureOffset)
@@ -135,6 +152,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         peakingSensitivity = read(.peakingSensitivity, defaults.peakingSensitivity)
         fixedFrameTime = read(.fixedFrameTime, defaults.fixedFrameTime)
         distortionCorrection = read(.distortionCorrection, defaults.distortionCorrection)
+        twelveBitProRes = read(.twelveBitProRes, defaults.twelveBitProRes)
         efficientWhenHot = read(.efficientWhenHot, defaults.efficientWhenHot)
         frameGuide = read(.frameGuide, defaults.frameGuide)
         desqueeze = read(.desqueeze, defaults.desqueeze)

@@ -52,6 +52,7 @@ public enum ColorMath {
 public enum Gamut: String, CaseIterable, Identifiable, Sendable {
     case rec2020
     case appleWideGamut
+    case sGamut3Cine
     case sGamut3
     case sGamut
     case arriWideGamut3
@@ -64,6 +65,7 @@ public enum Gamut: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .rec2020: return "Rec.2020"
         case .sGamut3: return "S-Gamut3"
+        case .sGamut3Cine: return "S-Gamut3.Cine"
         case .arriWideGamut3: return "ARRI Wide Gamut 3"
         case .appleWideGamut: return "Apple Wide Gamut"
         case .sGamut: return "S-Gamut"
@@ -72,11 +74,11 @@ public enum Gamut: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// The curve this gamut belongs to. Rec.2020 goes with every curve but Apple Log 2.
-    public var curve: LogCurve? {
+    /// The curve this gamut is recorded with by default. Rec.2020 is Apple Log's own.
+    public var standardCurve: LogCurve {
         switch self {
-        case .rec2020: return nil
-        case .sGamut3: return .sLog3
+        case .rec2020: return .appleLog
+        case .sGamut3, .sGamut3Cine: return .sLog3
         case .arriWideGamut3: return .logC3
         case .appleWideGamut: return .appleLog2
         case .sGamut: return .sLog2
@@ -85,24 +87,12 @@ public enum Gamut: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// The gamut with what it pairs with, so a list shows which curves have their own.
-    public var pairedLabel: String {
-        switch self {
-        case .rec2020: return "Rec.2020"
-        case .sGamut3: return "S-Gamut3 · S-Log3"
-        case .arriWideGamut3: return "ARRI Wide Gamut 3 · LogC3"
-        case .appleWideGamut: return "Apple Wide Gamut · Apple Log 2"
-        case .sGamut: return "S-Gamut · S-Log2"
-        case .arriWideGamut4: return "ARRI Wide Gamut 4 · LogC4"
-        case .cinemaGamut: return "Cinema Gamut · Canon Log 3"
-        }
-    }
-
     /// Red, green and blue as CIE xy.
     private var primaries: (red: SIMD2<Double>, green: SIMD2<Double>, blue: SIMD2<Double>)? {
         switch self {
         case .rec2020: return nil
         case .sGamut3: return (SIMD2(0.730, 0.280), SIMD2(0.140, 0.855), SIMD2(0.100, -0.050))
+        case .sGamut3Cine: return (SIMD2(0.766, 0.275), SIMD2(0.225, 0.800), SIMD2(0.089, -0.087))
         case .arriWideGamut3: return (SIMD2(0.6840, 0.3130), SIMD2(0.2210, 0.8480), SIMD2(0.0861, -0.1020))
         case .appleWideGamut: return (SIMD2(0.725, 0.301), SIMD2(0.221, 0.814), SIMD2(0.068, -0.076))
         // The same primaries as S-Gamut3, named apart because each goes with its own curve.
@@ -127,17 +117,76 @@ public enum Gamut: String, CaseIterable, Identifiable, Sendable {
 }
 
 extension LogCurve {
-    /// The gamut the curve's own cameras record. Apple Log is already Rec.2020.
+    /// The gamut this curve records by default. Apple Log is already Rec.2020.
     public var nativeGamut: Gamut {
         switch self {
         case .appleLog: return .rec2020
-        case .sLog3: return .sGamut3
+        case .sLog3: return .sGamut3Cine
         case .logC3: return .arriWideGamut3
         case .appleLog2: return .appleWideGamut
         case .sLog2: return .sGamut
         case .logC4: return .arriWideGamut4
         case .canonLog3: return .cinemaGamut
         }
+    }
+}
+
+/// Which gamut each curve records, and which curve each gamut records, while pairing is on. The
+/// owner can change both tables, and they're saved in presets.
+public struct GamutPairing: Equatable, Sendable {
+    public private(set) var gamuts: [LogCurve: Gamut] = [:]
+    public private(set) var curves: [Gamut: LogCurve] = [:]
+
+    public static let standard = GamutPairing()
+
+    public init() {}
+
+    /// Rebuilds the tables from saved labels, ignoring any entry that no longer fits.
+    public init(gamutLabels: [String: String], curveLabels: [String: String]) {
+        for (curveLabel, gamutLabel) in gamutLabels {
+            if let curve = LogCurve.allCases.first(where: { $0.label == curveLabel }),
+                let gamut = Gamut.allCases.first(where: { $0.label == gamutLabel }) {
+                setGamut(gamut, for: curve)
+            }
+        }
+        for (gamutLabel, curveLabel) in curveLabels {
+            if let gamut = Gamut.allCases.first(where: { $0.label == gamutLabel }),
+                let curve = LogCurve.allCases.first(where: { $0.label == curveLabel }) {
+                setCurve(curve, for: gamut)
+            }
+        }
+    }
+
+    /// Apple Log 2 is Apple Log in Apple Wide Gamut, so that gamut belongs to it alone.
+    public static func gamuts(for curve: LogCurve) -> [Gamut] {
+        curve == .appleLog2 ? [.appleWideGamut] : Gamut.allCases.filter { $0 != .appleWideGamut }
+    }
+
+    public static func curves(for gamut: Gamut) -> [LogCurve] {
+        gamut == .appleWideGamut ? [.appleLog2] : LogCurve.allCases.filter { $0 != .appleLog2 }
+    }
+
+    public func gamut(for curve: LogCurve) -> Gamut { gamuts[curve] ?? curve.nativeGamut }
+
+    public func curve(for gamut: Gamut) -> LogCurve { curves[gamut] ?? gamut.standardCurve }
+
+    public mutating func setGamut(_ gamut: Gamut, for curve: LogCurve) {
+        guard Self.gamuts(for: curve).contains(gamut) else { return }
+        gamuts[curve] = gamut == curve.nativeGamut ? nil : gamut
+    }
+
+    public mutating func setCurve(_ curve: LogCurve, for gamut: Gamut) {
+        guard Self.curves(for: gamut).contains(curve) else { return }
+        curves[gamut] = curve == gamut.standardCurve ? nil : curve
+    }
+
+    /// Only the changes from the standard pairs, by label, for saving.
+    public var gamutLabels: [String: String] {
+        Dictionary(uniqueKeysWithValues: gamuts.map { ($0.key.label, $0.value.label) })
+    }
+
+    public var curveLabels: [String: String] {
+        Dictionary(uniqueKeysWithValues: curves.map { ($0.key.label, $0.value.label) })
     }
 }
 

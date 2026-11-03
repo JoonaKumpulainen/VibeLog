@@ -82,10 +82,26 @@ final class AppModel: ObservableObject {
     /// Stops the stream after this long with no touch. Zero never does.
     @Published var idlePauseMinutes = 2.0
     @Published var distortionCorrection = false { didSet { if distortionCorrection != oldValue { reconfigure() } } }
+    /// ProRes 4444 keeps 12 bits instead of 10, at about the same data rate but more memory.
+    @Published var twelveBitProRes = false
+    /// What a take records with: the chosen preset, at 12 bits when that's on and it's 4444.
+    var takePreset: EncoderPreset { twelveBitProRes ? encoderPreset.twelveBit : encoderPreset }
     @Published var frameGuide = FrameGuide.scope
     @Published var fileTag = FileTag.rec2020
 
-    @Published var processing = ProcessingSettings() { didSet { pipeline?.update(processing) } }
+    @Published var processing = ProcessingSettings() {
+        didSet {
+            pipeline?.update(processing)
+            if !adopting, processing.curve != oldValue.curve || processing.gamut != oldValue.gamut {
+                followPairLUT(from: Self.lutKey(oldValue.curve, oldValue.gamut))
+            }
+        }
+    }
+    /// Viewfinder LUTs linked to a curve in a gamut, kept in presets. Choosing the pair chooses
+    /// its LUT, and choosing a LUT linked to one pair chooses that pair.
+    @Published var curveLUTs: [String: String] = [:]
+    /// Settings being read back, which mustn't set off the links between pairs and LUTs.
+    private var adopting = false
     @Published var pipelineStats = PipelineStats()
 
     @Published var recordEncoded = true
@@ -103,8 +119,14 @@ final class AppModel: ObservableObject {
         }
     }
     @Published var lutNames: [String] = []
-    /// Empty selects the built-in Rec.709 LUT.
-    @Published var selectedLUT = "" { didSet { if selectedLUT != oldValue { loadSelectedLUT() } } }
+    /// Empty selects the built-in Rec.709 view.
+    @Published var selectedLUT = "" {
+        didSet {
+            guard selectedLUT != oldValue else { return }
+            loadSelectedLUT()
+            if !adopting { followLUTPair() }
+        }
+    }
     @Published var recordElapsed = 0
     /// The loudest the microphone reached in the last second of a take, from 0 to 1.
     @Published var audioPeak: Float = 0
@@ -413,8 +435,11 @@ final class AppModel: ObservableObject {
         config.frameRate = frameRate
         config.stopAfterSeconds = recordSeconds
         config.logCurve = processing.curve.label
-        config.nativeGamut = processing.nativeGamut
+        config.gamut = processing.gamut.label
         config.pairsGamut = processing.pairsGamut
+        config.curveGamuts = processing.pairing.gamutLabels
+        config.gamutCurves = processing.pairing.curveLabels
+        config.curveLUTs = curveLUTs
         config.pipeline = processing.pipeline.rawValue
         config.debayer = processing.demosaic.label
         config.exposureOffset = processing.exposureStops
@@ -437,6 +462,7 @@ final class AppModel: ObservableObject {
         config.peakingSensitivity = processing.peakingSensitivity.rawValue
         config.fixedFrameTime = fixedFrameTime
         config.distortionCorrection = distortionCorrection
+        config.twelveBitProRes = twelveBitProRes
         config.efficientWhenHot = processing.efficientWhenHot
         config.frameGuide = frameGuide.rawValue
         config.desqueeze = processing.desqueeze
@@ -477,10 +503,16 @@ final class AppModel: ObservableObject {
         widescreen = saved.widescreen
         if FrameRates.all.contains(saved.frameRate) { frameRate = saved.frameRate }
         recordSeconds = saved.stopAfterSeconds
-        processing.curve = LogCurve.allCases.first { $0.label == saved.logCurve } ?? processing.curve
-        // Before the saved gamut choice, which turning pairing off would replace.
+        adopting = true
+        defer { adopting = false }
         processing.pairsGamut = saved.pairsGamut
-        processing.nativeGamut = saved.nativeGamut
+        processing.pairing = GamutPairing(gamutLabels: saved.curveGamuts, curveLabels: saved.gamutCurves)
+        let curve = LogCurve.allCases.first { $0.label == saved.logCurve } ?? processing.curve
+        // Older files only said whether the curve's own gamut was on.
+        let gamut = Gamut.allCases.first { $0.label == saved.gamut }
+            ?? (saved.nativeGamut || saved.pairsGamut || curve == .appleLog2 ? curve.nativeGamut : .rec2020)
+        processing.restore(curve: curve, gamut: gamut)
+        curveLUTs = saved.curveLUTs
         processing.pipeline = PipelineMode(rawValue: saved.pipeline) ?? processing.pipeline
         processing.demosaic = DemosaicMethod.allCases.first { $0.label == saved.debayer } ?? processing.demosaic
         processing.exposureStops = saved.exposureOffset
@@ -502,6 +534,7 @@ final class AppModel: ObservableObject {
         processing.peakingSensitivity = PeakingSensitivity(rawValue: saved.peakingSensitivity) ?? .low
         fixedFrameTime = saved.fixedFrameTime
         distortionCorrection = saved.distortionCorrection
+        twelveBitProRes = saved.twelveBitProRes
         processing.efficientWhenHot = saved.efficientWhenHot
         frameGuide = FrameGuide(rawValue: saved.frameGuide) ?? frameGuide
         processing.desqueeze = saved.desqueeze
@@ -722,6 +755,38 @@ final class AppModel: ObservableObject {
     private func refreshLUTs() {
         let files = (try? FileManager.default.contentsOfDirectory(atPath: Storage.luts.path)) ?? []
         lutNames = files.filter { $0.lowercased().hasSuffix(".cube") }.sorted()
+    }
+
+    static func lutKey(_ curve: LogCurve, _ gamut: Gamut) -> String {
+        AppConfig.lutKey(curve: curve.label, gamut: gamut.label)
+    }
+
+    /// The LUT linked to a pair, or nil for none.
+    func linkedLUT(_ curve: LogCurve, _ gamut: Gamut) -> String? { curveLUTs[Self.lutKey(curve, gamut)] }
+
+    func linkLUT(_ name: String, to curve: LogCurve, in gamut: Gamut) {
+        curveLUTs[Self.lutKey(curve, gamut)] = name.isEmpty ? nil : name
+        if curve == processing.curve, gamut == processing.gamut, !name.isEmpty { selectedLUT = name }
+    }
+
+    /// A LUT linked to the last pair leaves with it, so it can't misread the new one.
+    private func followPairLUT(from oldKey: String) {
+        if let linked = linkedLUT(processing.curve, processing.gamut), lutNames.contains(linked) {
+            selectedLUT = linked
+        } else if let old = curveLUTs[oldKey], old == selectedLUT {
+            selectedLUT = ""
+        }
+    }
+
+    private func followLUTPair() {
+        guard !isRecording, !selectedLUT.isEmpty,
+            linkedLUT(processing.curve, processing.gamut) != selectedLUT
+        else { return }
+        let pairs = LogCurve.allCases.flatMap { curve in
+            GamutPairing.gamuts(for: curve).map { (curve, $0) }
+        }.filter { linkedLUT($0.0, $0.1) == selectedLUT }
+        guard pairs.count == 1, let pair = pairs.first else { return }
+        processing.restore(curve: pair.0, gamut: pair.1)
     }
 
     private func loadSelectedLUT() {
@@ -960,10 +1025,6 @@ final class AppModel: ObservableObject {
 
     func runProbe() {
         runReleasingCamera(CaptureProbe.run)
-    }
-
-    func runZoomRawProbe() {
-        runReleasingCamera(ZoomRawProbe.run)
     }
 
     private func runReleasingCamera(
@@ -1225,7 +1286,7 @@ final class AppModel: ObservableObject {
             "tools": toolsLabel,
             "frameTime": fixedFrameTime ? "fixed" : "variable at 30 fps",
             "distortionCorrection": distortionCorrection ? "on" : "off, so the lens's distortion stays in the picture",
-            "bitDepth": String(encoderPreset.bitDepth),
+            "bitDepth": String(takePreset.bitDepth),
             "appPreview": appPreviewConnected ? "connected" : "disconnected",
             "fileTag": fileTag.label,
             "desqueeze": processing.desqueeze == 1 ? "off" : String(processing.desqueeze),
@@ -1237,7 +1298,7 @@ final class AppModel: ObservableObject {
         ]
         do {
             let encoder = try VideoEncoder(config: .init(
-                url: url, preset: encoderPreset, size: outputSize, frameRate: frameRate, audio: true,
+                url: url, preset: takePreset, size: outputSize, frameRate: frameRate, audio: true,
                 pcmAudio: pcmAudio, metadata: metadata,
                 rotationDegrees: hold.hold.clipRotation, fileTag: fileTag))
             audio.onSample = { [weak encoder] sample in encoder?.appendAudio(sample) }
@@ -1274,7 +1335,7 @@ final class AppModel: ObservableObject {
             isRecording = true
             let seconds = takeSeconds ?? recordSeconds
             takeSeconds = nil
-            Log.shared.info("Encoding \(name): lens \(currentLensLabel), \(encoderPreset.label) \(encoderPreset.bitDepth)-bit \(outputSize.label) at \(frameRateLabel) fps, frame time \(metadata["frameTime"] ?? "?"), audio \(metadata["audio"] ?? "?"), gyro \(metadata["gyroLog"] ?? "?"), tools \(toolsLabel), exposure \(metadata["exposureDuringTake"] ?? "?"), white balance \(metadata["whiteBalanceDuringTake"] ?? "?"), \(processing.curve.label), \(processing.pipeline.label) pipeline, \(seconds > 0 ? "\(seconds)s" : "until stopped"), battery \(SystemStatus.batteryText), thermal \(SystemStatus.thermalName), free \(SystemStatus.freeDisk / 1_000_000_000) GB")
+            Log.shared.info("Encoding \(name): lens \(currentLensLabel), \(takePreset.label) \(takePreset.bitDepth)-bit \(outputSize.label) at \(frameRateLabel) fps, frame time \(metadata["frameTime"] ?? "?"), audio \(metadata["audio"] ?? "?"), gyro \(metadata["gyroLog"] ?? "?"), tools \(toolsLabel), exposure \(metadata["exposureDuringTake"] ?? "?"), white balance \(metadata["whiteBalanceDuringTake"] ?? "?"), \(processing.curve.label), \(processing.pipeline.label) pipeline, \(seconds > 0 ? "\(seconds)s" : "until stopped"), battery \(SystemStatus.batteryText), thermal \(SystemStatus.thermalName), free \(SystemStatus.freeDisk / 1_000_000_000) GB")
             guard seconds > 0 else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self, weak encoder] in
                 guard let self, let encoder, self.activeEncoder === encoder else { return }

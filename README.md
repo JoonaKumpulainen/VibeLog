@@ -36,7 +36,6 @@ During a recording you can change ISO, shutter, white balance and the monitor to
 | **Show log** | Shows the log. **Copy** puts it on the clipboard, **Previous** opens the last session's log, which holds crash details. |
 | **Run control test** | Records 56 seconds and changes focus and exposure on a schedule. Each change is logged with frame and failure counts. |
 | **Run probe** | Logs every camera, format and RAW type, checks RAW availability for each session setup, tries Bayer formats on the video output, and scans AVCapture for RAW-related selectors. Saves `probes/probe_*.txt`. Takes up to a few minutes. |
-| **Run 48mm RAW probe** | Captures Bayer RAW on the main camera at each mix of photo size, 2x zoom and quality priority, and compares each picture with a 1x frame to see if it's really cropped. Saves `probes/zoom_raw_*.txt` and a folder of DNGs. Keep the phone still on a detailed scene. |
 | **Test link** | Connects to `tools/test_server.py` on your computer, which can change settings, start takes and collect logs. It can't delete takes, and it's off at every launch. Use it on your own network only. [TEST_LINK.md](TEST_LINK.md) covers privacy, the server and removing it. |
 | **Fixed frame time at 30 fps** | Holds the sensor at 1/30 s. Off lets it stretch to 1/15 s, as older builds did. |
 | **Start stream** / **Stop stream** | Starts or stops the selected method without saving. |
@@ -54,7 +53,7 @@ Methods:
 
 ## Processing
 
-Photo methods feed a GPU pipeline: black level, white balance, debayer, camera RAW to linear Rec.2020 using the DNG's color matrices, exposure, then a log curve. **Pipeline** is **Maximum quality** by default; **Efficient** does the same math with less GPU work, as described in the roadmap. **Monitor** shows the result through a Rec.709 LUT, as plain log, or switches back to the ISP preview. **Save still** saves the next processed frame to `stills/`. The overlay's `gpu` line shows the time per frame and any frames the pipeline dropped.
+Photo methods feed a GPU pipeline: black level, white balance, debayer, camera RAW to linear Rec.2020 using the DNG's color matrices, exposure, then a log curve. **Pipeline** is **Maximum quality** by default; **Efficient** does the same math with less GPU work, as described in the roadmap. **Monitor** shows the result in Rec.709, decoded per pixel on the GPU, as plain log, or switches back to the ISP preview. **Save still** saves the next processed frame to `stills/`. The overlay's `gpu` line shows the time per frame and any frames the pipeline dropped.
 
 The log image is Rec.2020 with the chosen curve by default. **Color space** in Settings can record Apple Wide Gamut, S-Gamut3 or ARRI Wide Gamut 3 instead, which also sets the matching curve, and the sidecar names the gamut. Curve constants match colour-science's implementations of the vendor formulas.
 

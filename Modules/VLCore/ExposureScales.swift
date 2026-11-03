@@ -1,9 +1,9 @@
 import Foundation
 
-/// The capture rates on offer. The decimal ones are the broadcast rates of 24 and 30, slowed by
-/// 1000/1001.
+/// The capture rates on offer. 23.98 and 29.97 are gone: set to them, the camera still delivered
+/// frames at 24 and 30 on an iPhone 14 Pro. The helpers still handle decimal rates.
 public enum FrameRates {
-    public static let all = [24000.0 / 1001, 24, 25, 30000.0 / 1001, 30]
+    public static let all = [24.0, 25, 30]
 
     private static func isDecimal(_ fps: Double) -> Bool { fps != fps.rounded() }
 

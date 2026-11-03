@@ -24,8 +24,10 @@ public struct MonitorBands: Equatable, Sendable {
     }
 }
 
-/// Monitoring transform from log Rec.2020 to display Rec.709. It holds middle gray in
-/// place and rolls highlights off, for judging exposure rather than as a finished look.
+/// Monitoring transform from log to display Rec.709. It holds middle gray in place and rolls
+/// highlights off, for judging exposure rather than as a finished look. The viewfinder does the
+/// same math per pixel in `monitorDisplay`, rather than through a LUT, whose interpolation
+/// differed by curve.
 public enum MonitorTransform {
     /// Scene-linear value that reaches display white.
     private static let peak = 8.0
@@ -42,25 +44,5 @@ public enum MonitorTransform {
         let scene = max(value, 0)
         let shaped = min(shoulderA * scene / (scene + shoulderB), 1)
         return pow(shaped, 1 / 2.4)
-    }
-
-    /// RGBA samples for a cubic 3D texture in rgba16Unorm, with red varying fastest.
-    public static func lut(curve: LogCurve, gamut: Gamut = .rec2020, size: Int) -> [UInt16] {
-        var samples = [UInt16]()
-        samples.reserveCapacity(size * size * size * 4)
-        let scale = 1 / Double(size - 1)
-        for blue in 0..<size {
-            for green in 0..<size {
-                for red in 0..<size {
-                    let input = SIMD3(Double(red), Double(green), Double(blue)) * scale
-                    let output = display(log: input, curve: curve, gamut: gamut)
-                    samples.append(UInt16(output.x * 65535))
-                    samples.append(UInt16(output.y * 65535))
-                    samples.append(UInt16(output.z * 65535))
-                    samples.append(65535)
-                }
-            }
-        }
-        return samples
     }
 }

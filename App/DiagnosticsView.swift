@@ -40,10 +40,6 @@ struct DiagnosticsView: View {
                     close()
                     model.runProbe()
                 }
-                Button("Run 48mm RAW probe") {
-                    close()
-                    model.runZoomRawProbe()
-                }
                 Button("Run encoder test") {
                     close()
                     model.runEncoderTest()
