@@ -1871,13 +1871,16 @@ final class ACESTests: XCTestCase {
                 + "OpenColorIO \(ACESReference.aces20[result.index])")
     }
 
-    /// OpenColorIO builds ACES 1.3's curves from its own splines, so a little more room here.
+    /// OpenColorIO's ACES 1.3 Rec.709 view leaves out-of-gamut colours above 1, where the Academy's
+    /// ODT clamps to the display, as this port does, so the reference is clamped the same way. The
+    /// rest differs by about 0.0002, at black.
     func testACES13MatchesOpenColorIO() {
-        let result = worst(.aces13, ACESReference.aces13)
+        let clamped = ACESReference.aces13.map { simd_clamp($0, SIMD3(repeating: 0), SIMD3(repeating: 1)) }
+        let result = worst(.aces13, clamped)
         XCTAssertLessThan(
-            result.error, 0.004,
+            result.error, 0.001,
             "sample \(result.index) \(ACESReference.samples[result.index]): got \(result.got), "
-                + "OpenColorIO \(ACESReference.aces13[result.index])")
+                + "OpenColorIO \(clamped[result.index])")
     }
 
     func testMiddleGrayLandsWhereACESPutsIt() {
