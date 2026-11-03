@@ -1,6 +1,6 @@
 # VibeLog handoff
 
-For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of early Phase 6. Phase 5 is built, and only a few phone checks remain. The latest build is `ad509d3`, which passed CI with 120 tests, one skipped because the simulator has no ProRes encoder, and hasn't been tested on the phone. It holds everything under **New since `c459497`**; `c1e1041` in between had stereo and baking, and its phone results are below. Results from earlier builds are under **Session on `623c5a9`**. The latest phone results came from `021248e`. The last logged session came from `9f9a456`.
+For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of early Phase 6. Phase 5 is built, and only a few phone checks remain. The latest build is `4241f0d`, which is `ad509d3` plus the look carousel fix and passed CI with 120 tests, one skipped because the simulator has no ProRes encoder, and hasn't been tested on the phone. It holds everything under **New since `c459497`**; `c1e1041` in between had stereo and baking, and its phone results are below. Results from earlier builds are under **Session on `623c5a9`**. The latest phone results came from `021248e`. The last logged session came from `9f9a456`.
 
 ## What this is
 
@@ -224,7 +224,7 @@ The owner wants sliders that grade the built-in looks, set while watching the vi
 - **Scope:** the built-in looks and the plain Rec.709 view only. Grading under an imported `.cube` means grading before someone else's look, which is possible but less predictable, and left for later.
 - **Tests:** a neutral grade must leave the look exactly as it is, exposure must move middle gray by the right stops through the tone curve, and saturation 0 must give neutral output. The owner judges how it looks, so slider ranges and hue widths start conservative and are tuned from the phone.
 
-### Fixed after `ad509d3`
+### Fixed after `ad509d3`, built as `4241f0d`
 
 - **Look carousel:** the owner found on `ad509d3` that sliding didn't snap or select, so a look had to be tapped, that the whole carousel turned sideways, and that the BAKE switch turned with the hold and broke. The row's stack sat inside a helper that switched between two stacks, so `scrollTargetLayout` never reached it and `scrollPosition` never moved. It's now a plain `HStack` marked as the scroll targets, which snaps and selects the look that settles in the middle. The carousel keeps its upright layout in every hold, at the owner's choice, and only the names turn. Only the BAKE label turns, and the switch stays as it is.
 
