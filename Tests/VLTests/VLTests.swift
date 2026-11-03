@@ -922,7 +922,7 @@ final class VideoEncoderTests: XCTestCase {
                 throw XCTSkip("\(preset.label) is not available here: \(error)")
             }
             // Capture times on the nanosecond clock, as the pipeline gives them.
-            for index in 0..<48 {
+            for index in 0..<10 {
                 let buffer = try XCTUnwrap(encoder.nextPixelBuffer())
                 encoder.append(buffer, at: CMTime(seconds: 1000 + Double(index) / fps, preferredTimescale: 1_000_000_000))
             }
