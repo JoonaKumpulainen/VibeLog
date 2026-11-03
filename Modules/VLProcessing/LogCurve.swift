@@ -111,11 +111,11 @@ public enum LogCurve: UInt32, CaseIterable, Identifiable, Sendable {
     }
 
     private enum Arri4 {
-        static let a = (pow(2, 18) - 16) / 117.45
+        static let a = (pow(2.0, 18) - 16) / 117.45
         static let b = (1023.0 - 95) / 1023
         static let c = 95.0 / 1023
-        static let s = 7 * log(2) * pow(2, 7 - 14 * c / b) / (a * b)
-        static let t = (pow(2, 14 * -c / b + 6) - 64) / a
+        static let s = 7 * log(2.0) * pow(2.0, 7 - 14 * c / b) / (a * b)
+        static let t = (pow(2.0, 14 * -c / b + 6) - 64) / a
     }
 
     private enum Canon {
