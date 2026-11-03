@@ -230,12 +230,8 @@ extension AppModel {
         }
         switch name {
         case "lens": return pick(lenses, \.zoomLabel) { lensID = $0.id }
-        case "frameRate":
-            guard let fps = Double(value), FrameRates.all.contains(fps) else {
-                return "frameRate takes: \(FrameRates.all.map(FrameRates.label).joined(separator: ", "))"
-            }
-            frameRate = fps
-            return nil
+        // By label, since 23.98 as typed isn't exactly 24000/1001.
+        case "frameRate": return pick(FrameRates.all, FrameRates.label) { frameRate = $0 }
         case "codec": return pick(EncoderPreset.all, \.id) { encoderPreset = $0 }
         case "size": return pick(EncoderSize.all, \.label) { encoderSize = $0 }
         case "aspect": return pick(["4:3", "16:9"], { $0 }) { widescreen = $0 == "16:9" }

@@ -58,3 +58,58 @@ struct ProcessedMonitor: UIViewRepresentable {
 
     func updateUIView(_ view: MTKView, context: Context) {}
 }
+
+/// Reports every touch that begins anywhere in its window, without taking it from the views
+/// that handle it. Buttons, dials and drags all count, which a SwiftUI tap gesture misses.
+struct TouchWatcher: UIViewRepresentable {
+    let onTouch: () -> Void
+
+    final class WatchingView: UIView {
+        var onTouch: () -> Void = {}
+        private var recognizer: Recognizer?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if let recognizer { recognizer.view?.removeGestureRecognizer(recognizer) }
+            guard let window else { return }
+            let added = Recognizer { [weak self] in self?.onTouch() }
+            window.addGestureRecognizer(added)
+            recognizer = added
+        }
+    }
+
+    /// Never recognizes, so it never delays or cancels another view's touches.
+    final class Recognizer: UIGestureRecognizer, UIGestureRecognizerDelegate {
+        private let began: () -> Void
+
+        init(began: @escaping () -> Void) {
+            self.began = began
+            super.init(target: nil, action: nil)
+            cancelsTouchesInView = false
+            delaysTouchesBegan = false
+            delaysTouchesEnded = false
+            delegate = self
+        }
+
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+            began()
+            state = .failed
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+        ) -> Bool { true }
+    }
+
+    func makeUIView(context: Context) -> WatchingView {
+        let view = WatchingView()
+        view.isUserInteractionEnabled = false
+        view.onTouch = onTouch
+        return view
+    }
+
+    func updateUIView(_ view: WatchingView, context: Context) {
+        view.onTouch = onTouch
+    }
+}

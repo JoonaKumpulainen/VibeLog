@@ -137,7 +137,11 @@ public enum ZoomRawProbe {
             let settings = AVCapturePhotoSettings(rawPixelFormatType: raw)
             settings.maxPhotoDimensions = CMVideoDimensions(
                 width: Int32(size.width), height: Int32(size.height))
-            settings.photoQualityPrioritization = priority
+            // RAW refuses quality prioritization on iOS 27, with an exception that ends the app.
+            if let exception = VLTryCatch({ settings.photoQualityPrioritization = priority }) {
+                add("\(label): settings raised \(exception.reason ?? exception.name.rawValue)")
+                break
+            }
             settings.flashMode = .off
             if #available(iOS 18.0, *), output.isShutterSoundSuppressionSupported {
                 settings.isShutterSoundSuppressionEnabled = true

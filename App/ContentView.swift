@@ -76,10 +76,20 @@ struct CameraScreen: View {
                 showFormat = true
             }
         }
-        .simultaneousGesture(TapGesture().onEnded { model.cameraTouched() })
+        .background(TouchWatcher { model.noteTouch() })
+        .overlay {
+            if model.idlePaused {
+                Color.black.opacity(0.001)
+                    .contentShape(Rectangle())
+                    .ignoresSafeArea()
+                    .onTapGesture { model.cameraTouched() }
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityLabel("Resume camera")
+            }
+        }
         .onChange(of: selectedDial != nil || showFormat || showMonitor) { _, open in
             model.isCameraControlOpen = open
-            model.cameraTouched()
+            model.noteTouch()
         }
         .onChange(of: model.playingTake != nil) { _, open in
             AppOrientation.allowTurning(open)

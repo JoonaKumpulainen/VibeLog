@@ -236,7 +236,8 @@ final class AppModel: ObservableObject {
     private var hotEnded: Date?
     private var takeHeatEvents: [String] = []
     private var lastTouch = Date()
-    private var idlePaused = false
+    /// The camera stopped itself for want of a touch. A tap anywhere on the screen resumes it.
+    @Published private(set) var idlePaused = false
     /// A dial or panel is open, which counts as using the camera.
     var isCameraControlOpen = false
     /// Names the log the test link sends, so one session keeps one file.
@@ -873,7 +874,13 @@ final class AppModel: ObservableObject {
         if openScreen == "diagnostics" { openScreen = "settings" }
     }
 
-    /// Any touch on the camera screen. It also wakes a paused camera.
+    /// Any touch anywhere in the app, seen by the window before any view handles it.
+    func noteTouch() {
+        lastTouch = Date()
+    }
+
+    /// The tap that wakes a paused camera. It lands on a layer over the whole screen, so it
+    /// presses nothing underneath.
     func cameraTouched() {
         lastTouch = Date()
         guard idlePaused else { return }
@@ -884,6 +891,8 @@ final class AppModel: ObservableObject {
 
     /// Runs once a second. The test link's runs start and stop the stream themselves.
     private func pauseIfIdle() {
+        // A take counts as use, so the wait starts again when it ends.
+        if isRecording || recordStarting { lastTouch = Date() }
         guard idlePauseMinutes > 0, isStreaming, !isRecording, !recordStarting, isBusy == nil,
             openScreen == "camera", playingTake == nil, !isCameraControlOpen, !testLinkOn,
             Date().timeIntervalSince(lastTouch) >= idlePauseMinutes * 60
@@ -891,7 +900,7 @@ final class AppModel: ObservableObject {
         Log.shared.info("Camera paused after \(idlePauseMinutes) minutes idle")
         idlePaused = true
         toggleStream()
-        notice = "Camera paused to save heat. Tap the picture to resume"
+        notice = "Camera paused to save heat. Tap anywhere to resume"
     }
 
     /// Records for a set time, leaving **Stop after** as it is.
