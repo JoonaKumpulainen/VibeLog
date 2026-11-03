@@ -155,14 +155,15 @@ public final class VideoEncoder: VideoFrameSink {
         }
     }
 
-    /// AAC gets 192 kbps a channel.
+    /// AAC at 192 kbps mono or 256 kbps stereo. 384 kbps stereo was accepted here but failed at
+    /// the first sample on an iPhone 14 Pro, past what Apple's AAC encoder takes at 48 kHz.
     static func audioSettings(pcm: Bool, channels: Int = 1) -> [String: Any] {
         guard pcm else {
             return [
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
                 AVSampleRateKey: 48000,
                 AVNumberOfChannelsKey: channels,
-                AVEncoderBitRateKey: 192_000 * channels,
+                AVEncoderBitRateKey: channels > 1 ? 256_000 : 192_000,
             ]
         }
         return [

@@ -120,6 +120,28 @@ CI proves the code compiles and the file, stats and DNG parsing logic works. Not
 
 Copyright (C) 2026 JoonaKumpulainen
 
-VibeLog is free software under the [GNU General Public License v3.0](LICENSE). You can use, change and share it, and anyone who distributes a modified version must share its source under the same license.
+VibeLog is free software under the [GNU General Public License v3.0](LICENSE). You can use, change and share it, and anyone who distributes a modified version must share its source under the same license. It comes with no warranty, to the extent the law allows, as the license sets out in sections 15 and 16. Check important footage before relying on it.
 
-Apple Log, ProRes, S-Log2, S-Log3, LogC3, LogC4 and Canon Log are trademarks of their owners. VibeLog is an independent project and is not affiliated with or endorsed by them.
+### Third-party code
+
+VibeLog carries two ports of other projects' code. Their licenses are in [LICENSES](LICENSES), [NOTICE](NOTICE) lists what was changed, and the app shows the same texts under **Settings > About > Legal**, since these licenses ask for their notices to travel with the app.
+
+| Part | Ported from | License |
+|---|---|---|
+| ACES 2.0 look, `Modules/VLProcessing/ACES2.swift` | OpenColorIO's ACES 2.0 output transform, `src/OpenColorIO/ops/fixedfunction/ACES2` at commit `22dd9c4faa`. Copyright Contributors to the OpenColorIO Project. | [BSD 3-Clause](LICENSES/OpenColorIO-BSD-3-Clause.txt) |
+| The ACES 2.0 algorithm it implements | The Academy Color Encoding System 2.0 output transform, `ampas/aces-core`. | [Apache License 2.0](LICENSES/ACES-Apache-2.0.txt) |
+| ACES 1.3 look, `Modules/VLProcessing/ACES13.swift` | The Academy's ACES 1.3 reference CTL, `ampas/aces-dev` tag `v1.3.1`. Copyright © 2015 Academy of Motion Picture Arts and Sciences (A.M.P.A.S.). Portions contributed by others as indicated. All rights reserved. | [License Terms for ACES Components](LICENSES/ACES-1.3-AMPAS.txt) |
+
+These licenses are permissive. The BSD 3-Clause and Apache 2.0 licenses are compatible with GPLv3, and the Academy's license is a BSD-style license that allows copying, changing and redistributing with its notice, conditions and disclaimer kept. None of them lets VibeLog use the names of the Academy, the OpenColorIO Project or their contributors to endorse or promote it. This is the project's reading of the terms, not legal advice.
+
+`tools/make_aces_reference.py` writes the reference values the tests compare against, using OpenColorIO 2.6's built-in ACES configs. OpenColorIO isn't part of the app.
+
+### Data and formulas
+
+Log curves and color spaces follow their makers' published formulas and primaries. The constants were checked against colour-science, whose code isn't included. LUTs you import stay under their own licenses, and VibeLog doesn't ship any camera maker's LUTs.
+
+### Trademarks and affiliation
+
+Apple, iPhone, Apple Log and ProRes are trademarks of Apple Inc. ACES is a trademark of the Academy of Motion Picture Arts and Sciences. Sony, ARRI and Canon, and the names of their log curves and color spaces, such as S-Log2, S-Log3, S-Gamut3.Cine, LogC3, LogC4, ARRI Wide Gamut, Canon Log 3 and Cinema Gamut, may be trademarks of their owners. Gyroflow, DaVinci Resolve and other names belong to their owners. They're used only to say what VibeLog works with.
+
+VibeLog is an independent project. It isn't affiliated with, endorsed by or certified by Apple, Sony, ARRI, Canon, the Academy of Motion Picture Arts and Sciences, the Academy Software Foundation or the OpenColorIO Project. Its ACES looks are its own implementation, checked against OpenColorIO's output, and it isn't an ACES Logo product.

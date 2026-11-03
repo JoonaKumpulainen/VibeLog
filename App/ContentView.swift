@@ -51,6 +51,9 @@ struct CameraScreen: View {
                         model.settingsOpened()
                         showSettings = true
                     })
+                // Fixed to the screen, so a row that runs too wide can't widen the stack and
+                // move the picture.
+                .frame(width: screen.width, height: screen.height)
             }
             .environment(\.heldTurn, hold.turn)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: hold.turn)
@@ -281,7 +284,7 @@ struct CameraHUD: View {
                     if showMonitor, model.processing.monitor != .isp {
                         MonitorPanel(hold: hold) {
                             model.openLookPanel()
-                            withAnimation(motion) { showLook = true }
+                            withAnimation(lookFade) { showLook = true }
                         }
                         .transition(trayTransition)
                     } else if selectedDial == nil {
@@ -325,15 +328,16 @@ struct CameraHUD: View {
                         depth: stripDepth - CameraGeometry.formatGap
                     ) { keep in
                         model.closeLookPanel(keep: keep)
-                        withAnimation(motion) { showLook = false }
+                        withAnimation(lookFade) { showLook = false }
                     }
                     .accessibilityAction(.escape) {
                         model.closeLookPanel(keep: false)
                         showLook = false
                     }
                 }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-                .zIndex(1)
+                // A fade in place. Sliding up over the controls showed both at once mid-way.
+                .transition(.opacity)
+                .zIndex(2)
             }
         }
         .onChange(of: selectedDial) { _, dial in
@@ -347,6 +351,10 @@ struct CameraHUD: View {
 
     private var motion: Animation? {
         reduceMotion ? nil : .spring(duration: 0.35, bounce: 0.15)
+    }
+
+    private var lookFade: Animation? {
+        reduceMotion ? nil : .easeOut(duration: 0.18)
     }
 
     private var trayTransition: AnyTransition {
@@ -531,7 +539,10 @@ struct CameraHUD: View {
             if !model.isRecording {
                 lensPill
             } else if model.recordEncoded {
+                // Sized before the tools, which shrink to fit. Shared out evenly, the tools took
+                // their widest and pushed the row past the screen, which shifted the whole view.
                 AudioMeter()
+                    .layoutPriority(1)
             }
         }
         .frame(height: CameraGeometry.trayDepth)
@@ -854,8 +865,9 @@ struct MonitorPanel: View {
     }
 }
 
-/// The viewfinder's LUT, which a baked take records too. Each LUT shows on the picture as it
-/// slides into the band. Cancel puts back what was there, and Select keeps it.
+/// The viewfinder's look: LOG, Rec.709 or a LUT, each shown on the picture as it reaches the
+/// middle of the carousel. BAKE in the header records that look into takes. Cancel puts back what
+/// was there, and Select keeps it. Every control keeps its place and turns with the hold.
 struct LookPanel: View {
     @EnvironmentObject private var model: AppModel
     let hold: Hold
@@ -869,63 +881,41 @@ struct LookPanel: View {
 
     /// Not a file name, since those end in .cube.
     static let logChoice = "log"
+    private static let headerDepth: CGFloat = 52
 
-    private static let headerDepth: CGFloat = 44
-    private static let topPadding: CGFloat = 4
-
-    private var rowDepth: CGFloat {
-        let spare = depth - Self.headerDepth - FormatWheel<Bool>.titleDepth(hold) - FormatWheel<Bool>.titleGap
-            - Self.topPadding - bottomInset
-        return max(spare / 3, 36)
-    }
+    private var bakeAllowed: Bool { !model.isRecording && choice != Self.logChoice }
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Button { close(false) } label: { Text("Cancel").fixedSize().turnedToHold() }
-                    .frame(minWidth: 72, minHeight: 44, alignment: .leading)
-                Spacer()
-                Text(model.lutNames.isEmpty ? "Import LUTs in Settings" : "LOOK")
+            ZStack {
+                Text("LOOK")
                     .font(Tokens.labelFont)
                     .foregroundStyle(Tokens.label)
-                Spacer()
-                Button { close(true) } label: { Text("Select").fontWeight(.semibold).fixedSize().turnedToHold() }
-                    .frame(minWidth: 72, minHeight: 44, alignment: .trailing)
+                    .fixedSize()
+                    .turnedToHold()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .opacity(hold.isLandscape ? 0 : 1)
+                HStack(spacing: 0) {
+                    headerButton("Cancel", weight: .regular) { close(false) }
+                    Spacer(minLength: 0)
+                    bakeToggle
+                    Spacer(minLength: 0)
+                    headerButton("Select", weight: .semibold) { close(true) }
+                }
             }
-            .font(Tokens.statusFont)
-            .foregroundStyle(Tokens.held)
             .frame(height: Self.headerDepth)
             if ready {
-                HStack(alignment: .bottom, spacing: 0) {
-                    FormatWheel(
-                        title: "VIEWFINDER", options: [Self.logChoice, ""] + model.lutNames, selection: $choice,
-                        hold: hold, rowDepth: rowDepth
-                    ) {
-                        $0 == Self.logChoice ? "LOG" : $0.isEmpty ? "REC.709" : ($0 as NSString).deletingPathExtension
-                    }
-                    // Baking log would only record log, so the switch waits for a look.
-                    FormatWheel(title: "BAKE", options: [false, true], selection: $bake, hold: hold, rowDepth: rowDepth) {
-                        $0 ? "ON" : "OFF"
-                    }
-                    .frame(width: 96)
-                    .disabled(model.isRecording || choice == Self.logChoice)
-                    .opacity(model.isRecording || choice == Self.logChoice ? 0.4 : 1)
-                }
-                .background(alignment: .bottom) {
-                    Rectangle()
-                        .fill(Tokens.surface)
-                        .frame(height: rowDepth)
-                        .padding(.bottom, rowDepth)
-                }
+                LookCarousel(
+                    options: [Self.logChoice, ""] + model.lookNames, selection: $choice, hold: hold,
+                    label: Self.label)
             }
         }
         .padding(.horizontal, 12)
-        .padding(.top, Self.topPadding)
         .padding(.bottom, bottomInset)
-        .frame(height: depth, alignment: .bottom)
+        .frame(height: depth)
         .background(Tokens.opaquePanel)
         .onAppear {
-            // The wheels open on the current choice, so they're made once it's known.
+            // The carousel opens on the current choice, so it's made once that's known.
             choice = model.processing.monitor == .log ? Self.logChoice : model.selectedLUT
             bake = model.bakeLook
             ready = true
@@ -940,6 +930,135 @@ struct LookPanel: View {
             }
         }
         .onChange(of: bake) { _, on in if !model.isRecording { model.bakeLook = on } }
+    }
+
+    static func label(_ option: String) -> String {
+        if option == logChoice { return "LOG" }
+        if option.isEmpty { return "REC.709" }
+        if BuiltInLook.named(option) != nil { return option }
+        return (option as NSString).deletingPathExtension
+    }
+
+    private func headerButton(_ title: String, weight: Font.Weight, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(Tokens.statusFont.weight(weight))
+                .foregroundStyle(Tokens.held)
+                .fixedSize()
+                .turnedToHold()
+                .frame(width: 72, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Off for LOG, which baking would only record as log, and during a take.
+    private var bakeToggle: some View {
+        HStack(spacing: 8) {
+            Text("BAKE")
+                .font(Tokens.labelFont)
+                .foregroundStyle(bake ? Tokens.held : Tokens.label)
+            Toggle("BAKE", isOn: $bake)
+                .labelsHidden()
+                .tint(Tokens.held)
+        }
+        .fixedSize()
+        .turnedToHold()
+        .frame(width: 110, height: 44)
+        .disabled(!bakeAllowed)
+        .opacity(bakeAllowed ? 1 : 0.4)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Bake the look into takes")
+    }
+}
+
+/// Choices in a row that slides under a band, with the middle one chosen. It runs across the
+/// screen upright and along it sideways, so each name reads along the row it sits in.
+struct LookCarousel: View {
+    let options: [String]
+    @Binding var selection: String
+    let hold: Hold
+    let label: (String) -> String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var centered: String?
+
+    /// Room for a name, along the row.
+    private static let itemLength: CGFloat = 128
+
+    var body: some View {
+        let axis: Axis.Set = hold.isLandscape ? .vertical : .horizontal
+        GeometryReader { geometry in
+            let length = hold.isLandscape ? geometry.size.height : geometry.size.width
+            let margin = max((length - Self.itemLength) / 2, 0)
+            ZStack {
+                // The band the chosen name sits in.
+                RoundedRectangle(cornerRadius: Tokens.panelRadius)
+                    .fill(Tokens.surface)
+                    .frame(
+                        width: hold.isLandscape ? nil : Self.itemLength,
+                        height: hold.isLandscape ? Self.itemLength : nil)
+                ScrollViewReader { reader in
+                    ScrollView(axis, showsIndicators: false) {
+                        stack {
+                            ForEach(options, id: \.self) { option in
+                                item(option)
+                            }
+                        }
+                        .scrollTargetLayout()
+                    }
+                    .contentMargins(hold.isLandscape ? .vertical : .horizontal, margin, for: .scrollContent)
+                    .scrollTargetBehavior(.viewAligned)
+                    .scrollPosition(id: $centered, anchor: .center)
+                    .onAppear {
+                        centered = selection
+                        reader.scrollTo(selection, anchor: .center)
+                        DispatchQueue.main.async { reader.scrollTo(selection, anchor: .center) }
+                    }
+                    // The axis changes with the hold, and the row should stay on the choice.
+                    .onChange(of: hold.isLandscape) { _, _ in
+                        DispatchQueue.main.async { reader.scrollTo(selection, anchor: .center) }
+                    }
+                }
+            }
+        }
+        .sensoryFeedback(.selection, trigger: centered)
+        .onChange(of: centered) { _, value in
+            if let value, value != selection { selection = value }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Look")
+    }
+
+    @ViewBuilder
+    private func stack<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        if hold.isLandscape {
+            LazyVStack(spacing: 0, content: content)
+        } else {
+            LazyHStack(spacing: 0, content: content)
+        }
+    }
+
+    private func item(_ option: String) -> some View {
+        let isOn = option == centered
+        return Button {
+            withAnimation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.1)) { centered = option }
+        } label: {
+            Text(label(option))
+                .font(Tokens.statusFont)
+                .foregroundStyle(isOn ? Tokens.held : Tokens.value)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .frame(width: Self.itemLength - 12)
+                .turnedToHold()
+                .frame(
+                    width: hold.isLandscape ? nil : Self.itemLength,
+                    height: hold.isLandscape ? Self.itemLength : nil)
+                .frame(maxWidth: hold.isLandscape ? .infinity : nil, maxHeight: hold.isLandscape ? nil : .infinity)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label(option))
+        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 }
 

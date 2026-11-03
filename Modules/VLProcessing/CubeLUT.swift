@@ -70,6 +70,14 @@ public struct CubeLUT: Sendable {
         self.samples = samples
     }
 
+    /// A LUT made in code over the unit cube, such as the built-in ACES looks.
+    public init(size: Int, samples: [SIMD3<Float>]) {
+        self.size = size
+        domainMin = SIMD3(repeating: 0)
+        domainMax = SIMD3(repeating: 1)
+        self.samples = samples
+    }
+
     /// RGBA samples for a cubic rgba16Unorm texture.
     public var textureSamples: [UInt16] {
         var output = [UInt16]()

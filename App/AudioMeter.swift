@@ -217,7 +217,7 @@ struct AudioMeter: View {
             AudioBarView(bar: model.audioBar, turn: turn)
                 .frame(height: 21)
         }
-        .frame(minWidth: 132, maxWidth: 190)
+        .frame(minWidth: 96, maxWidth: 190)
         .accessibilityElement()
         .accessibilityLabel("Microphone level")
         .accessibilityValue(label)

@@ -286,7 +286,7 @@ extension AppModel {
                 selectedLUT = ""
                 return nil
             }
-            return pick(lutNames, { $0 }) { selectedLUT = $0 }
+            return pick(lookNames, { $0 }) { selectedLUT = $0 }
         case "lutMadeFor": return pick(["log", "rec709"], { $0 }) { processing.lutExpectsRec709 = $0 == "rec709" }
         case "freezeViewfinder": return flag { processing.pauseMonitorWhileRecording = $0 }
         case "punch":

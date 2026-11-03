@@ -65,9 +65,9 @@ struct ExportView: View {
                 Section("Look") {
                     Picker("LUT", selection: $lutName) {
                         Text("Rec.709 view").tag("")
-                        ForEach(model.lutNames, id: \.self) { Text($0).tag($0) }
+                        ForEach(model.lookNames, id: \.self) { Text($0).tag($0) }
                     }
-                    if !lutName.isEmpty {
+                    if !lutName.isEmpty, BuiltInLook.named(lutName) == nil {
                         Picker("LUT made for", selection: $lutMadeForRec709) {
                             Text("Log").tag(false)
                             Text("Rec.709").tag(true)
@@ -113,7 +113,7 @@ struct ExportView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             lutName = model.linkedLUT(curve, gamut) ?? model.selectedLUT
-            if !model.lutNames.contains(lutName) { lutName = "" }
+            if !model.isAvailableLook(lutName) { lutName = "" }
             lutMadeForRec709 = model.processing.lutExpectsRec709
             Task {
                 length = (try? await LookExporter.describe(take.url).seconds) ?? 0
@@ -126,23 +126,36 @@ struct ExportView: View {
         .interactiveDismissDisabled(job.progress != nil)
     }
 
-    private func look() -> LookExporter.Look {
+    /// Reading a .cube or building an ACES look takes a moment, so this runs off the main thread.
+    nonisolated private static func makeLook(
+        name: String, curve: LogCurve, gamut: Gamut, madeForRec709: Bool, sourceRec709: Bool
+    ) -> LookExporter.Look {
+        if let builtIn = BuiltInLook.named(name) {
+            return LookExporter.Look(
+                curve: curve, gamut: gamut, lut: builtIn.lut(curve: curve, gamut: gamut), lutExpectsRec709: false,
+                sourceRec709: sourceRec709)
+        }
         var lut: CubeLUT?
-        if !lutName.isEmpty {
-            let url = Storage.luts.appendingPathComponent(lutName)
+        if !name.isEmpty {
+            let url = Storage.luts.appendingPathComponent(name)
             lut = (try? String(contentsOf: url, encoding: .utf8)).flatMap { try? CubeLUT(text: $0) }
         }
         return LookExporter.Look(
-            curve: curve, gamut: gamut, lut: lut, lutExpectsRec709: lutMadeForRec709,
-            sourceRec709: take.info?.metadata["fileTag"] == FileTag.rec709.label)
+            curve: curve, gamut: gamut, lut: lut, lutExpectsRec709: madeForRec709, sourceRec709: sourceRec709)
+    }
+
+    private var lookInputs: (String, LogCurve, Gamut, Bool, Bool) {
+        (lutName, curve, gamut, lutMadeForRec709, take.info?.metadata["fileTag"] == FileTag.rec709.label)
     }
 
     private func refreshPreview() {
-        let look = look()
+        let (name, curve, gamut, madeFor, sourceRec709) = lookInputs
         let url = take.url
         let time = seconds
         Task.detached(priority: .userInitiated) {
             do {
+                let look = Self.makeLook(
+                    name: name, curve: curve, gamut: gamut, madeForRec709: madeFor, sourceRec709: sourceRec709)
                 guard let exporter = LookExporter(look: look) else { throw LookExporter.Failure.gpu }
                 let image = try await exporter.preview(of: url, at: time, width: 960)
                 await MainActor.run {
@@ -159,8 +172,15 @@ struct ExportView: View {
         let preset = EncoderPreset.all.first { $0.id == codec } ?? EncoderPreset.all[0]
         let lutLabel = lutName.isEmpty
             ? "Rec.709 view, baked in"
+            : BuiltInLook.named(lutName) != nil ? "\(lutName) Rec.709, baked in"
             : "\(lutName), baked in" + (lutMadeForRec709 ? " after the Rec.709 view" : " on log")
-        job.start(take: take, look: look(), preset: preset, lookLabel: lutLabel)
+        let (name, curve, gamut, madeFor, sourceRec709) = lookInputs
+        let take = take
+        Task.detached(priority: .userInitiated) {
+            let look = Self.makeLook(
+                name: name, curve: curve, gamut: gamut, madeForRec709: madeFor, sourceRec709: sourceRec709)
+            await MainActor.run { job.start(take: take, look: look, preset: preset, lookLabel: lutLabel) }
+        }
     }
 }
 

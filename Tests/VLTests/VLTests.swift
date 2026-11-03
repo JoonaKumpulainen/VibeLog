@@ -979,7 +979,64 @@ final class VideoEncoderTests: XCTestCase {
             XCTAssertEqual(stereo[AVNumberOfChannelsKey] as? Int, 2)
             XCTAssertTrue(writer.canApply(outputSettings: stereo, forMediaType: .audio), "pcm \(pcm)")
         }
-        XCTAssertEqual(VideoEncoder.audioSettings(pcm: false, channels: 2)[AVEncoderBitRateKey] as? Int, 384_000)
+        XCTAssertEqual(VideoEncoder.audioSettings(pcm: false, channels: 2)[AVEncoderBitRateKey] as? Int, 256_000)
+    }
+
+    /// Settings the writer accepts can still fail at the first sample, as 384 kbps stereo AAC did on
+    /// the phone, so this encodes real stereo audio in both formats.
+    func testWritesStereoAudio() async throws {
+        for pcm in [false, true] {
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
+            let preset = try XCTUnwrap(EncoderPreset.all.first { $0.id == "hevc420" })
+            let encoder: VideoEncoder
+            do {
+                encoder = try VideoEncoder(config: .init(
+                    url: url, preset: preset, size: EncoderSize(width: 640, height: 480), audio: true, pcmAudio: pcm,
+                    audioChannels: 2, realTime: false))
+            } catch {
+                throw XCTSkip("\(preset.label) is not available here: \(error)")
+            }
+            var format = AudioStreamBasicDescription(
+                mSampleRate: 48000, mFormatID: kAudioFormatLinearPCM,
+                mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked, mBytesPerPacket: 4,
+                mFramesPerPacket: 1, mBytesPerFrame: 4, mChannelsPerFrame: 2, mBitsPerChannel: 16, mReserved: 0)
+            var description: CMAudioFormatDescription?
+            XCTAssertEqual(CMAudioFormatDescriptionCreate(
+                allocator: nil, asbd: &format, layoutSize: 0, layout: nil, magicCookieSize: 0, magicCookie: nil,
+                extensions: nil, formatDescriptionOut: &description), noErr)
+            let frames = 1024
+            for index in 0..<10 {
+                if index % 3 == 0 {
+                    let buffer = try XCTUnwrap(encoder.nextPixelBuffer())
+                    encoder.append(buffer, at: CMTime(value: Int64(index / 3), timescale: 30))
+                }
+                // A tone on the left, silence on the right.
+                var samples = [Int16](repeating: 0, count: frames * 2)
+                for frame in 0..<frames { samples[frame * 2] = Int16(8000 * sin(Double(index * frames + frame) * 0.05)) }
+                var block: CMBlockBuffer?
+                let bytes = samples.count * 2
+                XCTAssertEqual(CMBlockBufferCreateWithMemoryBlock(
+                    allocator: nil, memoryBlock: nil, blockLength: bytes, blockAllocator: nil, customBlockSource: nil,
+                    offsetToData: 0, dataLength: bytes, flags: kCMBlockBufferAssureMemoryNowFlag, blockBufferOut: &block), noErr)
+                samples.withUnsafeBytes { _ = CMBlockBufferReplaceDataBytes(with: $0.baseAddress!, blockBuffer: block!, offsetIntoDestination: 0, dataLength: bytes) }
+                var sample: CMSampleBuffer?
+                XCTAssertEqual(CMAudioSampleBufferCreateReadyWithPacketDescriptions(
+                    allocator: nil, dataBuffer: block!, formatDescription: description!, sampleCount: frames,
+                    presentationTimeStamp: CMTime(value: Int64(index * frames), timescale: 48000),
+                    packetDescriptions: nil, sampleBufferOut: &sample), noErr)
+                encoder.appendAudio(try XCTUnwrap(sample))
+                // Real-time-style audio input drops samples while the writer is busy, so give it room.
+                try await Task.sleep(nanoseconds: 20_000_000)
+            }
+            let result = await withCheckedContinuation { continuation in encoder.finish { continuation.resume(returning: $0) } }
+            XCTAssertNil(result.failure, "pcm \(pcm): \(result.failure ?? "")")
+            XCTAssertGreaterThan(result.audioSamplesWritten, 0, "pcm \(pcm)")
+            let tracks = try await AVURLAsset(url: url).loadTracks(withMediaType: .audio)
+            let audioTrack = try XCTUnwrap(tracks.first)
+            let descriptions = try await audioTrack.load(.formatDescriptions)
+            let channels = descriptions.first.flatMap { CMAudioFormatDescriptionGetStreamBasicDescription($0)?.pointee.mChannelsPerFrame }
+            XCTAssertEqual(channels, 2, "pcm \(pcm)")
+        }
     }
 
     func testMetersReadEachChannel() {
@@ -1792,3 +1849,65 @@ final class TakeLibraryTests: XCTestCase {
     }
 }
 
+
+/// The ACES ports against OpenColorIO's own output for the same colours, in ACESReference.
+final class ACESTests: XCTestCase {
+    private func worst(_ look: BuiltInLook, _ expected: [SIMD3<Double>]) -> (error: Double, index: Int, got: SIMD3<Double>) {
+        var worst = (error: 0.0, index: 0, got: SIMD3<Double>())
+        for (index, sample) in ACESReference.samples.enumerated() {
+            let got = look.display(linearRec2020: sample)
+            let difference = got - expected[index]
+            let error = max(abs(difference.x), abs(difference.y), abs(difference.z))
+            if error > worst.error || error.isNaN { worst = (error.isNaN ? .infinity : error, index, got) }
+        }
+        return worst
+    }
+
+    func testACES20MatchesOpenColorIO() {
+        let result = worst(.aces20, ACESReference.aces20)
+        XCTAssertLessThan(
+            result.error, 0.002,
+            "sample \(result.index) \(ACESReference.samples[result.index]): got \(result.got), "
+                + "OpenColorIO \(ACESReference.aces20[result.index])")
+    }
+
+    /// OpenColorIO builds ACES 1.3's curves from its own splines, so a little more room here.
+    func testACES13MatchesOpenColorIO() {
+        let result = worst(.aces13, ACESReference.aces13)
+        XCTAssertLessThan(
+            result.error, 0.004,
+            "sample \(result.index) \(ACESReference.samples[result.index]): got \(result.got), "
+                + "OpenColorIO \(ACESReference.aces13[result.index])")
+    }
+
+    func testMiddleGrayLandsWhereACESPutsIt() {
+        let gray = SIMD3<Double>(repeating: 0.18)
+        XCTAssertEqual(BuiltInLook.aces20.display(linearRec2020: gray).y, 0.38312, accuracy: 0.001)
+        XCTAssertEqual(BuiltInLook.aces13.display(linearRec2020: gray).y, 0.38953, accuracy: 0.001)
+    }
+
+    /// Each grid point of the built LUT is the transform of that log value, decoded.
+    func testLookLUTDecodesTheCurve() {
+        let size = 9
+        let lut = BuiltInLook.aces20.lut(curve: .sLog3, gamut: .sGamut3Cine, size: size)
+        XCTAssertEqual(lut.samples.count, size * size * size)
+        let toRec2020 = Gamut.sGamut3Cine.fromRec2020.inverse
+        for (r, g, b) in [(0, 0, 0), (4, 4, 4), (8, 2, 5), (3, 7, 1)] {
+            let log = SIMD3(Double(r), Double(g), Double(b)) / Double(size - 1)
+            let linear = toRec2020 * SIMD3(LogCurve.sLog3.decode(log.x), LogCurve.sLog3.decode(log.y), LogCurve.sLog3.decode(log.z))
+            let expected = BuiltInLook.aces20.display(linearRec2020: linear)
+            let got = lut.samples[(b * size + g) * size + r]
+            XCTAssertEqual(Double(got.x), expected.x, accuracy: 1e-5)
+            XCTAssertEqual(Double(got.y), expected.y, accuracy: 1e-5)
+            XCTAssertEqual(Double(got.z), expected.z, accuracy: 1e-5)
+        }
+    }
+
+    func testBuiltInLooksCantClashWithFiles() {
+        for look in BuiltInLook.allCases {
+            XCTAssertFalse(look.name.lowercased().hasSuffix(".cube"))
+            XCTAssertEqual(BuiltInLook.named(look.name), look)
+        }
+        XCTAssertNil(BuiltInLook.named("ACES 2.0.cube"))
+    }
+}

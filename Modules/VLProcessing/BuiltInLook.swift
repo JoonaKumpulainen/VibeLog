@@ -1,0 +1,91 @@
+import Foundation
+import simd
+
+/// Looks VibeLog makes itself rather than reads from a .cube file: the ACES 2.0 and ACES 1.3 Rec.709
+/// output transforms, each built as a LUT on log for the curve and gamut recorded. Their names
+/// don't end in .cube, so they can't clash with an imported LUT.
+public enum BuiltInLook: String, CaseIterable, Sendable {
+    case aces20 = "ACES 2.0"
+    case aces13 = "ACES 1.3"
+
+    public var name: String { rawValue }
+
+    /// For the status line and the LOOK cell.
+    public var shortLabel: String {
+        switch self {
+        case .aces20: return "ACES2"
+        case .aces13: return "ACES13"
+        }
+    }
+
+    public static func named(_ name: String) -> BuiltInLook? { BuiltInLook(rawValue: name) }
+
+    /// Linear Rec.2020 to ACES2065-1, row-major, as OpenColorIO 2.6's ACES configs convert it,
+    /// with Bradford adaptation from D65 to the ACES white.
+    static let rec2020ToAP0: [Double] = [
+        0.6790856122970581, 0.15770091116428375, 0.16321344673633575,
+        0.04600200429558754, 0.859054684638977, 0.0949433222413063,
+        -0.0005739431944675744, 0.02846776880323887, 0.9721061587333679,
+    ]
+
+    /// Display code values for a scene-linear Rec.2020 colour, as the OpenColorIO view
+    /// "Rec.1886 Rec.709 - Display" shows it.
+    public func display(linearRec2020 rgb: SIMD3<Double>, aces2: ACES2Renderer? = nil) -> SIMD3<Double> {
+        let m = Self.rec2020ToAP0
+        let ap0 = (m[0] * rgb.x + m[1] * rgb.y + m[2] * rgb.z,
+                   m[3] * rgb.x + m[4] * rgb.y + m[5] * rgb.z,
+                   m[6] * rgb.x + m[7] * rgb.y + m[8] * rgb.z)
+        switch self {
+        case .aces20:
+            return (aces2 ?? ACES2Renderer.shared).display(ap0: ap0)
+        case .aces13:
+            let out = ACES13Output.forward(ap0)
+            return SIMD3(out.0, out.1, out.2)
+        }
+    }
+
+    /// The look as a LUT on the log image: each grid point is decoded with the curve, taken from
+    /// the gamut to Rec.2020, then through the transform. 65 points keeps interpolation small.
+    public func lut(curve: LogCurve, gamut: Gamut, size: Int = 65) -> CubeLUT {
+        let toRec2020 = gamut.fromRec2020.inverse
+        let renderer = ACES2Renderer.shared
+        let decoded = (0..<size).map { curve.decode(Double($0) / Double(size - 1)) }
+        var samples = [SIMD3<Float>](repeating: .zero, count: size * size * size)
+        samples.withUnsafeMutableBufferPointer { buffer in
+            let base = buffer.baseAddress!
+            DispatchQueue.concurrentPerform(iterations: size) { blue in
+                for green in 0..<size {
+                    for red in 0..<size {
+                        let linear = toRec2020 * SIMD3(decoded[red], decoded[green], decoded[blue])
+                        let out = display(linearRec2020: linear, aces2: renderer)
+                        base[(blue * size + green) * size + red] = SIMD3(Float(out.x), Float(out.y), Float(out.z))
+                    }
+                }
+            }
+        }
+        return CubeLUT(size: size, samples: samples)
+    }
+}
+
+/// The ACES 2.0 Rec.709 view as OpenColorIO builds it: clamp to AP1, the output transform with
+/// Rec.709 limiting primaries at 100 nits, clamp to the display, then the Rec.1886 2.4 power.
+public final class ACES2Renderer: @unchecked Sendable {
+    /// Its tables take a moment to build, and never change.
+    public static let shared = ACES2Renderer()
+
+    let transform = ACES2OutputTransform()
+    private static let ap0ToAP1 = ACES13Output.ap0ToAP1
+    private static let ap1ToAP0 = ACES13Output.ap1ToAP0
+    /// 8 x (128 + 768 x log(peak / 100) / log(100)), which is 1024 at 100 nits.
+    private static let ap1UpperBound = 1024.0
+
+    func display(ap0 input: (Double, Double, Double)) -> SIMD3<Double> {
+        var ap1 = ACES13Output.mult(Self.ap0ToAP1, input)
+        let bound = Self.ap1UpperBound
+        ap1 = (min(max(ap1.0, 0), bound), min(max(ap1.1, 0), bound), min(max(ap1.2, 0), bound))
+        let ap0 = ACES13Output.mult(Self.ap1ToAP0, ap1)
+        let out = transform.forward((Float(ap0.0), Float(ap0.1), Float(ap0.2)))
+        func encode(_ v: Float) -> Double { pow(Double(min(max(v, 0), 1)), 1 / 2.4) }
+        return SIMD3(encode(out.0), encode(out.1), encode(out.2))
+    }
+}

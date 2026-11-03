@@ -112,14 +112,16 @@ final class AppModel: ObservableObject {
     var bakedLookLabel: String {
         guard bakeLook else { return "log, as recorded" }
         guard !selectedLUT.isEmpty else { return "Rec.709 view, baked in" }
+        if BuiltInLook.named(selectedLUT) != nil { return "\(selectedLUT) Rec.709, baked in" }
         return "\(selectedLUT), baked in" + (processing.lutExpectsRec709 ? " after the Rec.709 view" : " on log")
     }
 
     @Published var processing = ProcessingSettings() {
         didSet {
             pipeline?.update(processing)
-            if !adopting, processing.curve != oldValue.curve || processing.gamut != oldValue.gamut {
-                followPairLUT(from: Self.lutKey(oldValue.curve, oldValue.gamut))
+            if processing.curve != oldValue.curve || processing.gamut != oldValue.gamut {
+                if !adopting { followPairLUT(from: Self.lutKey(oldValue.curve, oldValue.gamut)) }
+                if let builtIn = BuiltInLook.named(selectedLUT) { loadBuiltInLook(builtIn) }
             }
         }
     }
@@ -145,6 +147,12 @@ final class AppModel: ObservableObject {
         }
     }
     @Published var lutNames: [String] = []
+    /// The built-in ACES looks, then every imported LUT.
+    var lookNames: [String] { BuiltInLook.allCases.map(\.name) + lutNames }
+    /// Built-in looks for each curve and gamut, made once a session.
+    private var builtInLUTs: [String: CubeLUT] = [:]
+
+    func isAvailableLook(_ name: String) -> Bool { BuiltInLook.named(name) != nil || lutNames.contains(name) }
     /// Empty selects the built-in Rec.709 view.
     @Published var selectedLUT = "" {
         didSet {
@@ -552,7 +560,7 @@ final class AppModel: ObservableObject {
         processing.bilinearWhenHot = saved.bilinearWhenHot
         idlePauseMinutes = saved.idlePauseMinutes
         processing.monitor = MonitorMode(rawValue: saved.monitor) ?? processing.monitor
-        if saved.monitorLUT.isEmpty || lutNames.contains(saved.monitorLUT) { selectedLUT = saved.monitorLUT }
+        if saved.monitorLUT.isEmpty || isAvailableLook(saved.monitorLUT) { selectedLUT = saved.monitorLUT }
         processing.lutExpectsRec709 = saved.lutExpectsRec709
         processing.pauseMonitorWhileRecording = saved.monitorOffWhileRecording
         showTelemetry = saved.telemetry
@@ -653,6 +661,7 @@ final class AppModel: ObservableObject {
 
     static func shortLUTName(_ name: String) -> String {
         guard !name.isEmpty else { return "709" }
+        if let builtIn = BuiltInLook.named(name) { return builtIn.shortLabel }
         return String((name as NSString).deletingPathExtension.prefix(6)).uppercased()
     }
 
@@ -841,7 +850,7 @@ final class AppModel: ObservableObject {
 
     /// A LUT linked to the last pair leaves with it, so it can't misread the new one.
     private func followPairLUT(from oldKey: String) {
-        if let linked = linkedLUT(processing.curve, processing.gamut), lutNames.contains(linked) {
+        if let linked = linkedLUT(processing.curve, processing.gamut), isAvailableLook(linked) {
             selectedLUT = linked
         } else if let old = curveLUTs[oldKey], old == selectedLUT {
             selectedLUT = ""
@@ -865,6 +874,10 @@ final class AppModel: ObservableObject {
             pipeline?.setCustomLUT(nil)
             return
         }
+        if let builtIn = BuiltInLook.named(name) {
+            loadBuiltInLook(builtIn)
+            return
+        }
         DispatchQueue.global(qos: .userInitiated).async { [pipeline] in
             do {
                 let url = Storage.luts.appendingPathComponent(name)
@@ -872,6 +885,30 @@ final class AppModel: ObservableObject {
                 pipeline?.setCustomLUT(lut)
             } catch {
                 Log.shared.error("Cannot load LUT \(name): \(error)")
+            }
+        }
+    }
+
+    /// A built-in look is made for the curve and gamut recorded, so it's remade when either changes.
+    private func loadBuiltInLook(_ look: BuiltInLook) {
+        let curve = processing.curve
+        let gamut = processing.gamut
+        let key = "\(look.name) · \(curve.label) · \(gamut.label)"
+        if let lut = builtInLUTs[key] {
+            pipeline?.setCustomLUT(lut, expectsRec709: false)
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self, pipeline] in
+            let start = Date()
+            let lut = look.lut(curve: curve, gamut: gamut)
+            Log.shared.info("Built \(key) in \(String(format: "%.2f", Date().timeIntervalSince(start))) s")
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.builtInLUTs[key] = lut
+                // The choice may have moved on while this was made.
+                if self.selectedLUT == look.name, self.processing.curve == curve, self.processing.gamut == gamut {
+                    pipeline?.setCustomLUT(lut, expectsRec709: false)
+                }
             }
         }
     }

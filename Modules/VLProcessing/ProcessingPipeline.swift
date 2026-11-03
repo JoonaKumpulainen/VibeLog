@@ -285,9 +285,9 @@ struct LookParams {
     /// The log image as recorded, in Rec.2020's matrix.
     static let log = LookParams(settings: ProcessingSettings(), lut: nil)
 
-    init(settings: ProcessingSettings, lut: CubeLUT?) {
+    init(settings: ProcessingSettings, lut: CubeLUT?, expectsRec709: Bool? = nil) {
         if settings.bakeLook {
-            mode = lut == nil ? 1 : (settings.lutExpectsRec709 ? 3 : 2)
+            mode = lut == nil ? 1 : ((expectsRec709 ?? settings.lutExpectsRec709) ? 3 : 2)
         } else {
             mode = 0
         }
@@ -345,6 +345,8 @@ private struct SinkFrame {
 private struct CustomLUT {
     var texture: MTLTexture
     var lut: CubeLUT
+    /// Set for a built-in look, which always works on log, whatever **LUT made for** says.
+    var expectsRec709: Bool?
 }
 
 /// Turns Bayer frames into log Rec.2020 on the GPU and shows the result. When work backs up
@@ -474,10 +476,10 @@ public final class ProcessingPipeline: NSObject {
     }
 
     /// Replaces the Rec.709 monitoring LUT, or restores it when nil.
-    public func setCustomLUT(_ lut: CubeLUT?) {
+    public func setCustomLUT(_ lut: CubeLUT?, expectsRec709: Bool? = nil) {
         var custom: CustomLUT?
         if let lut, let texture = lutTexture(for: lut) {
-            custom = CustomLUT(texture: texture, lut: lut)
+            custom = CustomLUT(texture: texture, lut: lut, expectsRec709: expectsRec709)
         }
         lock.lock()
         customLUT = custom
@@ -489,7 +491,7 @@ public final class ProcessingPipeline: NSObject {
     public func setSink(_ newSink: VideoFrameSink?) {
         lock.lock()
         sink = newSink
-        takeLook = newSink == nil ? nil : (LookParams(settings: settings, lut: customLUT?.lut), customLUT?.texture)
+        takeLook = newSink == nil ? nil : (LookParams(settings: settings, lut: customLUT?.lut, expectsRec709: customLUT?.expectsRec709), customLUT?.texture)
         lock.unlock()
     }
 
@@ -618,7 +620,7 @@ public final class ProcessingPipeline: NSObject {
         }
         let sinkFrame = prepareSinkFrame(pts: capture.pts)
         lock.lock()
-        let look = takeLook?.look ?? LookParams(settings: settings, lut: customLUT?.lut)
+        let look = takeLook?.look ?? LookParams(settings: settings, lut: customLUT?.lut, expectsRec709: customLUT?.expectsRec709)
         let lookLUT = takeLook == nil ? customLUT?.texture : takeLook?.lut
         let hotPath = hot && settings.efficientWhenHot
         let efficient = (settings.pipeline == .efficient || hotPath) && stillRequest == nil
@@ -1140,7 +1142,7 @@ extension ProcessingPipeline: MTKViewDelegate {
         let bands = MonitorBands(curve: current.curve, exposureStops: current.exposureStops)
         var mode: UInt32 = 0
         if current.monitor == .rec709 {
-            mode = custom == nil ? 1 : (current.lutExpectsRec709 ? 3 : 2)
+            mode = custom == nil ? 1 : ((custom?.expectsRec709 ?? current.lutExpectsRec709) ? 3 : 2)
         }
         var parameters = MonitorParams(
             useLUT: mode,

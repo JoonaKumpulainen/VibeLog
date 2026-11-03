@@ -45,7 +45,7 @@ struct SettingsView: View {
                 if matches(Self.twelveBitTerms), !search.isEmpty {
                     Section("Advanced") { twelveBitRow }
                 }
-                if matches("about version saved config file") {
+                if matches("about version saved config file legal license licenses trademark") {
                     aboutSection
                 }
             }
@@ -83,7 +83,8 @@ struct SettingsView: View {
     private static let mainsTerms = "flicker mains lights hz power frequency shutter"
     private static let recordingTerms = [stopTerms, autoTerms, audioTerms, gyroTerms, heatTerms, mainsTerms].joined(separator: " ")
     private static let lookTerms = "look monitor rec.709 log preview isp viewfinder"
-    private static let lutTerms = "lut cube import look monitor input bake baked file"
+    private static let lutTerms = "lut cube import look monitor input"
+    private static let bakeTerms = "bake baked look lut rec.709 file record"
     private static let pauseTerms = "pause viewfinder monitor off gpu recording idle heat sleep"
     private static let peakingTerms = "focus peaking sensitivity low high detail"
     private static let guideTerms = "frame guide aspect scope 2.39 1.85 framing"
@@ -95,7 +96,7 @@ struct SettingsView: View {
     private static let processingTerms = "pipeline debayer demosaic quality processing efficient bilinear malvar hot advanced"
     private static let distortionTerms = "lens distortion correction ultra wide advanced"
     private static let twelveBitTerms = "12-bit 12 bit prores 4444 depth color advanced"
-    private static let imageTerms = [offsetTerms, gamutTerms, tagTerms].joined(separator: " ")
+    private static let imageTerms = [offsetTerms, bakeTerms, gamutTerms, tagTerms].joined(separator: " ")
 
     /// Every word typed has to appear, so a phrase can come in any order.
     private func matches(_ terms: String) -> Bool {
@@ -105,7 +106,7 @@ struct SettingsView: View {
     private var hasResults: Bool {
         matches(Self.formatTerms) || matches(Self.presetTerms) || matches(Self.recordingTerms)
             || matches(Self.viewfinderTerms) || matches(Self.imageTerms) || matches(Self.processingTerms)
-            || matches(Self.distortionTerms) || matches(Self.twelveBitTerms) || matches("about version saved config file")
+            || matches(Self.distortionTerms) || matches(Self.twelveBitTerms) || matches("about version saved config file legal license licenses trademark")
     }
 
     private static var version: String {
@@ -285,13 +286,13 @@ struct SettingsView: View {
             if matches(Self.lutTerms) {
                 Picker(selection: $model.selectedLUT) {
                     Text("None").tag("")
-                    ForEach(model.lutNames, id: \.self) { Text($0).tag($0) }
+                    ForEach(model.lookNames, id: \.self) { Text($0).tag($0) }
                 } label: {
                     explained("LUT", "Replaces Rec.709 in the viewfinder, and in the file when the look is baked.")
                 }
                 Button("Import .cube LUT") { importingLUT = true }
-                bakeRow
-                if !model.selectedLUT.isEmpty {
+                // Built-in looks always work on log.
+                if !model.selectedLUT.isEmpty, BuiltInLook.named(model.selectedLUT) == nil {
                     Picker(selection: $model.processing.lutExpectsRec709) {
                         Text("Log").tag(false)
                         Text("Rec.709").tag(true)
@@ -342,6 +343,7 @@ struct SettingsView: View {
     }
 
     private var gamutDetail: String {
+        if model.bakeLook { return "Not used while Bake is on: baked takes are recorded in Rec.709." }
         let processing = model.processing
         guard processing.pairsGamut else {
             return "Changes the color space alone. Apple Wide Gamut is only for Apple Log 2."
@@ -366,12 +368,17 @@ struct SettingsView: View {
                         .accessibilityValue(String(format: "%+.1f stops", model.processing.exposureStops))
                 }
             }
+            if matches(Self.bakeTerms) {
+                bakeRow
+            }
             if matches(Self.gamutTerms) {
                 Picker(selection: $model.processing.gamut) {
                     ForEach(Gamut.allCases) { Text(gamutLabel($0)).tag($0) }
                 } label: {
                     explained("Color space", gamutDetail)
                 }
+                // A baked take is display Rec.709, so the recorded gamut has no say in the file.
+                .disabled(model.bakeLook)
                 Toggle(isOn: $model.processing.pairsGamut) {
                     explained(
                         "Pair curve and color space",
@@ -443,8 +450,8 @@ struct SettingsView: View {
     private var bakeRow: some View {
         Toggle(isOn: $model.bakeLook) {
             explained(
-                "Bake the look into the file",
-                "Records what the viewfinder shows, Rec.709 or its LUT, tagged Rec.709, and keeps no log, so it can't be graded back. Switches to HEVC 4:2:0 for small files. The look is fixed as a take starts. The LOOK button in MON sets it too.")
+                "Bake",
+                "Records the viewfinder's look, Rec.709 or its LUT, into takes instead of log, tagged Rec.709. It can't be graded back. Switches to HEVC 4:2:0 for small files, and the look is fixed as a take starts. Also in the LOOK panel under MON.")
         }
         .disabled(model.isRecording)
     }
@@ -469,6 +476,7 @@ struct SettingsView: View {
     private var aboutSection: some View {
         Section {
             LabeledContent("Version", value: Self.version)
+            NavigationLink("Legal") { LegalView() }
         } header: {
             Text("About")
         } footer: {

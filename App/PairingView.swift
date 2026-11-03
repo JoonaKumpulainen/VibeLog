@@ -40,7 +40,7 @@ struct PairingView: View {
                     let gamut = model.processing.pairing.gamut(for: curve)
                     Picker(selection: lutBinding(for: curve, in: gamut)) {
                         Text("None").tag("")
-                        ForEach(model.lutNames, id: \.self) { Text($0).tag($0) }
+                        ForEach(model.lookNames, id: \.self) { Text($0).tag($0) }
                     } label: {
                         explained(curve.label, gamut.label)
                     }

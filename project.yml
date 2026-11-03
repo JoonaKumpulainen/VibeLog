@@ -65,6 +65,11 @@ targets:
       - path: App
         excludes:
           - Info.plist
+      # Shown under Settings > About > Legal, as the licenses require for the app itself.
+      - path: LICENSE
+        buildPhase: resources
+      - path: LICENSES
+        type: folder
     dependencies:
       - target: ObjCGuard
       - target: VLCore

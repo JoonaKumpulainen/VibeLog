@@ -1,0 +1,35 @@
+VibeLog
+Copyright (C) 2026 JoonaKumpulainen
+Licensed under the GNU General Public License v3.0, in LICENSE.
+
+This product includes code ported from the following projects. Their license texts are in the
+LICENSES folder, and the app shows them under Settings > About > Legal.
+
+1. OpenColorIO, ACES 2.0 output transform
+   Source: https://github.com/AcademySoftwareFoundation/OpenColorIO
+           src/OpenColorIO/ops/fixedfunction/ACES2 (Common.h, ColorLib.h, MatrixLib.h, Transform.cpp)
+           and the renderer in FixedFunctionOpCPU.cpp, at commit 22dd9c4faa
+   Copyright Contributors to the OpenColorIO Project.
+   License: BSD 3-Clause, LICENSES/OpenColorIO-BSD-3-Clause.txt
+   Changes: translated from C++ to Swift in Modules/VLProcessing/ACES2.swift, keeping only the
+   forward path, with the built-in Rec.709 view's clamps and display encoding from
+   transforms/builtins/ACES.cpp and Displays.cpp added in Modules/VLProcessing/BuiltInLook.swift.
+
+2. Academy Color Encoding System (ACES) 2.0
+   Source: https://github.com/ampas/aces-core
+   Academy of Motion Picture Arts and Sciences.
+   License: Apache License 2.0, LICENSES/ACES-Apache-2.0.txt
+   The ACES 2.0 output transform algorithm, as implemented by item 1.
+
+3. Academy Color Encoding System (ACES) 1.3 reference implementation
+   Source: https://github.com/ampas/aces-dev, tag v1.3.1: transforms/ctl/rrt/RRT.ctl,
+           transforms/ctl/odt/rec709/ODT.Academy.Rec709_100nits_dim.ctl and the ACESlib files
+   Copyright © 2015 Academy of Motion Picture Arts and Sciences (A.M.P.A.S.).
+   Portions contributed by others as indicated. All rights reserved.
+   License: License Terms for Academy Color Encoding System Components,
+            LICENSES/ACES-1.3-AMPAS.txt, including its Disclaimer of Warranty
+   Changes: translated from CTL to Swift in Modules/VLProcessing/ACES13.swift, keeping only the
+   forward RRT and the Rec.709 100-nit dim-surround output transform.
+
+Neither the names of the Academy of Motion Picture Arts and Sciences, the OpenColorIO Project or
+their contributors are used to endorse or promote VibeLog.
