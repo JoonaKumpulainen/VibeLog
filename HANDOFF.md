@@ -1,6 +1,6 @@
 # VibeLog handoff
 
-For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of early Phase 6. Phase 5 is built, and only a few phone checks remain. The latest build is `7501cae`, which passed CI with 106 tests, one skipped because the simulator has no ProRes encoder. It adds the idle pause, probe and link fixes to `623c5a9`, whose results are under **Session on `623c5a9`**, and hasn't been tested on the phone. The latest phone results came from `021248e`. The last logged session came from `9f9a456`.
+For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of early Phase 6. Phase 5 is built, and only a few phone checks remain. The latest build is `c459497`, which passed CI with 107 tests, one skipped because the simulator has no ProRes encoder, and hasn't been tested on the phone. Results from earlier builds are under **Session on `623c5a9`**. The latest phone results came from `021248e`. The last logged session came from `9f9a456`.
 
 ## What this is
 
@@ -31,7 +31,7 @@ An iPhone camera app that records full-sensor RAW frames, processes them on the 
 | `Modules/VLProcessing` | Log curves, color math, monitor LUT, `.cube` parser, Metal pipeline, still export, `Shaders.metal` |
 | `Modules/VLRecording` | RAW dump writer, `VideoEncoder`, encoder presets, encoder benchmark, `TakeLibrary` |
 | `Modules/ObjCGuard` | Catches Objective-C exceptions from AVFoundation, runtime scan |
-| `Tests/VLTests` | 106 tests, including real GPU tests on the simulator |
+| `Tests/VLTests` | 107 tests, including real GPU tests on the simulator |
 | `tools/inspect_clip.py` | Summarizes a RAW clip and exports a frame |
 | `tools/test_server.py` | The test link's server, which sends the phone commands and collects its files |
 
@@ -80,7 +80,7 @@ Modules are dynamic frameworks. Swift is in Swift 5 mode.
 - **Library and peaking:** the owner reported both working. Delete removes a take with its metadata.
 - **Format panel:** the owner reported that the wheels open on the current choice, and that the ProRes names, **OPEN GATE** and the sizes read correctly.
 - **180° button:** the owner reported it working.
-- **Gyroflow:** the owner reported that it works with the saved `.gcsv`. A 5-second sample also had the right header, even 100 Hz spacing and 1.00 g at rest.
+- **Gyroflow:** the owner reported that it works with the saved `.gcsv`, with the axes right. A 5-second sample also had the right header, even 100 Hz spacing and 1.00 g at rest.
 
 - **Session on `623c5a9`, run over the link:**
   - **12-bit ProRes 4444 works.** Take `202954`, 1x, Maximum quality, Apple Log 2 at ISO 956, ran 60 seconds at 29.78 fps written, 1791 frames, 254.7 MB/s, about the same rate as 10-bit. 9 were lost: 2 at the GPU in the first 4 seconds and 7 encoder `not ready` in the last half-second, around the stop, with `writer drops 0` at every progress line before. Memory was about 950 MB against 783 for 10-bit `185616`, and GPU time about 22 ms in a brighter scene. Heat reached fair at 53 seconds. Take `203115` reads as `prores` profile 4444, `yuva444p12le`, 12 bits per sample, and its luma's low two bits are spread evenly, so they carry picture, not padding.
@@ -174,7 +174,7 @@ New additions follow the design rules in [ROADMAP.md](ROADMAP.md). `CameraGeomet
 - **Disconnect Apple's preview:** a Diagnostics switch, off at every launch and kept out of presets. While VibeLog's own viewfinder shows, it takes the hidden preview off the session. It can't change during a take, and the connection holds until the take ends. The sidecar's `appPreview`, the link's status and the heat log record whether it was connected. Whether photo capture or auto exposure depends on it is unknown, so it needs a short take before a long one. If it saves heat, the end goal is to make this the normal behavior and drop the switch: **ISP preview** stays under **Look**, the preview connects only while that look is chosen, and any other look disconnects it.
 - **Suites:** `tools/suites/hot_switches.json` runs the two long tests below, and `tools/suites/app_preview.json` runs a long take with Apple's preview disconnected. Both match `222321`'s setup: 1x, Maximum quality, uncompressed audio, correction off and all tools except zebras.
 
-### New since `7501cae`, not built
+### New in `c459497`, untested on the phone
 
 - **Owner's checks on `7501cae`:** idle pause, the black launch, the curve names in the LOG wheel, the library turning, the **Advanced** page and the centered reset popup all work.
 - **23.98 and 29.97 removed:** the camera delivered 24 and 30 either way. `FrameRates.all` is 24, 25 and 30, and a saved decimal rate falls back to the current one. The helpers still handle decimal rates.
