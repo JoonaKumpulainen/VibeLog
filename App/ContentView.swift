@@ -952,18 +952,20 @@ struct LookPanel: View {
         .buttonStyle(.plain)
     }
 
-    /// Off for LOG, which baking would only record as log, and during a take.
+    /// Off for LOG, which baking would only record as log, and during a take. Only the label
+    /// turns with the hold: a turned switch would slide the wrong way under a finger.
     private var bakeToggle: some View {
         HStack(spacing: 8) {
             Text("BAKE")
                 .font(Tokens.labelFont)
                 .foregroundStyle(bake ? Tokens.held : Tokens.label)
+                .fixedSize()
+                .turnedToHold()
             Toggle("BAKE", isOn: $bake)
                 .labelsHidden()
                 .tint(Tokens.held)
         }
         .fixedSize()
-        .turnedToHold()
         .frame(width: 110, height: 44)
         .disabled(!bakeAllowed)
         .opacity(bakeAllowed ? 1 : 0.4)
@@ -972,8 +974,8 @@ struct LookPanel: View {
     }
 }
 
-/// Choices in a row that slides under a band, with the middle one chosen. It runs across the
-/// screen upright and along it sideways, so each name reads along the row it sits in.
+/// Choices in a row that slides under a band, the middle one chosen as it settles. The row keeps
+/// its upright layout in every hold, and only each name turns to read.
 struct LookCarousel: View {
     let options: [String]
     @Binding var selection: String
@@ -982,40 +984,34 @@ struct LookCarousel: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var centered: String?
 
-    /// Room for a name, along the row.
-    private static let itemLength: CGFloat = 128
+    /// Room for a name.
+    private static let itemWidth: CGFloat = 128
 
     var body: some View {
-        let axis: Axis.Set = hold.isLandscape ? .vertical : .horizontal
         GeometryReader { geometry in
-            let length = hold.isLandscape ? geometry.size.height : geometry.size.width
-            let margin = max((length - Self.itemLength) / 2, 0)
+            let margin = max((geometry.size.width - Self.itemWidth) / 2, 0)
             ZStack {
                 // The band the chosen name sits in.
                 RoundedRectangle(cornerRadius: Tokens.panelRadius)
                     .fill(Tokens.surface)
-                    .frame(
-                        width: hold.isLandscape ? nil : Self.itemLength,
-                        height: hold.isLandscape ? Self.itemLength : nil)
+                    .frame(width: Self.itemWidth)
                 ScrollViewReader { reader in
-                    ScrollView(axis, showsIndicators: false) {
-                        stack {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        // A plain stack, marked as the scroll targets itself, so the row snaps to a
+                        // name and reports which one settled in the middle.
+                        HStack(spacing: 0) {
                             ForEach(options, id: \.self) { option in
-                                item(option)
+                                item(option, height: geometry.size.height)
                             }
                         }
                         .scrollTargetLayout()
                     }
-                    .contentMargins(hold.isLandscape ? .vertical : .horizontal, margin, for: .scrollContent)
+                    .contentMargins(.horizontal, margin, for: .scrollContent)
                     .scrollTargetBehavior(.viewAligned)
                     .scrollPosition(id: $centered, anchor: .center)
                     .onAppear {
                         centered = selection
                         reader.scrollTo(selection, anchor: .center)
-                        DispatchQueue.main.async { reader.scrollTo(selection, anchor: .center) }
-                    }
-                    // The axis changes with the hold, and the row should stay on the choice.
-                    .onChange(of: hold.isLandscape) { _, _ in
                         DispatchQueue.main.async { reader.scrollTo(selection, anchor: .center) }
                     }
                 }
@@ -1029,17 +1025,10 @@ struct LookCarousel: View {
         .accessibilityLabel("Look")
     }
 
-    @ViewBuilder
-    private func stack<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        if hold.isLandscape {
-            LazyVStack(spacing: 0, content: content)
-        } else {
-            LazyHStack(spacing: 0, content: content)
-        }
-    }
-
-    private func item(_ option: String) -> some View {
+    private func item(_ option: String, height: CGFloat) -> some View {
         let isOn = option == centered
+        // Turned sideways, a name runs across the row's depth, so it gets that much room.
+        let length = hold.isLandscape ? min(Self.itemWidth - 12, height - 8) : Self.itemWidth - 12
         return Button {
             withAnimation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.1)) { centered = option }
         } label: {
@@ -1048,12 +1037,9 @@ struct LookCarousel: View {
                 .foregroundStyle(isOn ? Tokens.held : Tokens.value)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
-                .frame(width: Self.itemLength - 12)
+                .frame(width: length)
                 .turnedToHold()
-                .frame(
-                    width: hold.isLandscape ? nil : Self.itemLength,
-                    height: hold.isLandscape ? Self.itemLength : nil)
-                .frame(maxWidth: hold.isLandscape ? .infinity : nil, maxHeight: hold.isLandscape ? nil : .infinity)
+                .frame(width: Self.itemWidth, height: height)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
