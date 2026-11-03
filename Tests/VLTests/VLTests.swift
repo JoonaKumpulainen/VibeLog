@@ -438,6 +438,7 @@ final class PipelineGPUTests: XCTestCase {
         settings.exposureStops = 0
         // Only the curve under test, in Rec.2020.
         settings.pairsGamut = false
+        settings.nativeGamut = false
         for curve in LogCurve.allCases {
             for demosaic in DemosaicMethod.allCases {
                 settings.curve = curve
@@ -1389,7 +1390,9 @@ final class GamutTests: XCTestCase {
 
     func testNativeGamutFollowsTheCurve() {
         var settings = ProcessingSettings()
+        // Turning pairing off keeps the pair, so Rec.2020 is chosen after.
         settings.pairsGamut = false
+        settings.nativeGamut = false
         settings.curve = .sLog3
         XCTAssertEqual(settings.gamut, .rec2020)
         settings.nativeGamut = true
