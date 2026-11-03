@@ -101,6 +101,8 @@ Modules are dynamic frameworks. Swift is in Swift 5 mode.
 
 ## Not verified
 
+- The ACES looks end to end, from a log code value to the display, against OpenColorIO's own camera inputs for the six pairs it has: `Apple Log`, `S-Log3 S-Gamut3`, `S-Log3 S-Gamut3.Cine`, `ARRI LogC3 (EI800)`, `ARRI LogC4` and `CanonLog3 CinemaGamut D55`. Only the pieces are tested: the transforms from linear Rec.2020, the curves, the gamut matrices and one LUT's grid. OpenColorIO's Canon input is named for D55, so it may adapt from a different white than the D65 VibeLog gives Cinema Gamut, which would show as a slight cast. Also unmeasured: the 65-point LUT's interpolation error between grid points, worst in deep shadows. Both can be checked with OpenColorIO here: extend `tools/make_aces_reference.py` to send log code values through each camera input to the ACES 2.0 view, add the values to `ACESReference.swift`, and test each pair.
+
 - Recording well past 10 minutes, or 10 minutes with no dropped frames at all.
 - Why the long run was about 16 frames short of 30 fps: skipped frames or the sensor's real rate. The new `missed` and `gap` figures should show which.
 - Whether **Auto exposure and white balance during a take** costs frames.
