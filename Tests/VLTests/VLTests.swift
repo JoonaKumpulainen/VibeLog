@@ -849,7 +849,8 @@ final class VideoEncoderTests: XCTestCase {
         if result.failure != nil { throw XCTSkip("Encoder failed here: \(result.failure ?? "")") }
 
         let asset = AVURLAsset(url: url)
-        let track = try XCTUnwrap(try await asset.loadTracks(withMediaType: .video).first)
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        let track = try XCTUnwrap(tracks.first)
         let reader = try AVAssetReader(asset: asset)
         let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_4444AYpCbCr16,
@@ -929,7 +930,8 @@ final class VideoEncoderTests: XCTestCase {
                 encoder.finish { continuation.resume(returning: $0) }
             }
             if result.failure != nil { throw XCTSkip("Encoder failed here: \(result.failure ?? "")") }
-            let track = try XCTUnwrap(try await AVURLAsset(url: url).loadTracks(withMediaType: .video).first)
+            let tracks = try await AVURLAsset(url: url).loadTracks(withMediaType: .video)
+            let track = try XCTUnwrap(tracks.first)
             let (scale, rate) = try await track.load(.naturalTimeScale, .nominalFrameRate)
             XCTAssertEqual(scale, FrameRates.mediaTimeScale(fps))
             XCTAssertEqual(Double(rate), fps, accuracy: 0.005)
