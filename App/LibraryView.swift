@@ -199,6 +199,7 @@ struct TakePlayer: View {
     @State private var player: AVPlayer
     @State private var take: Take
     @State private var showsInfo = false
+    @State private var showsExport = false
     @State private var confirmsDelete = false
     @Environment(\.verticalSizeClass) private var verticalSize
 
@@ -217,6 +218,12 @@ struct TakePlayer: View {
             actions {
                 Button { showsInfo = true } label: { action("Details", symbol: "info.circle") }
                 ShareLink(items: take.files) { action("Share", symbol: "square.and.arrow.up") }
+                Button {
+                    player.pause()
+                    showsExport = true
+                } label: {
+                    action("Export", symbol: "wand.and.stars")
+                }
                 Button(role: .destructive) {
                     confirmsDelete = true
                 } label: {
@@ -235,6 +242,9 @@ struct TakePlayer: View {
         }
         .sheet(isPresented: $showsInfo) {
             TakeInfoView(take: take)
+        }
+        .sheet(isPresented: $showsExport) {
+            ExportView(take: take)
         }
         .confirmationDialog(
             "Delete this take?", isPresented: $confirmsDelete, titleVisibility: .visible
@@ -286,7 +296,9 @@ private struct TakeInfoView: View {
         let names = [
             ("frameRate", "Frame rate"), ("curve", "Log curve"), ("gamut", "Gamut"),
             ("aspect", "Aspect"), ("exposureStops", "Exposure offset"),
-            ("exposureDuringTake", "Exposure"), ("whiteBalanceDuringTake", "White balance"),
+            ("look", "Look"), ("exportedFrom", "Exported from"),
+            ("exposureDuringTake", "Exposure"), ("shutter", "Shutter"), ("iso", "ISO"),
+            ("whiteBalanceDuringTake", "White balance"), ("whiteBalance", "White balance values"),
             ("pipeline", "Pipeline"), ("debayer", "Debayer"), ("heatChanges", "Heat changes"),
             ("hotPath", "Pipeline when hot"), ("hotDebayer", "Debayer when hot"),
             ("orientation", "Hold"), ("lens", "Lens"), ("distortionCorrection", "Lens correction"),

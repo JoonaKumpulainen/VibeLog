@@ -110,7 +110,7 @@ The rule for this phase: anything that adds to real-time GPU load must prove it 
 - RAW histogram, waveform and vectorscope.
 - Horizon indicator: the Level tool does this.
 - Frame guides, a 3x3 grid and anamorphic desqueeze: added, with frame guides and desqueeze untested.
-- LUTs baked into recordings, as an option.
+- LUTs baked into recordings, as an option: built, untested. It records the Rec.709 view and its LUT, tagged Rec.709, and needs a long take to prove its GPU cost.
 - Timecode and Apple Watch control, if they prove useful.
 
 ## Phase 8: on-phone finishing
@@ -119,7 +119,7 @@ Keep recording clean, and do the heavy work after the shot, when real-time limit
 
 - **One-tap stabilization:** use the saved gyro data and the spare sensor area from open gate, with an optional horizon lock.
 - **One-tap denoise:** use the noise profile from the metadata, with temporal denoise where quality justifies the time.
-- **Export presets:** bake a LUT, render Rec.709 or HDR, and make small proxies for sharing.
+- **Export presets:** baking a LUT or the Rec.709 view into a copy, with a preview, is built, untested. HDR renders and small proxies are left.
 - **Roll-off and gamut conversions:** convert between log curves and gamuts for different grading workflows.
 
 ## Later ideas

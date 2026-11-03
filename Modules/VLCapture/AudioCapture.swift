@@ -5,15 +5,22 @@ import VLCore
 /// behaves. Its timestamps use the host clock, the same as the camera's.
 public final class AudioCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
     public var onSample: ((CMSampleBuffer) -> Void)?
-    /// The loudest sample of each stretch of about 80 ms, on the audio queue.
-    public var onLevel: ((Float) -> Void)?
+    /// The loudest left and right samples of each stretch of about 80 ms, on the audio queue.
+    /// Mono gives the same value for both.
+    public var onLevels: ((Float, Float) -> Void)?
+    /// Asks the built-in microphones for stereo, which iOS 18 offers. It applies from the next
+    /// start, and the log says what the microphone gave.
+    public var stereo = true {
+        didSet { queue.async { [self] in applyStereo() } }
+    }
 
     private let session = AVCaptureSession()
     private let queue = DispatchQueue(label: "vibelog.audio", qos: .userInitiated)
     private var configured = false
     private let peakLock = NSLock()
     private var peak: Float = 0
-    private var levelPeak: Float = 0
+    private var levelPeaks: (left: Float, right: Float) = (0, 0)
+    private var input: AVCaptureDeviceInput?
     private var levelFrames = 0
     private var loggedFormat = false
 
@@ -63,8 +70,25 @@ public final class AudioCapture: NSObject, AVCaptureAudioDataOutputSampleBufferD
         session.addOutput(output)
         output.setSampleBufferDelegate(self, queue: queue)
         session.commitConfiguration()
+        self.input = input
         configured = true
+        applyStereo()
         return true
+    }
+
+    private func applyStereo() {
+        guard let input else { return }
+        guard #available(iOS 18.0, *), input.isMultichannelAudioModeSupported(.stereo) else {
+            if stereo { Log.shared.warn("Stereo audio isn't supported here, recording mono") }
+            return
+        }
+        let mode: AVCaptureMultichannelAudioMode = stereo ? .stereo : .none
+        guard input.multichannelAudioMode != mode else { return }
+        session.beginConfiguration()
+        input.multichannelAudioMode = mode
+        session.commitConfiguration()
+        loggedFormat = false
+        Log.shared.info("Microphone set to \(stereo ? "stereo" : "mono")")
     }
 
     public func captureOutput(
@@ -92,28 +116,20 @@ public final class AudioCapture: NSObject, AVCaptureAudioDataOutputSampleBufferD
             block, atOffset: 0, lengthAtOffsetOut: &length, totalLengthOut: nil, dataPointerOut: &pointer
         ) == kCMBlockBufferNoErr, let pointer else { return }
         let bytes = UnsafeRawBufferPointer(start: pointer, count: length)
-        var loudest: Float = 0
-        if stream.mFormatFlags & kAudioFormatFlagIsFloat != 0, stream.mBitsPerChannel == 32 {
-            for sample in bytes.bindMemory(to: Float.self) { loudest = max(loudest, abs(sample)) }
-        } else if stream.mBitsPerChannel == 16 {
-            for sample in bytes.bindMemory(to: Int16.self) {
-                loudest = max(loudest, abs(Float(sample)) / 32768)
-            }
-        } else if stream.mBitsPerChannel == 32 {
-            for sample in bytes.bindMemory(to: Int32.self) {
-                loudest = max(loudest, abs(Float(sample)) / 2_147_483_648)
-            }
-        } else {
-            return
-        }
+        let channels = max(Int(stream.mChannelsPerFrame), 1)
+        let interleaved = stream.mFormatFlags & kAudioFormatFlagIsNonInterleaved == 0
+        guard let loudest = AudioLevels.channelPeaks(
+            bytes, bits: Int(stream.mBitsPerChannel), float: stream.mFormatFlags & kAudioFormatFlagIsFloat != 0,
+            channels: channels, interleaved: interleaved)
+        else { return }
         peakLock.lock()
-        peak = max(peak, min(loudest, 1))
+        peak = max(peak, min(max(loudest.left, loudest.right), 1))
         peakLock.unlock()
-        levelPeak = max(levelPeak, min(loudest, 1))
+        levelPeaks = (max(levelPeaks.left, min(loudest.left, 1)), max(levelPeaks.right, min(loudest.right, 1)))
         levelFrames += CMSampleBufferGetNumSamples(sampleBuffer)
         guard Double(levelFrames) >= stream.mSampleRate * 0.08 else { return }
-        onLevel?(levelPeak)
-        levelPeak = 0
+        onLevels?(levelPeaks.left, levelPeaks.right)
+        levelPeaks = (0, 0)
         levelFrames = 0
     }
 }

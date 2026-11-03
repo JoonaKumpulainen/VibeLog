@@ -574,6 +574,56 @@ final class PipelineGPUTests: XCTestCase {
         XCTAssertEqual(value[3] >> 4, 2048)
     }
 
+    /// Baked, middle gray in S-Log3 becomes the Rec.709 view's gray, in Rec.709's matrix.
+    func testBakedLookWritesTheRec709View() throws {
+        let pipeline = try makePipeline()
+        let device = pipeline.device
+        func texture(_ format: MTLPixelFormat, _ width: Int, _ height: Int, _ usage: MTLTextureUsage) throws -> MTLTexture {
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: format, width: width, height: height, mipmapped: false)
+            descriptor.usage = usage
+            return try XCTUnwrap(device.makeTexture(descriptor: descriptor))
+        }
+        let gray = LogCurve.sLog3.encode(0.18)
+        let image = try texture(.rgba16Unorm, 8, 8, .shaderRead)
+        let pixels = [UInt16](repeating: UInt16((gray * 65535).rounded()), count: 8 * 8 * 4)
+        pixels.withUnsafeBytes {
+            image.replace(region: MTLRegionMake2D(0, 0, 8, 8), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: 64)
+        }
+        var settings = ProcessingSettings()
+        settings.curve = .sLog3
+        settings.bakeLook = true
+        let look = LookParams(settings: settings, lut: nil)
+        XCTAssertEqual(look.mode, 1)
+        XCTAssertEqual(look.luma, LookParams.rec709Luma)
+
+        let luma = try texture(.r16Unorm, 8, 8, .shaderWrite)
+        let chroma = try texture(.rg16Unorm, 4, 8, .shaderWrite)
+        let queue = try XCTUnwrap(device.makeCommandQueue())
+        let commands = try XCTUnwrap(queue.makeCommandBuffer())
+        XCTAssertTrue(pipeline.encodeYCbCr(into: commands, image: image, luma: luma, chroma: chroma, look: look))
+        commands.commit()
+        commands.waitUntilCompleted()
+        XCTAssertEqual(commands.status, .completed)
+        var lumaValue: UInt16 = 0
+        luma.getBytes(&lumaValue, bytesPerRow: 16, from: MTLRegionMake2D(4, 4, 1, 1), mipmapLevel: 0)
+        var chromaValue: [UInt16] = [0, 0]
+        chroma.getBytes(&chromaValue, bytesPerRow: 16, from: MTLRegionMake2D(2, 4, 1, 1), mipmapLevel: 0)
+        let display = MonitorTransform.display(log: SIMD3(repeating: gray), curve: .sLog3, gamut: settings.gamut).y
+        XCTAssertEqual(Double(lumaValue >> 6), (64 + 876 * display).rounded(), accuracy: 1)
+        XCTAssertEqual(Double(chromaValue[0] >> 6), 512, accuracy: 1)
+        XCTAssertEqual(Double(chromaValue[1] >> 6), 512, accuracy: 1)
+    }
+
+    func testFileTagSetsTheMatrix() {
+        var settings = ProcessingSettings()
+        XCTAssertEqual(LookParams(settings: settings, lut: nil).luma, LookParams.rec2020Luma)
+        XCTAssertEqual(LookParams(settings: settings, lut: nil).mode, 0)
+        settings.rec709Matrix = true
+        XCTAssertEqual(LookParams(settings: settings, lut: nil).luma, LookParams.rec709Luma)
+        XCTAssertEqual(LookParams(settings: settings, lut: nil).mode, 0)
+    }
+
     /// Noisy Bayer data through both pipelines must give the same planes to within rounding.
     private func comparePipelines(
         lumaHeight: Int, chromaWidth: Int, chromaHeight: Int, demosaic: DemosaicMethod, curve: LogCurve
@@ -924,6 +974,38 @@ final class VideoEncoderTests: XCTestCase {
         let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
         XCTAssertTrue(writer.canApply(outputSettings: VideoEncoder.audioSettings(pcm: false), forMediaType: .audio))
         XCTAssertTrue(writer.canApply(outputSettings: VideoEncoder.audioSettings(pcm: true), forMediaType: .audio))
+        for pcm in [false, true] {
+            let stereo = VideoEncoder.audioSettings(pcm: pcm, channels: 2)
+            XCTAssertEqual(stereo[AVNumberOfChannelsKey] as? Int, 2)
+            XCTAssertTrue(writer.canApply(outputSettings: stereo, forMediaType: .audio), "pcm \(pcm)")
+        }
+        XCTAssertEqual(VideoEncoder.audioSettings(pcm: false, channels: 2)[AVEncoderBitRateKey] as? Int, 384_000)
+    }
+
+    func testMetersReadEachChannel() {
+        let interleaved: [Int16] = [100, -2000, 300, 50]
+        let stereo = interleaved.withUnsafeBytes {
+            AudioLevels.channelPeaks($0, bits: 16, float: false, channels: 2, interleaved: true)
+        }
+        XCTAssertEqual(stereo?.left ?? 0, 300 / 32768, accuracy: 1e-6)
+        XCTAssertEqual(stereo?.right ?? 0, 2000 / 32768, accuracy: 1e-6)
+
+        let blocks: [Float] = [0.1, -0.4, 0.2, 0.05]
+        let split = blocks.withUnsafeBytes {
+            AudioLevels.channelPeaks($0, bits: 32, float: true, channels: 2, interleaved: false)
+        }
+        XCTAssertEqual(split?.left ?? 0, 0.4, accuracy: 1e-6)
+        XCTAssertEqual(split?.right ?? 0, 0.2, accuracy: 1e-6)
+
+        let mono: [Int16] = [-16384, 8]
+        let single = mono.withUnsafeBytes {
+            AudioLevels.channelPeaks($0, bits: 16, float: false, channels: 1, interleaved: true)
+        }
+        XCTAssertEqual(single?.left, single?.right)
+        XCTAssertEqual(single?.left ?? 0, 0.5, accuracy: 1e-6)
+        XCTAssertNil([UInt8](repeating: 0, count: 6).withUnsafeBytes {
+            AudioLevels.channelPeaks($0, bits: 24, float: false, channels: 2, interleaved: true)
+        })
     }
 
     func testExpectedFrameRateFollowsTheTake() throws {
@@ -957,6 +1039,66 @@ final class VideoEncoderTests: XCTestCase {
         let asset = AVURLAsset(url: url)
         let tracks = try await asset.loadTracks(withMediaType: .video)
         XCTAssertEqual(tracks.count, 1)
+    }
+
+    /// A flat S-Log3 gray take, exported with the Rec.709 view, reads back as that view's gray.
+    func testExportBakesTheLook() async throws {
+        let folder = FileManager.default.temporaryDirectory
+        let source = folder.appendingPathComponent(UUID().uuidString + ".mov")
+        let output = folder.appendingPathComponent(UUID().uuidString + ".mov")
+        let preset = try XCTUnwrap(EncoderPreset.all.first { $0.id == "hevc420" })
+        let size = EncoderSize(width: 640, height: 480)
+        let gray = LogCurve.sLog3.encode(0.18)
+        let writer: VideoEncoder
+        do {
+            writer = try VideoEncoder(config: .init(url: source, preset: preset, size: size, audio: false, realTime: false))
+        } catch {
+            throw XCTSkip("\(preset.label) is not available here: \(error)")
+        }
+        for index in 0..<6 {
+            let buffer = try XCTUnwrap(writer.nextPixelBuffer())
+            CVPixelBufferLockBaseAddress(buffer, [])
+            for (plane, value) in [(0, 64 + 876 * gray), (1, 512.0)] {
+                let base = try XCTUnwrap(CVPixelBufferGetBaseAddressOfPlane(buffer, plane))
+                let count = CVPixelBufferGetBytesPerRowOfPlane(buffer, plane) * CVPixelBufferGetHeightOfPlane(buffer, plane) / 2
+                let samples = base.assumingMemoryBound(to: UInt16.self)
+                for sample in 0..<count { samples[sample] = UInt16(value.rounded()) << 6 }
+            }
+            CVPixelBufferUnlockBaseAddress(buffer, [])
+            writer.append(buffer, at: CMTime(value: Int64(index), timescale: 30))
+        }
+        let written = await withCheckedContinuation { continuation in writer.finish { continuation.resume(returning: $0) } }
+        if written.failure != nil { throw XCTSkip("Encoder failed here: \(written.failure ?? "")") }
+
+        let look = LookExporter.Look(
+            curve: .sLog3, gamut: .sGamut3Cine, lut: nil, lutExpectsRec709: false, sourceRec709: false)
+        let exporter = try XCTUnwrap(LookExporter(look: look))
+        let sink = try VideoEncoder(config: .init(
+            url: output, preset: preset, size: size, audio: false, realTime: false, fileTag: .rec709))
+        do {
+            try await exporter.export(from: source, into: sink, seconds: 0.2, progress: { _ in }, cancelled: { false })
+        } catch LookExporter.Failure.cannotRead(let reason) {
+            throw XCTSkip("The simulator can't read the take back: \(reason)")
+        }
+        let exported = await withCheckedContinuation { continuation in sink.finish { continuation.resume(returning: $0) } }
+        XCTAssertNil(exported.failure)
+        XCTAssertEqual(exported.framesWritten, 6)
+
+        let asset = AVURLAsset(url: output)
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        let reader = try AVAssetReader(asset: asset)
+        let trackOutput = AVAssetReaderTrackOutput(track: try XCTUnwrap(tracks.first), outputSettings: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange,
+        ])
+        reader.add(trackOutput)
+        XCTAssertTrue(reader.startReading())
+        let frame = try XCTUnwrap(trackOutput.copyNextSampleBuffer().flatMap(CMSampleBufferGetImageBuffer))
+        CVPixelBufferLockBaseAddress(frame, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(frame, .readOnly) }
+        let row = try XCTUnwrap(CVPixelBufferGetBaseAddressOfPlane(frame, 0))
+            .advanced(by: 240 * CVPixelBufferGetBytesPerRowOfPlane(frame, 0)).assumingMemoryBound(to: UInt16.self)
+        let display = MonitorTransform.display(log: SIMD3(repeating: gray), curve: .sLog3, gamut: .sGamut3Cine).y
+        XCTAssertEqual(Double(row[320] >> 6), 64 + 876 * display, accuracy: 3)
     }
 
     /// Editors read the rate from the track, which must keep whole ticks per frame.
@@ -1244,7 +1386,7 @@ final class TakeAccountingTests: XCTestCase {
     }
 
     func testPeakingThresholds() {
-        XCTAssertEqual(PeakingSensitivity.low.threshold, 0.1)
+        XCTAssertEqual(PeakingSensitivity.low.threshold, 0.2)
         XCTAssertLessThan(PeakingSensitivity.high.threshold, PeakingSensitivity.low.threshold)
     }
 
@@ -1331,9 +1473,11 @@ final class AppConfigTests: XCTestCase {
         XCTAssertEqual(config.testServer, "")
         XCTAssertFalse(config.distortionCorrection)
         XCTAssertTrue(config.efficientWhenHot)
-        XCTAssertTrue(config.bilinearWhenHot)
+        XCTAssertFalse(config.bilinearWhenHot)
         XCTAssertEqual(config.idlePauseMinutes, 2)
         XCTAssertEqual(config.fileTag, "rec2020")
+        XCTAssertTrue(config.stereoAudio)
+        XCTAssertFalse(config.twelveBitProRes)
     }
 
     private var night: FormatPreset {
@@ -1540,6 +1684,31 @@ final class GamutTests: XCTestCase {
         XCTAssertEqual(native.x, plain.x, accuracy: 0.01)
         XCTAssertEqual(native.y, plain.y, accuracy: 0.01)
         XCTAssertEqual(native.z, plain.z, accuracy: 0.01)
+    }
+}
+
+final class TakeReadingsTests: XCTestCase {
+    func testFrozenTakesNameTheirValues() {
+        var readings = TakeReadings()
+        for _ in 0..<3 { readings.add(seconds: 1.0 / 50, iso: 937, temperature: 5612, tint: 3) }
+        XCTAssertEqual(readings.shutter(.frozen), "1/50 s, frozen at start")
+        XCTAssertEqual(readings.isoText(.frozen), "ISO 937, frozen at start")
+        XCTAssertEqual(readings.whiteBalance(.frozen), "5612 K, tint +3, frozen at start")
+        XCTAssertEqual(readings.shutter(.manual), "1/50 s, manual")
+    }
+
+    func testAutoTakesGiveTheirRange() {
+        var readings = TakeReadings()
+        readings.add(seconds: 1.0 / 50, iso: 800, temperature: 5200, tint: 0)
+        readings.add(seconds: 1.0 / 120, iso: 1250, temperature: 5800, tint: 2)
+        XCTAssertEqual(readings.shutter(.auto), "auto, 1/50 to 1/120 s")
+        XCTAssertEqual(readings.isoText(.auto), "auto, ISO 800 to 1250")
+        XCTAssertEqual(readings.whiteBalance(.auto), "auto, 5200 to 5800 K")
+    }
+
+    func testNoReadingsStillSayTheMode() {
+        XCTAssertEqual(TakeReadings().shutter(.auto), "auto")
+        XCTAssertEqual(TakeReadings().isoText(.frozen), "frozen at start")
     }
 }
 

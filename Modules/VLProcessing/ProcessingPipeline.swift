@@ -81,8 +81,8 @@ public enum PeakingSensitivity: String, CaseIterable, Identifiable, Sendable {
 
     var threshold: Float {
         switch self {
-        case .low: return 0.1
-        case .high: return 0.05
+        case .low: return 0.2
+        case .high: return 0.1
         }
     }
 }
@@ -119,8 +119,9 @@ public struct ProcessingSettings: Equatable, Sendable {
     public var pauseMonitorWhileRecording = false
     /// Slows the monitor when the phone is hot.
     public var reduceLoadWhenHot = true
-    /// Uses the cheaper debayer when the phone is hot, whichever one is chosen.
-    public var bilinearWhenHot = true
+    /// Uses the cheaper debayer when the phone is hot, whichever one is chosen. Off by default:
+    /// Malvar-He-Cutler held a 10-minute take at serious heat with the Efficient path.
+    public var bilinearWhenHot = false
     /// Look LUTs expect Rec.709; conversion LUTs expect the log image.
     public var lutExpectsRec709 = false
     private var storedCurve = LogCurve.appleLog
@@ -146,6 +147,10 @@ public struct ProcessingSettings: Equatable, Sendable {
     /// On an iPhone 14 Pro, auto exposure on a plain surface read 0.37 linear at +0.5 stops,
     /// so -0.5 stops places it near 0.18. This is from a single measurement.
     public var exposureStops = -0.5
+    /// Records the look instead of log: the Rec.709 view, then the chosen LUT, in Rec.709's matrix.
+    public var bakeLook = false
+    /// The file is tagged Rec.709, so its YCbCr uses Rec.709's matrix. A baked look always does.
+    public var rec709Matrix = false
 
     public var curve: LogCurve {
         get { storedCurve }
@@ -261,6 +266,48 @@ private struct MonitorParams {
     }
 }
 
+/// What the encode kernels write. Must match LookParams in Shaders.metal.
+struct LookParams {
+    var mode: UInt32
+    var curve: UInt32
+    var lutSize: Float
+    var unused: Float = 0
+    var lutScale: SIMD4<Float>
+    var lutOffset: SIMD4<Float>
+    var toRec709Row0: SIMD4<Float>
+    var toRec709Row1: SIMD4<Float>
+    var toRec709Row2: SIMD4<Float>
+    var luma: SIMD4<Float>
+
+    static let rec2020Luma = SIMD4<Float>(0.2627, 0.6780, 0.0593, 0)
+    static let rec709Luma = SIMD4<Float>(0.2126, 0.7152, 0.0722, 0)
+
+    /// The log image as recorded, in Rec.2020's matrix.
+    static let log = LookParams(settings: ProcessingSettings(), lut: nil)
+
+    init(settings: ProcessingSettings, lut: CubeLUT?) {
+        if settings.bakeLook {
+            mode = lut == nil ? 1 : (settings.lutExpectsRec709 ? 3 : 2)
+        } else {
+            mode = 0
+        }
+        curve = settings.curve.rawValue
+        lutSize = Float(lut?.size ?? 2)
+        let low = lut?.domainMin ?? SIMD3(repeating: 0)
+        let high = lut?.domainMax ?? SIMD3(repeating: 1)
+        lutScale = SIMD4(1 / (high - low), 0)
+        lutOffset = SIMD4(low, 0)
+        let matrix = ColorMath.rec2020ToRec709 * settings.gamut.fromRec2020.inverse
+        func row(_ index: Int) -> SIMD4<Float> {
+            SIMD4(Float(matrix[0][index]), Float(matrix[1][index]), Float(matrix[2][index]), 0)
+        }
+        toRec709Row0 = row(0)
+        toRec709Row1 = row(1)
+        toRec709Row2 = row(2)
+        luma = settings.bakeLook || settings.rec709Matrix ? Self.rec709Luma : Self.rec2020Luma
+    }
+}
+
 private struct CropParams {
     var uvOffset: SIMD2<Float>
     var uvScale: SIMD2<Float>
@@ -343,6 +390,7 @@ public final class ProcessingPipeline: NSObject {
     private var drawScheduled = false
     /// Bound in place of a custom LUT, which the shader then never reads.
     private var emptyLUT: MTLTexture?
+    private var takeLook: (look: LookParams, lut: MTLTexture?)?
     private var customLUT: CustomLUT?
     private var stats = PipelineStats()
     private var gpuTotalMs = 0.0
@@ -387,6 +435,15 @@ public final class ProcessingPipeline: NSObject {
             descriptor.fragmentFunction = library.makeFunction(name: "monitorFragment")
             descriptor.colorAttachments[0].pixelFormat = pixelFormat
             monitorState = try device.makeRenderPipelineState(descriptor: descriptor)
+            // Made here, since both the encode queue and the viewfinder bind it.
+            let empty = MTLTextureDescriptor()
+            empty.textureType = .type3D
+            empty.pixelFormat = .rgba16Unorm
+            empty.width = 2
+            empty.height = 2
+            empty.depth = 2
+            empty.usage = .shaderRead
+            emptyLUT = device.makeTexture(descriptor: empty)
         } catch {
             Log.shared.error("Pipeline shader setup failed: \(error.localizedDescription)")
             return nil
@@ -419,34 +476,20 @@ public final class ProcessingPipeline: NSObject {
     /// Replaces the Rec.709 monitoring LUT, or restores it when nil.
     public func setCustomLUT(_ lut: CubeLUT?) {
         var custom: CustomLUT?
-        if let lut {
-            let descriptor = MTLTextureDescriptor()
-            descriptor.textureType = .type3D
-            descriptor.pixelFormat = .rgba16Unorm
-            descriptor.width = lut.size
-            descriptor.height = lut.size
-            descriptor.depth = lut.size
-            descriptor.usage = .shaderRead
-            if let texture = device.makeTexture(descriptor: descriptor) {
-                let samples = lut.textureSamples
-                let size = lut.size
-                samples.withUnsafeBytes { bytes in
-                    texture.replace(
-                        region: MTLRegionMake3D(0, 0, 0, size, size, size), mipmapLevel: 0, slice: 0,
-                        withBytes: bytes.baseAddress!, bytesPerRow: size * 8, bytesPerImage: size * size * 8)
-                }
-                custom = CustomLUT(texture: texture, lut: lut)
-            }
+        if let lut, let texture = lutTexture(for: lut) {
+            custom = CustomLUT(texture: texture, lut: lut)
         }
         lock.lock()
         customLUT = custom
         lock.unlock()
     }
 
-    /// Sends finished frames to an encoder until set back to nil.
+    /// Sends finished frames to an encoder until set back to nil. A baked look is fixed for the
+    /// take as it starts, so a LUT chosen mid-take only changes the viewfinder.
     public func setSink(_ newSink: VideoFrameSink?) {
         lock.lock()
         sink = newSink
+        takeLook = newSink == nil ? nil : (LookParams(settings: settings, lut: customLUT?.lut), customLUT?.texture)
         lock.unlock()
     }
 
@@ -575,6 +618,8 @@ public final class ProcessingPipeline: NSObject {
         }
         let sinkFrame = prepareSinkFrame(pts: capture.pts)
         lock.lock()
+        let look = takeLook?.look ?? LookParams(settings: settings, lut: customLUT?.lut)
+        let lookLUT = takeLook == nil ? customLUT?.texture : takeLook?.lut
         let hotPath = hot && settings.efficientWhenHot
         let efficient = (settings.pipeline == .efficient || hotPath) && stillRequest == nil
         lock.unlock()
@@ -589,10 +634,10 @@ public final class ProcessingPipeline: NSObject {
                 switch frame.planes {
                 case .biplanar(let luma, let chroma):
                     return encodeDirect(into: commands, input: input, luma: luma, chroma: chroma, cfa: cfa,
-                                        gains: capture.whiteBalanceGains)
+                                        gains: capture.whiteBalanceGains, look: look, lut: lookLUT)
                 case .packed(let packed):
                     return encodeDirectPacked(into: commands, input: input, packed: packed, cfa: cfa,
-                                              gains: capture.whiteBalanceGains)
+                                              gains: capture.whiteBalanceGains, look: look, lut: lookLUT)
                 }
             } ?? true
             // Every other frame is enough for the monitor while recording.
@@ -613,9 +658,10 @@ public final class ProcessingPipeline: NSObject {
             if encoded, let sinkFrame {
                 switch sinkFrame.planes {
                 case .biplanar(let luma, let chroma):
-                    encoded = encodeYCbCr(into: commands, image: output, luma: luma, chroma: chroma)
+                    encoded = encodeYCbCr(
+                        into: commands, image: output, luma: luma, chroma: chroma, look: look, lut: lookLUT)
                 case .packed(let packed):
-                    encoded = encodePacked(into: commands, image: output, packed: packed)
+                    encoded = encodePacked(into: commands, image: output, packed: packed, look: look, lut: lookLUT)
                 }
             }
             still = encoded ? encodeStillReadback(commands, output: output, capture: capture) : nil
@@ -671,8 +717,19 @@ public final class ProcessingPipeline: NSObject {
         lock.lock()
         let target = sink
         lock.unlock()
-        guard let target, let cache = textureCache, let buffer = target.nextPixelBuffer() else { return nil }
+        guard let target, let buffer = target.nextPixelBuffer() else { return nil }
+        guard let wrapping = wrapPlanes(buffer) else {
+            logOnce("Cannot wrap the encoder's pixel buffer as textures")
+            return nil
+        }
+        return SinkFrame(
+            sink: target, buffer: buffer, wrapped: wrapping.0, planes: wrapping.1,
+            time: CMTime(seconds: pts, preferredTimescale: 1_000_000_000))
+    }
 
+    /// An encoder buffer as textures the GPU can write. Keep the wrapped textures until it's done.
+    fileprivate func wrapPlanes(_ buffer: CVPixelBuffer) -> ([CVMetalTexture], SinkFrame.Planes)? {
+        guard let cache = textureCache else { return nil }
         func wrap(plane: Int, format: MTLPixelFormat) -> CVMetalTexture? {
             var texture: CVMetalTexture?
             // A packed buffer has no planes, so plane sizes read as zero.
@@ -683,25 +740,55 @@ public final class ProcessingPipeline: NSObject {
                 planar ? CVPixelBufferGetHeightOfPlane(buffer, plane) : CVPixelBufferGetHeight(buffer), plane, &texture)
             return status == kCVReturnSuccess ? texture : nil
         }
-        let time = CMTime(seconds: pts, preferredTimescale: 1_000_000_000)
         if CVPixelBufferGetPixelFormatType(buffer) == kCVPixelFormatType_4444AYpCbCr16 {
-            guard let wrapped = wrap(plane: 0, format: .rgba16Unorm), let packed = CVMetalTextureGetTexture(wrapped) else {
-                logOnce("Cannot wrap the encoder's 16-bit pixel buffer as a texture")
-                return nil
-            }
-            return SinkFrame(sink: target, buffer: buffer, wrapped: [wrapped], planes: .packed(packed), time: time)
+            guard let wrapped = wrap(plane: 0, format: .rgba16Unorm), let packed = CVMetalTextureGetTexture(wrapped)
+            else { return nil }
+            return ([wrapped], .packed(packed))
         }
         guard let wrappedLuma = wrap(plane: 0, format: .r16Unorm),
             let wrappedChroma = wrap(plane: 1, format: .rg16Unorm),
             let luma = CVMetalTextureGetTexture(wrappedLuma),
             let chroma = CVMetalTextureGetTexture(wrappedChroma)
-        else {
-            logOnce("Cannot wrap the encoder's pixel buffer as textures")
-            return nil
+        else { return nil }
+        return ([wrappedLuma, wrappedChroma], .biplanar(luma: luma, chroma: chroma))
+    }
+
+    /// Converts a log image into an encoder buffer with a look, for the export. Returns the wrapped
+    /// textures, which must outlive the command buffer.
+    func encodeImage(
+        _ image: MTLTexture, into buffer: CVPixelBuffer, commands: MTLCommandBuffer, look: LookParams,
+        lut: MTLTexture?
+    ) -> [CVMetalTexture]? {
+        guard let wrapping = wrapPlanes(buffer) else { return nil }
+        let wrapped = wrapping.0
+        switch wrapping.1 {
+        case .biplanar(let luma, let chroma):
+            guard encodeYCbCr(into: commands, image: image, luma: luma, chroma: chroma, look: look, lut: lut)
+            else { return nil }
+        case .packed(let packed):
+            guard encodePacked(into: commands, image: image, packed: packed, look: look, lut: lut) else { return nil }
         }
-        return SinkFrame(
-            sink: target, buffer: buffer, wrapped: [wrappedLuma, wrappedChroma],
-            planes: .biplanar(luma: luma, chroma: chroma), time: time)
+        return wrapped
+    }
+
+    /// A .cube LUT as the 3D texture the shaders sample.
+    func lutTexture(for lut: CubeLUT) -> MTLTexture? {
+        let descriptor = MTLTextureDescriptor()
+        descriptor.textureType = .type3D
+        descriptor.pixelFormat = .rgba16Unorm
+        descriptor.width = lut.size
+        descriptor.height = lut.size
+        descriptor.depth = lut.size
+        descriptor.usage = .shaderRead
+        guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
+        let samples = lut.textureSamples
+        let size = lut.size
+        samples.withUnsafeBytes { bytes in
+            texture.replace(
+                region: MTLRegionMake3D(0, 0, 0, size, size, size), mipmapLevel: 0, slice: 0,
+                withBytes: bytes.baseAddress!, bytesPerRow: size * 8, bytesPerImage: size * size * 8)
+        }
+        return texture
     }
 
     /// The efficient path: writes the encoder's planes directly from the Bayer data, center
@@ -709,8 +796,10 @@ public final class ProcessingPipeline: NSObject {
     @discardableResult
     func encodeDirect(
         into commands: MTLCommandBuffer, input: MTLTexture, luma: MTLTexture, chroma: MTLTexture,
-        cfa: CFAPattern, gains: [Float]
+        cfa: CFAPattern, gains: [Float], look: LookParams = .log, lut: MTLTexture? = nil
     ) -> Bool {
+        var look = look
+        guard let lut = lut ?? placeholderLUT() else { return false }
         guard let encoder = commands.makeComputeCommandEncoder() else { return false }
         var parameters = makeParameters(cfa: cfa, gains: gains)
         var direct = DirectParams(
@@ -720,8 +809,10 @@ public final class ProcessingPipeline: NSObject {
         encoder.setTexture(input, index: 0)
         encoder.setTexture(luma, index: 1)
         encoder.setTexture(chroma, index: 2)
+        encoder.setTexture(lut, index: 3)
         encoder.setBytes(&parameters, length: MemoryLayout<ProcessParams>.stride, index: 0)
         encoder.setBytes(&direct, length: MemoryLayout<DirectParams>.stride, index: 1)
+        encoder.setBytes(&look, length: MemoryLayout<LookParams>.stride, index: 2)
         let width = directState.threadExecutionWidth
         let height = max(directState.maxTotalThreadsPerThreadgroup / width, 1)
         encoder.dispatchThreads(
@@ -734,8 +825,11 @@ public final class ProcessingPipeline: NSObject {
     /// The efficient path for packed 4:4:4, center cropping like `encodeDirect`.
     @discardableResult
     func encodeDirectPacked(
-        into commands: MTLCommandBuffer, input: MTLTexture, packed: MTLTexture, cfa: CFAPattern, gains: [Float]
+        into commands: MTLCommandBuffer, input: MTLTexture, packed: MTLTexture, cfa: CFAPattern, gains: [Float],
+        look: LookParams = .log, lut: MTLTexture? = nil
     ) -> Bool {
+        var look = look
+        guard let lut = lut ?? placeholderLUT() else { return false }
         guard let encoder = commands.makeComputeCommandEncoder() else { return false }
         var parameters = makeParameters(cfa: cfa, gains: gains)
         var direct = DirectParams(
@@ -744,8 +838,10 @@ public final class ProcessingPipeline: NSObject {
         encoder.setComputePipelineState(directPackedState)
         encoder.setTexture(input, index: 0)
         encoder.setTexture(packed, index: 1)
+        encoder.setTexture(lut, index: 2)
         encoder.setBytes(&parameters, length: MemoryLayout<ProcessParams>.stride, index: 0)
         encoder.setBytes(&direct, length: MemoryLayout<DirectParams>.stride, index: 1)
+        encoder.setBytes(&look, length: MemoryLayout<LookParams>.stride, index: 2)
         let width = directPackedState.threadExecutionWidth
         let height = max(directPackedState.maxTotalThreadsPerThreadgroup / width, 1)
         encoder.dispatchThreads(
@@ -778,9 +874,11 @@ public final class ProcessingPipeline: NSObject {
     /// Converts a log image to biplanar 10-bit YCbCr. Separate so tests can use plain textures.
     @discardableResult
     func encodeYCbCr(
-        into commands: MTLCommandBuffer, image: MTLTexture, luma: MTLTexture, chroma: MTLTexture
+        into commands: MTLCommandBuffer, image: MTLTexture, luma: MTLTexture, chroma: MTLTexture,
+        look: LookParams = .log, lut: MTLTexture? = nil
     ) -> Bool {
-        guard let encoder = commands.makeComputeCommandEncoder() else { return false }
+        var look = look
+        guard let lut = lut ?? placeholderLUT(), let encoder = commands.makeComputeCommandEncoder() else { return false }
         var crop = Self.centerCrop(
             imageAspect: Float(image.width) / Float(image.height),
             targetAspect: Float(luma.width) / Float(luma.height))
@@ -788,7 +886,9 @@ public final class ProcessingPipeline: NSObject {
             encoder.setComputePipelineState(state)
             encoder.setTexture(image, index: 0)
             encoder.setTexture(target, index: 1)
+            encoder.setTexture(lut, index: 2)
             encoder.setBytes(&crop, length: MemoryLayout<CropParams>.stride, index: 0)
+            encoder.setBytes(&look, length: MemoryLayout<LookParams>.stride, index: 1)
             let width = state.threadExecutionWidth
             let height = max(state.maxTotalThreadsPerThreadgroup / width, 1)
             encoder.dispatchThreads(
@@ -801,15 +901,21 @@ public final class ProcessingPipeline: NSObject {
 
     /// Converts a log image to packed 16-bit AYCbCr 4:4:4. Separate so tests can use plain textures.
     @discardableResult
-    func encodePacked(into commands: MTLCommandBuffer, image: MTLTexture, packed: MTLTexture) -> Bool {
-        guard let encoder = commands.makeComputeCommandEncoder() else { return false }
+    func encodePacked(
+        into commands: MTLCommandBuffer, image: MTLTexture, packed: MTLTexture, look: LookParams = .log,
+        lut: MTLTexture? = nil
+    ) -> Bool {
+        var look = look
+        guard let lut = lut ?? placeholderLUT(), let encoder = commands.makeComputeCommandEncoder() else { return false }
         var crop = Self.centerCrop(
             imageAspect: Float(image.width) / Float(image.height),
             targetAspect: Float(packed.width) / Float(packed.height))
         encoder.setComputePipelineState(packedState)
         encoder.setTexture(image, index: 0)
         encoder.setTexture(packed, index: 1)
+        encoder.setTexture(lut, index: 2)
         encoder.setBytes(&crop, length: MemoryLayout<CropParams>.stride, index: 0)
+        encoder.setBytes(&look, length: MemoryLayout<LookParams>.stride, index: 1)
         let width = packedState.threadExecutionWidth
         let height = max(packedState.maxTotalThreadsPerThreadgroup / width, 1)
         encoder.dispatchThreads(
@@ -965,18 +1071,10 @@ public final class ProcessingPipeline: NSObject {
         }
     }
 
-    private func placeholderLUT() -> MTLTexture? {
-        if let emptyLUT { return emptyLUT }
-        let descriptor = MTLTextureDescriptor()
-        descriptor.textureType = .type3D
-        descriptor.pixelFormat = .rgba16Unorm
-        descriptor.width = 2
-        descriptor.height = 2
-        descriptor.depth = 2
-        descriptor.usage = .shaderRead
-        emptyLUT = device.makeTexture(descriptor: descriptor)
-        return emptyLUT
-    }
+    private func placeholderLUT() -> MTLTexture? { emptyLUT }
+
+    /// Bound in place of a LUT the shader won't read.
+    var placeholderTexture: MTLTexture? { emptyLUT }
 
     /// Runs the viewfinder's Rec.709 math on a plain texture, so tests can check it against
     /// `MonitorTransform.display`.

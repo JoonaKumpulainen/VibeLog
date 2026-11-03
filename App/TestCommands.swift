@@ -192,7 +192,9 @@ extension AppModel {
             "pairsGamut": String(processing.pairsGamut),
             "pipeline": processing.pipeline.rawValue, "tools": toolsLabel,
             "fixedFrameTime": String(fixedFrameTime), "uncompressedAudio": String(pcmAudio),
+            "stereoAudio": String(stereoAudio),
             "distortionCorrection": String(distortionCorrection), "twelveBitProRes": String(twelveBitProRes),
+            "bakeLook": String(bakeLook),
             "efficientWhenHot": String(processing.efficientWhenHot), "isoAuto": String(isoAuto),
             "bilinearWhenHot": String(processing.bilinearWhenHot),
             "yields": String(pipelineStats.monitorYields),
@@ -242,11 +244,13 @@ extension AppModel {
             processing.exposureStops = stops
             return nil
         case "uncompressedAudio": return flag { pcmAudio = $0 }
+        case "stereoAudio": return flag { stereoAudio = $0 }
         case "saveGyro": return flag { saveGyroLog = $0 }
         case "captureTiming": return flag { logCaptureTiming = $0 }
         case "fixedFrameTime": return flag { fixedFrameTime = $0 }
         case "distortionCorrection": return flag { distortionCorrection = $0 }
         case "twelveBitProRes": return flag { twelveBitProRes = $0 }
+        case "bakeLook": return flag { bakeLook = $0 }
         case "efficientWhenHot": return flag { processing.efficientWhenHot = $0 }
         case "isoAuto":
             guard exposureLocked else { return "isoAuto needs a set shutter first" }

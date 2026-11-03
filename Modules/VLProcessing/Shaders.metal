@@ -42,6 +42,21 @@ struct CropParams {
     float2 uvScale;
 };
 
+// Must match LookParams in ProcessingPipeline.swift. What the encoder writes: the log image as
+// recorded, or a look baked in, in the file's own YCbCr matrix.
+struct LookParams {
+    uint mode;  // 0 log, 1 Rec.709 view, 2 LUT on log, 3 Rec.709 view then LUT.
+    uint curve;
+    float lutSize;
+    float unused;
+    float4 lutScale;
+    float4 lutOffset;
+    float4 toRec709Row0;
+    float4 toRec709Row1;
+    float4 toRec709Row2;
+    float4 luma;  // Kr, Kg, Kb of the file's matrix.
+};
+
 struct DirectParams {
     int2 sourceOrigin;
     uint2 chromaStep;
@@ -191,95 +206,6 @@ kernel void processMonitor(texture2d<ushort, access::read> raw [[texture(0)]],
     output.write(float4(cameraToLog(float3(red, green, blue), u), 1.0), gid);
 }
 
-// Rec.2020 non-constant luminance, 10-bit video range, MSB-aligned in 16 bits. Sampling on
-// the output grid resizes the image and averages chroma when it is subsampled.
-static inline float3 logSample(texture2d<float, access::sample> image, float2 uv) {
-    constexpr sampler linearSampler(filter::linear, address::clamp_to_edge);
-    return image.sample(linearSampler, uv).rgb;
-}
-
-static inline float rec2020Luma(float3 rgb) {
-    return dot(rgb, float3(0.2627, 0.6780, 0.0593));
-}
-
-static inline float msbAligned(float code) {
-    return round(clamp(code, 4.0, 1019.0)) * 64.0 / 65535.0;
-}
-
-kernel void encodeLuma(texture2d<float, access::sample> image [[texture(0)]],
-                       texture2d<float, access::write> luma [[texture(1)]],
-                       constant CropParams &crop [[buffer(0)]],
-                       uint2 gid [[thread_position_in_grid]]) {
-    float2 uv = crop.uvOffset + crop.uvScale * (float2(gid) + 0.5) / float2(luma.get_width(), luma.get_height());
-    float y = rec2020Luma(saturate(logSample(image, uv)));
-    luma.write(float4(msbAligned(64.0 + 876.0 * y)), gid);
-}
-
-kernel void encodeChroma(texture2d<float, access::sample> image [[texture(0)]],
-                         texture2d<float, access::write> chroma [[texture(1)]],
-                         constant CropParams &crop [[buffer(0)]],
-                         uint2 gid [[thread_position_in_grid]]) {
-    float2 uv = crop.uvOffset + crop.uvScale * (float2(gid) + 0.5) / float2(chroma.get_width(), chroma.get_height());
-    float3 rgb = saturate(logSample(image, uv));
-    float y = rec2020Luma(rgb);
-    float cb = (rgb.b - y) / 1.8814;
-    float cr = (rgb.r - y) / 1.4746;
-    chroma.write(float4(msbAligned(512.0 + 896.0 * cb), msbAligned(512.0 + 896.0 * cr), 0.0, 0.0), gid);
-}
-
-// Writes the encoder's planes straight from the Bayer data, with the same math per pixel as
-// processRaw followed by encodeLuma and encodeChroma. Each thread covers one chroma sample.
-kernel void processDirect(texture2d<ushort, access::read> raw [[texture(0)]],
-                          texture2d<float, access::write> luma [[texture(1)]],
-                          texture2d<float, access::write> chroma [[texture(2)]],
-                          constant ProcessParams &u [[buffer(0)]],
-                          constant DirectParams &d [[buffer(1)]],
-                          uint2 gid [[thread_position_in_grid]]) {
-    int2 size = int2(raw.get_width(), raw.get_height());
-    float3 total = float3(0.0);
-    for (uint y = 0; y < d.chromaStep.y; y++) {
-        for (uint x = 0; x < d.chromaStep.x; x++) {
-            uint2 target = gid * d.chromaStep + uint2(x, y);
-            float3 rgb = saturate(logPixel(raw, int2(target) + d.sourceOrigin, size, u));
-            total += rgb;
-            luma.write(float4(msbAligned(64.0 + 876.0 * rec2020Luma(rgb))), target);
-        }
-    }
-    float3 rgb = total / float(d.chromaStep.x * d.chromaStep.y);
-    float y = rec2020Luma(rgb);
-    float cb = (rgb.b - y) / 1.8814;
-    float cr = (rgb.r - y) / 1.4746;
-    chroma.write(float4(msbAligned(512.0 + 896.0 * cb), msbAligned(512.0 + 896.0 * cr), 0.0, 0.0), gid);
-}
-
-// One 4:4:4 pixel as 16-bit AYCbCr, for ProRes 4444. Codes keep their fraction, so the
-// encoder gets its full 12 bits rather than 10. Video range is the 10-bit range scaled by 64.
-static inline float4 packedPixel(float3 rgb) {
-    float y = rec2020Luma(rgb);
-    float cb = (rgb.b - y) / 1.8814;
-    float cr = (rgb.r - y) / 1.4746;
-    float3 codes = clamp(float3(64.0 + 876.0 * y, 512.0 + 896.0 * cb, 512.0 + 896.0 * cr), 4.0, 1019.0);
-    return float4(1.0, codes * 64.0 / 65535.0);
-}
-
-kernel void encodePacked(texture2d<float, access::sample> image [[texture(0)]],
-                         texture2d<float, access::write> packed [[texture(1)]],
-                         constant CropParams &crop [[buffer(0)]],
-                         uint2 gid [[thread_position_in_grid]]) {
-    float2 uv = crop.uvOffset + crop.uvScale * (float2(gid) + 0.5) / float2(packed.get_width(), packed.get_height());
-    packed.write(packedPixel(saturate(logSample(image, uv))), gid);
-}
-
-// The efficient path for packed 4:4:4: one thread per pixel, the same math as processDirect.
-kernel void processDirectPacked(texture2d<ushort, access::read> raw [[texture(0)]],
-                                texture2d<float, access::write> packed [[texture(1)]],
-                                constant ProcessParams &u [[buffer(0)]],
-                                constant DirectParams &d [[buffer(1)]],
-                                uint2 gid [[thread_position_in_grid]]) {
-    int2 size = int2(raw.get_width(), raw.get_height());
-    packed.write(packedPixel(saturate(logPixel(raw, int2(gid) + d.sourceOrigin, size, u))), gid);
-}
-
 // The same decoders as LogCurve.decode, for the viewfinder.
 static inline float decodeLog(float y, uint curve) {
     switch (curve) {
@@ -316,17 +242,159 @@ static inline float decodeLog(float y, uint curve) {
 }
 
 // MonitorTransform.display: decode, convert to Rec.709, then roll highlights off to display white.
-static inline float3 monitorDisplay(float3 logColor, constant MonitorParams &m) {
-    float3 linear = float3(decodeLog(logColor.r, m.curve), decodeLog(logColor.g, m.curve),
-                           decodeLog(logColor.b, m.curve));
-    float3 rec709 = float3(dot(m.toRec709Row0.xyz, linear), dot(m.toRec709Row1.xyz, linear),
-                           dot(m.toRec709Row2.xyz, linear));
+static inline float3 displayRec709(float3 logColor, uint curve, float4 row0, float4 row1, float4 row2) {
+    float3 linear = float3(decodeLog(logColor.r, curve), decodeLog(logColor.g, curve),
+                           decodeLog(logColor.b, curve));
+    float3 rec709 = float3(dot(row0.xyz, linear), dot(row1.xyz, linear), dot(row2.xyz, linear));
     const float peak = 8.0;
     const float shoulderB = 0.82 * peak / (peak - 1.0);
     const float shoulderA = 0.18 + shoulderB;
     float3 scene = max(rec709, 0.0);
     float3 shaped = min(shoulderA * scene / (scene + shoulderB), 1.0);
     return pow(shaped, 1.0 / 2.4);
+}
+
+static inline float3 monitorDisplay(float3 logColor, constant MonitorParams &m) {
+    return displayRec709(logColor, m.curve, m.toRec709Row0, m.toRec709Row1, m.toRec709Row2);
+}
+
+static inline float3 lookColor(float3 logColor, constant LookParams &k, texture3d<float> lut) {
+    if (k.mode == 0) return logColor;
+    constexpr sampler linearSampler(filter::linear, address::clamp_to_edge);
+    float3 color = logColor;
+    if (k.mode == 1 || k.mode == 3) {
+        color = displayRec709(color, k.curve, k.toRec709Row0, k.toRec709Row1, k.toRec709Row2);
+    }
+    if (k.mode >= 2) {
+        float3 normalized = saturate((color - k.lutOffset.rgb) * k.lutScale.rgb);
+        color = lut.sample(linearSampler, (normalized * (k.lutSize - 1.0) + 0.5) / k.lutSize).rgb;
+    }
+    return saturate(color);
+}
+
+// Y, Cb and Cr in the file's matrix, as 10-bit video-range codes.
+static inline float3 videoCodes(float3 rgb, constant LookParams &k) {
+    float y = dot(rgb, k.luma.xyz);
+    float cb = (rgb.b - y) / (2.0 * (1.0 - k.luma.z));
+    float cr = (rgb.r - y) / (2.0 * (1.0 - k.luma.x));
+    return float3(64.0 + 876.0 * y, 512.0 + 896.0 * cb, 512.0 + 896.0 * cr);
+}
+
+// Rec.2020 non-constant luminance, 10-bit video range, MSB-aligned in 16 bits. Sampling on
+// the output grid resizes the image and averages chroma when it is subsampled.
+static inline float3 logSample(texture2d<float, access::sample> image, float2 uv) {
+    constexpr sampler linearSampler(filter::linear, address::clamp_to_edge);
+    return image.sample(linearSampler, uv).rgb;
+}
+
+static inline float rec2020Luma(float3 rgb) {
+    return dot(rgb, float3(0.2627, 0.6780, 0.0593));
+}
+
+static inline float msbAligned(float code) {
+    return round(clamp(code, 4.0, 1019.0)) * 64.0 / 65535.0;
+}
+
+kernel void encodeLuma(texture2d<float, access::sample> image [[texture(0)]],
+                       texture2d<float, access::write> luma [[texture(1)]],
+                       texture3d<float> lut [[texture(2)]],
+                       constant CropParams &crop [[buffer(0)]],
+                       constant LookParams &k [[buffer(1)]],
+                       uint2 gid [[thread_position_in_grid]]) {
+    float2 uv = crop.uvOffset + crop.uvScale * (float2(gid) + 0.5) / float2(luma.get_width(), luma.get_height());
+    float3 codes = videoCodes(lookColor(saturate(logSample(image, uv)), k, lut), k);
+    luma.write(float4(msbAligned(codes.x)), gid);
+}
+
+kernel void encodeChroma(texture2d<float, access::sample> image [[texture(0)]],
+                         texture2d<float, access::write> chroma [[texture(1)]],
+                         texture3d<float> lut [[texture(2)]],
+                         constant CropParams &crop [[buffer(0)]],
+                         constant LookParams &k [[buffer(1)]],
+                         uint2 gid [[thread_position_in_grid]]) {
+    float2 uv = crop.uvOffset + crop.uvScale * (float2(gid) + 0.5) / float2(chroma.get_width(), chroma.get_height());
+    float3 codes = videoCodes(lookColor(saturate(logSample(image, uv)), k, lut), k);
+    chroma.write(float4(msbAligned(codes.y), msbAligned(codes.z), 0.0, 0.0), gid);
+}
+
+// Writes the encoder's planes straight from the Bayer data, with the same math per pixel as
+// processRaw followed by encodeLuma and encodeChroma. Each thread covers one chroma sample.
+kernel void processDirect(texture2d<ushort, access::read> raw [[texture(0)]],
+                          texture2d<float, access::write> luma [[texture(1)]],
+                          texture2d<float, access::write> chroma [[texture(2)]],
+                          texture3d<float> lut [[texture(3)]],
+                          constant ProcessParams &u [[buffer(0)]],
+                          constant DirectParams &d [[buffer(1)]],
+                          constant LookParams &k [[buffer(2)]],
+                          uint2 gid [[thread_position_in_grid]]) {
+    int2 size = int2(raw.get_width(), raw.get_height());
+    float3 total = float3(0.0);
+    for (uint y = 0; y < d.chromaStep.y; y++) {
+        for (uint x = 0; x < d.chromaStep.x; x++) {
+            uint2 target = gid * d.chromaStep + uint2(x, y);
+            float3 rgb = saturate(logPixel(raw, int2(target) + d.sourceOrigin, size, u));
+            total += rgb;
+            luma.write(float4(msbAligned(videoCodes(lookColor(rgb, k, lut), k).x)), target);
+        }
+    }
+    // The log average, then the look, as the full path samples the log image.
+    float3 codes = videoCodes(lookColor(total / float(d.chromaStep.x * d.chromaStep.y), k, lut), k);
+    chroma.write(float4(msbAligned(codes.y), msbAligned(codes.z), 0.0, 0.0), gid);
+}
+
+// One 4:4:4 pixel as 16-bit AYCbCr, for ProRes 4444. Codes keep their fraction, so the
+// encoder gets its full 12 bits rather than 10. Video range is the 10-bit range scaled by 64.
+static inline float4 packedPixel(float3 rgb, constant LookParams &k, texture3d<float> lut) {
+    float3 codes = clamp(videoCodes(lookColor(rgb, k, lut), k), 4.0, 1019.0);
+    return float4(1.0, codes * 64.0 / 65535.0);
+}
+
+kernel void encodePacked(texture2d<float, access::sample> image [[texture(0)]],
+                         texture2d<float, access::write> packed [[texture(1)]],
+                         texture3d<float> lut [[texture(2)]],
+                         constant CropParams &crop [[buffer(0)]],
+                         constant LookParams &k [[buffer(1)]],
+                         uint2 gid [[thread_position_in_grid]]) {
+    float2 uv = crop.uvOffset + crop.uvScale * (float2(gid) + 0.5) / float2(packed.get_width(), packed.get_height());
+    packed.write(packedPixel(saturate(logSample(image, uv)), k, lut), gid);
+}
+
+// The efficient path for packed 4:4:4: one thread per pixel, the same math as processDirect.
+kernel void processDirectPacked(texture2d<ushort, access::read> raw [[texture(0)]],
+                                texture2d<float, access::write> packed [[texture(1)]],
+                                texture3d<float> lut [[texture(2)]],
+                                constant ProcessParams &u [[buffer(0)]],
+                                constant DirectParams &d [[buffer(1)]],
+                                constant LookParams &k [[buffer(2)]],
+                                uint2 gid [[thread_position_in_grid]]) {
+    int2 size = int2(raw.get_width(), raw.get_height());
+    packed.write(packedPixel(saturate(logPixel(raw, int2(gid) + d.sourceOrigin, size, u)), k, lut), gid);
+}
+
+// A decoded frame, 16-bit AYCbCr in video range, back to the log RGB image the encoder was given.
+// `luma` names the matrix it was written in.
+kernel void decodeVideo(texture2d<float, access::read> frame [[texture(0)]],
+                        texture2d<float, access::write> image [[texture(1)]],
+                        constant float4 &luma [[buffer(0)]],
+                        uint2 gid [[thread_position_in_grid]]) {
+    float3 codes = frame.read(gid).gba * 65535.0 / 64.0;
+    float y = (codes.x - 64.0) / 876.0;
+    float cb = (codes.y - 512.0) / 896.0;
+    float cr = (codes.z - 512.0) / 896.0;
+    float r = y + 2.0 * (1.0 - luma.x) * cr;
+    float b = y + 2.0 * (1.0 - luma.z) * cb;
+    float g = (y - luma.x * r - luma.z * b) / luma.y;
+    image.write(float4(saturate(float3(r, g, b)), 1.0), gid);
+}
+
+// The look on a smaller copy of the log image, for the export preview.
+kernel void lookPreview(texture2d<float, access::sample> image [[texture(0)]],
+                        texture2d<float, access::write> output [[texture(1)]],
+                        texture3d<float> lut [[texture(2)]],
+                        constant LookParams &k [[buffer(0)]],
+                        uint2 gid [[thread_position_in_grid]]) {
+    float2 uv = (float2(gid) + 0.5) / float2(output.get_width(), output.get_height());
+    output.write(float4(lookColor(saturate(logSample(image, uv)), k, lut), 1.0), gid);
 }
 
 // Only for tests, which compare the viewfinder's math with MonitorTransform.display.

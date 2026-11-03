@@ -78,12 +78,12 @@ struct SettingsView: View {
     private static let stopTerms = "stop after limit duration time timer"
     private static let autoTerms = "auto exposure shutter iso white balance during take recording freeze lock start roll"
     private static let heatTerms = "hot heat thermal cool long takes viewfinder slow"
-    private static let audioTerms = "audio pcm aac sound uncompressed microphone"
+    private static let audioTerms = "audio pcm aac sound uncompressed microphone stereo mono channels"
     private static let gyroTerms = "gyro gyroflow stabilization motion gcsv log"
     private static let mainsTerms = "flicker mains lights hz power frequency shutter"
     private static let recordingTerms = [stopTerms, autoTerms, audioTerms, gyroTerms, heatTerms, mainsTerms].joined(separator: " ")
     private static let lookTerms = "look monitor rec.709 log preview isp viewfinder"
-    private static let lutTerms = "lut cube import look monitor input"
+    private static let lutTerms = "lut cube import look monitor input bake baked file"
     private static let pauseTerms = "pause viewfinder monitor off gpu recording idle heat sleep"
     private static let peakingTerms = "focus peaking sensitivity low high detail"
     private static let guideTerms = "frame guide aspect scope 2.39 1.85 framing"
@@ -240,8 +240,12 @@ struct SettingsView: View {
                 }
             }
             if matches(Self.audioTerms) {
+                Toggle(isOn: $model.stereoAudio) {
+                    explained("Stereo audio", "Records left and right from the built-in microphones. Off records mono.")
+                }
+                .disabled(model.isRecording)
                 Toggle(isOn: $model.pcmAudio) {
-                    explained("Uncompressed audio", "Records 24-bit PCM instead of AAC, about 0.5 GB an hour.")
+                    explained("Uncompressed audio", "Records 24-bit PCM instead of AAC, about 0.5 GB an hour in mono and 1 GB in stereo.")
                 }
             }
             if matches(Self.gyroTerms) {
@@ -283,9 +287,10 @@ struct SettingsView: View {
                     Text("None").tag("")
                     ForEach(model.lutNames, id: \.self) { Text($0).tag($0) }
                 } label: {
-                    explained("LUT", "Replaces Rec.709 in the viewfinder only.")
+                    explained("LUT", "Replaces Rec.709 in the viewfinder, and in the file when the look is baked.")
                 }
                 Button("Import .cube LUT") { importingLUT = true }
+                bakeRow
                 if !model.selectedLUT.isEmpty {
                     Picker(selection: $model.processing.lutExpectsRec709) {
                         Text("Log").tag(false)
@@ -433,6 +438,15 @@ struct SettingsView: View {
         Toggle(isOn: $model.processing.bilinearWhenHot) {
             explained("Bilinear when hot", "Saves GPU time, but the picture turns softer partway through a take.")
         }
+    }
+
+    private var bakeRow: some View {
+        Toggle(isOn: $model.bakeLook) {
+            explained(
+                "Bake the look into the file",
+                "Records what the viewfinder shows, Rec.709 or its LUT, tagged Rec.709, and keeps no log, so it can't be graded back. Switches to HEVC 4:2:0 for small files. The look is fixed as a take starts. The LOOK button in MON sets it too.")
+        }
+        .disabled(model.isRecording)
     }
 
     private var twelveBitRow: some View {

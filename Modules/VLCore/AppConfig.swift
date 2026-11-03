@@ -69,7 +69,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var debayer = "Malvar-He-Cutler"
     public var exposureOffset = -0.5
     public var reduceLoadWhenHot = true
-    public var bilinearWhenHot = true
+    public var bilinearWhenHot = false
     /// Stops the stream after this long with no touch. Zero never does.
     public var idlePauseMinutes = 2.0
     public var monitor = "rec709"
@@ -80,6 +80,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var lockAtRoll = true
     public var saveGyroLog = true
     public var pcmAudio = false
+    /// Stereo from the built-in microphones.
+    public var stereoAudio = true
     public var mainsHz = 50
     /// Tool identifiers, in toolbar order.
     public var toolbar = ["zebras", "falseColor", "grid", "center", "level", "punchIn"]
@@ -95,6 +97,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var distortionCorrection = false
     /// ProRes 4444 at 12 bits instead of 10.
     public var twelveBitProRes = false
+    /// Records the viewfinder's look instead of log.
+    public var bakeLook = false
     /// Moves to the Efficient path while the phone is hot.
     public var efficientWhenHot = true
     public var frameGuide = "2.39"
@@ -144,6 +148,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         lockAtRoll = read(.lockAtRoll, defaults.lockAtRoll)
         saveGyroLog = read(.saveGyroLog, defaults.saveGyroLog)
         pcmAudio = read(.pcmAudio, defaults.pcmAudio)
+        stereoAudio = read(.stereoAudio, defaults.stereoAudio)
         mainsHz = read(.mainsHz, defaults.mainsHz)
         toolbar = read(.toolbar, defaults.toolbar)
         activeTools = read(.activeTools, defaults.activeTools)
@@ -153,6 +158,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         fixedFrameTime = read(.fixedFrameTime, defaults.fixedFrameTime)
         distortionCorrection = read(.distortionCorrection, defaults.distortionCorrection)
         twelveBitProRes = read(.twelveBitProRes, defaults.twelveBitProRes)
+        bakeLook = read(.bakeLook, defaults.bakeLook)
         efficientWhenHot = read(.efficientWhenHot, defaults.efficientWhenHot)
         frameGuide = read(.frameGuide, defaults.frameGuide)
         desqueeze = read(.desqueeze, defaults.desqueeze)

@@ -250,6 +250,8 @@ struct CameraHUD: View {
     @Binding var selectedDial: ControlDial?
     @Binding var showMonitor: Bool
     @Binding var showFormat: Bool
+    /// The look panel, over the controls like Format, so the picture shows each LUT.
+    @State private var showLook = false
     let hold: Hold
     let insets: EdgeInsets
     /// What's left beneath the picture.
@@ -277,8 +279,11 @@ struct CameraHUD: View {
                 VStack(spacing: 3) {
                     // One tray above the control bar, so nothing else moves.
                     if showMonitor, model.processing.monitor != .isp {
-                        MonitorPanel(hold: hold)
-                            .transition(trayTransition)
+                        MonitorPanel(hold: hold) {
+                            model.openLookPanel()
+                            withAnimation(motion) { showLook = true }
+                        }
+                        .transition(trayTransition)
                     } else if selectedDial == nil {
                         toolRow
                             .transition(trayTransition)
@@ -308,9 +313,35 @@ struct CameraHUD: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .zIndex(1)
             }
+            if showLook {
+                // Holds touches off the picture and controls, so only Cancel or Select closes it.
+                Color.clear
+                    .contentShape(Rectangle())
+                    .accessibilityHidden(true)
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    LookPanel(
+                        hold: hold, bottomInset: max(insets.bottom, 10),
+                        depth: stripDepth - CameraGeometry.formatGap
+                    ) { keep in
+                        model.closeLookPanel(keep: keep)
+                        withAnimation(motion) { showLook = false }
+                    }
+                    .accessibilityAction(.escape) {
+                        model.closeLookPanel(keep: false)
+                        showLook = false
+                    }
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .zIndex(1)
+            }
         }
         .onChange(of: selectedDial) { _, dial in
             if dial != nil { showMonitor = false }
+        }
+        .onChange(of: showLook) { _, open in
+            model.isCameraControlOpen = open
+            model.noteTouch()
         }
     }
 
@@ -764,6 +795,7 @@ struct NoticeCard: View {
 struct MonitorPanel: View {
     @EnvironmentObject private var model: AppModel
     let hold: Hold
+    let openLook: () -> Void
 
     var body: some View {
         HStack(spacing: 0) {
@@ -776,19 +808,18 @@ struct MonitorPanel: View {
         .contentShape(Rectangle())
     }
 
+    /// Opens the look panel. Amber while the look is baked into takes, since then no log is recorded.
     private var lookButton: some View {
-        Button {
-            model.processing.monitor = model.processing.monitor == .log ? .rec709 : .log
-        } label: {
+        Button(action: openLook) {
             VStack(spacing: 3) {
                 Text(model.monitorLabel)
                     .font(Tokens.lineFont)
-                    .foregroundStyle(Tokens.value)
+                    .foregroundStyle(model.bakeLook ? Tokens.held : Tokens.value)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                Text("LOOK")
+                Text(model.bakeLook ? "BAKED" : "LOOK")
                     .font(Tokens.labelFont)
-                    .foregroundStyle(Tokens.label)
+                    .foregroundStyle(model.bakeLook ? Tokens.held : Tokens.label)
             }
             .upright(hold, depth: 46)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -796,8 +827,8 @@ struct MonitorPanel: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Monitor look")
-        .accessibilityValue(model.monitorName)
+        .accessibilityLabel("Look")
+        .accessibilityValue(model.bakeLook ? "\(model.monitorName), baked into takes" : model.monitorName)
     }
 
     private func toolButton(_ tool: Tool) -> some View {
@@ -820,6 +851,95 @@ struct MonitorPanel: View {
         .buttonStyle(.plain)
         .accessibilityLabel(tool.title)
         .accessibilityAddTraits(model.isOn(tool) ? .isSelected : [])
+    }
+}
+
+/// The viewfinder's LUT, which a baked take records too. Each LUT shows on the picture as it
+/// slides into the band. Cancel puts back what was there, and Select keeps it.
+struct LookPanel: View {
+    @EnvironmentObject private var model: AppModel
+    let hold: Hold
+    let bottomInset: CGFloat
+    /// From the screen's edge to just short of the picture.
+    let depth: CGFloat
+    let close: (Bool) -> Void
+    @State private var choice = ""
+    @State private var bake = false
+    @State private var ready = false
+
+    /// Not a file name, since those end in .cube.
+    static let logChoice = "log"
+
+    private static let headerDepth: CGFloat = 44
+    private static let topPadding: CGFloat = 4
+
+    private var rowDepth: CGFloat {
+        let spare = depth - Self.headerDepth - FormatWheel<Bool>.titleDepth(hold) - FormatWheel<Bool>.titleGap
+            - Self.topPadding - bottomInset
+        return max(spare / 3, 36)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button { close(false) } label: { Text("Cancel").fixedSize().turnedToHold() }
+                    .frame(minWidth: 72, minHeight: 44, alignment: .leading)
+                Spacer()
+                Text(model.lutNames.isEmpty ? "Import LUTs in Settings" : "LOOK")
+                    .font(Tokens.labelFont)
+                    .foregroundStyle(Tokens.label)
+                Spacer()
+                Button { close(true) } label: { Text("Select").fontWeight(.semibold).fixedSize().turnedToHold() }
+                    .frame(minWidth: 72, minHeight: 44, alignment: .trailing)
+            }
+            .font(Tokens.statusFont)
+            .foregroundStyle(Tokens.held)
+            .frame(height: Self.headerDepth)
+            if ready {
+                HStack(alignment: .bottom, spacing: 0) {
+                    FormatWheel(
+                        title: "VIEWFINDER", options: [Self.logChoice, ""] + model.lutNames, selection: $choice,
+                        hold: hold, rowDepth: rowDepth
+                    ) {
+                        $0 == Self.logChoice ? "LOG" : $0.isEmpty ? "REC.709" : ($0 as NSString).deletingPathExtension
+                    }
+                    // Baking log would only record log, so the switch waits for a look.
+                    FormatWheel(title: "BAKE", options: [false, true], selection: $bake, hold: hold, rowDepth: rowDepth) {
+                        $0 ? "ON" : "OFF"
+                    }
+                    .frame(width: 96)
+                    .disabled(model.isRecording || choice == Self.logChoice)
+                    .opacity(model.isRecording || choice == Self.logChoice ? 0.4 : 1)
+                }
+                .background(alignment: .bottom) {
+                    Rectangle()
+                        .fill(Tokens.surface)
+                        .frame(height: rowDepth)
+                        .padding(.bottom, rowDepth)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, Self.topPadding)
+        .padding(.bottom, bottomInset)
+        .frame(height: depth, alignment: .bottom)
+        .background(Tokens.opaquePanel)
+        .onAppear {
+            // The wheels open on the current choice, so they're made once it's known.
+            choice = model.processing.monitor == .log ? Self.logChoice : model.selectedLUT
+            bake = model.bakeLook
+            ready = true
+        }
+        .onChange(of: choice) { _, value in
+            if value == Self.logChoice {
+                model.processing.monitor = .log
+                bake = false
+            } else {
+                model.processing.monitor = .rec709
+                model.previewLUT(value)
+            }
+        }
+        .onChange(of: bake) { _, on in if !model.isRecording { model.bakeLook = on } }
     }
 }
 

@@ -87,7 +87,33 @@ final class AppModel: ObservableObject {
     /// What a take records with: the chosen preset, at 12 bits when that's on and it's 4444.
     var takePreset: EncoderPreset { twelveBitProRes ? encoderPreset.twelveBit : encoderPreset }
     @Published var frameGuide = FrameGuide.scope
-    @Published var fileTag = FileTag.rec2020
+    @Published var fileTag = FileTag.rec2020 { didSet { processing.rec709Matrix = fileTag == .rec709 } }
+    /// Records the viewfinder's look, the Rec.709 view and any LUT, instead of log, tagged Rec.709.
+    @Published var bakeLook = false {
+        didSet {
+            processing.bakeLook = bakeLook
+            guard !adopting, bakeLook != oldValue else { return }
+            // A baked take is a finished picture, which HEVC 4:2:0 keeps at about a sixth of
+            // ProRes 422 HQ. Turning it off goes back, unless the codec was changed since.
+            let hevc = EncoderPreset.all.first { $0.id == "hevc420" } ?? encoderPreset
+            if bakeLook {
+                codecBeforeBake = encoderPreset
+                encoderPreset = hevc
+            } else if let before = codecBeforeBake {
+                if encoderPreset == hevc { encoderPreset = before }
+                codecBeforeBake = nil
+            }
+        }
+    }
+    private var codecBeforeBake: EncoderPreset?
+    /// A baked look is display Rec.709, so the file says so whatever the tag setting is.
+    var takeFileTag: FileTag { bakeLook ? .rec709 : fileTag }
+    /// What the sidecar says the file holds.
+    var bakedLookLabel: String {
+        guard bakeLook else { return "log, as recorded" }
+        guard !selectedLUT.isEmpty else { return "Rec.709 view, baked in" }
+        return "\(selectedLUT), baked in" + (processing.lutExpectsRec709 ? " after the Rec.709 view" : " on log")
+    }
 
     @Published var processing = ProcessingSettings() {
         didSet {
@@ -177,6 +203,8 @@ final class AppModel: ObservableObject {
     @Published var saveGyroLog = true
     /// 24-bit PCM instead of AAC.
     @Published var pcmAudio = false
+    /// Stereo from the built-in microphones, from the next take.
+    @Published var stereoAudio = true { didSet { audio.stereo = stereoAudio } }
     @Published var presets: [FormatPreset] = []
     /// Where the test link connects, kept between launches. The link itself never is.
     @Published var testServer = ""
@@ -257,6 +285,8 @@ final class AppModel: ObservableObject {
     private var resumeAfterSettings = false
     private var hotEnded: Date?
     private var takeHeatEvents: [String] = []
+    /// The camera's shutter, ISO and white balance during the take, for the sidecar.
+    private var takeReadings = TakeReadings()
     private var lastTouch = Date()
     /// The camera stopped itself for want of a touch. A tap anywhere on the screen resumes it.
     @Published private(set) var idlePaused = false
@@ -277,7 +307,7 @@ final class AppModel: ObservableObject {
         router.onRecordingElapsed = { [weak self] in
             DispatchQueue.main.async { self?.stopRecording() }
         }
-        audio.onLevel = { [audioBar] peak in audioBar.show(peak: peak) }
+        audio.onLevels = { [audioBar] left, right in audioBar.show(left: left, right: right) }
         camera.onFrame = { [router] frame in router.handle(frame) }
         camera.onCaptureDrop = { [router] reason in router.handleDrop(reason) }
         camera.onCaptureFailure = { [router] _ in router.handleFailure() }
@@ -454,6 +484,7 @@ final class AppModel: ObservableObject {
         config.lockAtRoll = lockAtRoll
         config.saveGyroLog = saveGyroLog
         config.pcmAudio = pcmAudio
+        config.stereoAudio = stereoAudio
         config.mainsHz = mainsHz
         config.toolbar = toolbar.map(\.rawValue)
         config.activeTools = activeTools.map(\.rawValue).sorted()
@@ -467,6 +498,7 @@ final class AppModel: ObservableObject {
         config.frameGuide = frameGuide.rawValue
         config.desqueeze = processing.desqueeze
         config.fileTag = fileTag.rawValue
+        config.bakeLook = bakeLook
         config.testServer = testServer
         config.testToken = testToken
         return config
@@ -527,6 +559,7 @@ final class AppModel: ObservableObject {
         lockAtRoll = saved.lockAtRoll
         saveGyroLog = saved.saveGyroLog
         pcmAudio = saved.pcmAudio
+        stereoAudio = saved.stereoAudio
         mainsHz = saved.mainsHz
         toolbar = saved.toolbar.compactMap(Tool.init(rawValue:))
         activeTools = Set(saved.activeTools.compactMap(Tool.init(rawValue:)))
@@ -539,6 +572,7 @@ final class AppModel: ObservableObject {
         frameGuide = FrameGuide(rawValue: saved.frameGuide) ?? frameGuide
         processing.desqueeze = saved.desqueeze
         fileTag = FileTag(rawValue: saved.fileTag) ?? fileTag
+        bakeLook = saved.bakeLook
     }
 
     /// What a preset keeps. Zebras and false color only ever reach the file through here.
@@ -608,10 +642,48 @@ final class AppModel: ObservableObject {
     /// The real chain, from sensor to file.
     var signalPath: String {
         guard recordEncoded else { return "RAW 14 › DUMP" }
-        return "RAW 14 › \(curveLabel) › \(encoderPreset.label.uppercased())"
+        return "RAW 14 › \(bakeLook ? "\(processing.curve.shortLabel) › BAKED \(lutShortLabel)" : curveLabel) › \(encoderPreset.label.uppercased())"
     }
 
-    var curveLabel: String { processing.curve.shortLabel }
+    /// A baked take records the look, not the curve, so the status line says which.
+    var curveLabel: String { bakeLook ? "BAKED \(lutShortLabel)" : processing.curve.shortLabel }
+
+    /// The LUT's name cut to fit a status line, or 709 for the Rec.709 view.
+    var lutShortLabel: String { Self.shortLUTName(selectedLUT) }
+
+    static func shortLUTName(_ name: String) -> String {
+        guard !name.isEmpty else { return "709" }
+        return String((name as NSString).deletingPathExtension.prefix(6)).uppercased()
+    }
+
+    /// What the look panel started from, so Cancel can put it back.
+    private var lookBeforePanel: (lut: String, bake: Bool, monitor: MonitorMode)?
+
+    /// The look panel changes the viewfinder as it slides, and Cancel puts this back.
+    func openLookPanel() {
+        lookBeforePanel = (selectedLUT, bakeLook, processing.monitor)
+    }
+
+    /// Shows a LUT on the viewfinder without choosing its curve, which only Select does.
+    func previewLUT(_ name: String) {
+        guard name != selectedLUT else { return }
+        adopting = true
+        selectedLUT = name
+        adopting = false
+    }
+
+    func closeLookPanel(keep: Bool) {
+        defer { lookBeforePanel = nil }
+        guard keep else {
+            if let before = lookBeforePanel {
+                previewLUT(before.lut)
+                if !isRecording { bakeLook = before.bake }
+                processing.monitor = before.monitor
+            }
+            return
+        }
+        followLUTPair()
+    }
 
     var codecLabel: String { recordEncoded ? encoderPreset.shortLabel : "RAW" }
 
@@ -620,9 +692,7 @@ final class AppModel: ObservableObject {
         switch processing.monitor {
         case .log: return "LOG"
         case .isp: return "ISP"
-        case .rec709:
-            guard !selectedLUT.isEmpty else { return "709" }
-            return String((selectedLUT as NSString).deletingPathExtension.prefix(6)).uppercased()
+        case .rec709: return lutShortLabel
         }
     }
 
@@ -822,6 +892,9 @@ final class AppModel: ObservableObject {
 
     /// Unlocked controls follow the camera, so a lock or dial starts from what it is doing.
     private func adopt(_ live: LiveCameraValues) {
+        if isRecording {
+            takeReadings.add(seconds: live.seconds, iso: live.iso, temperature: live.temperature, tint: live.tint)
+        }
         if !exposureLocked {
             iso = live.iso
             if live.seconds > 0 {
@@ -835,6 +908,22 @@ final class AppModel: ObservableObject {
             tint = live.tint ?? tint
         }
         if !focusLocked { lensPosition = live.lensPosition }
+    }
+
+    /// How each reading behaved, from what the sidecar says exposure and white balance did.
+    static func readingModes(exposure: String?, whiteBalance: String?)
+        -> (shutter: TakeReadings.Mode, iso: TakeReadings.Mode, whiteBalance: TakeReadings.Mode) {
+        let shutter: TakeReadings.Mode
+        let iso: TakeReadings.Mode
+        switch exposure {
+        case "frozen at start": (shutter, iso) = (.frozen, .frozen)
+        case "manual": (shutter, iso) = (.manual, .manual)
+        case "shutter priority": (shutter, iso) = (.manual, .auto)
+        default: (shutter, iso) = (.auto, .auto)
+        }
+        let balance: TakeReadings.Mode = whiteBalance == "manual" ? .manual
+            : whiteBalance == "frozen at start" ? .frozen : .auto
+        return (shutter, iso, balance)
     }
 
     private func updateHeatMode() {
@@ -1203,6 +1292,7 @@ final class AppModel: ObservableObject {
 
     private func startRecording() {
         guard !isRecording, !recordStarting, pendingRateChange == nil else { return }
+        takeReadings = TakeReadings()
         idlePaused = false
         lastTouch = Date()
         notice = nil
@@ -1270,7 +1360,7 @@ final class AppModel: ObservableObject {
         let url = Storage.videos.appendingPathComponent(name + ".mov")
         let metadata: [String: String] = [
             "curve": processing.curve.label, "gamut": processing.gamut.label,
-            "audio": pcmAudio ? "24-bit PCM" : "AAC",
+            "audio": (pcmAudio ? "24-bit PCM" : "AAC") + (stereoAudio ? " stereo" : " mono"),
             "matrix": "Rec.2020 non-constant luminance, video range",
             "exposureStops": String(processing.exposureStops),
             "frameRate": frameRateLabel,
@@ -1288,7 +1378,8 @@ final class AppModel: ObservableObject {
             "distortionCorrection": distortionCorrection ? "on" : "off, so the lens's distortion stays in the picture",
             "bitDepth": String(takePreset.bitDepth),
             "appPreview": appPreviewConnected ? "connected" : "disconnected",
-            "fileTag": fileTag.label,
+            "fileTag": takeFileTag.label,
+            "look": bakedLookLabel,
             "desqueeze": processing.desqueeze == 1 ? "off" : String(processing.desqueeze),
             "hotPath": processing.efficientWhenHot ? "Efficient when hot" : "stays on the chosen pipeline",
             "hotDebayer": processing.bilinearWhenHot ? "Bilinear when hot" : "stays on the chosen debayer",
@@ -1299,8 +1390,8 @@ final class AppModel: ObservableObject {
         do {
             let encoder = try VideoEncoder(config: .init(
                 url: url, preset: takePreset, size: outputSize, frameRate: frameRate, audio: true,
-                pcmAudio: pcmAudio, metadata: metadata,
-                rotationDegrees: hold.hold.clipRotation, fileTag: fileTag))
+                pcmAudio: pcmAudio, audioChannels: stereoAudio ? 2 : 1, metadata: metadata,
+                rotationDegrees: hold.hold.clipRotation, fileTag: takeFileTag))
             audio.onSample = { [weak encoder] sample in encoder?.appendAudio(sample) }
             audioPeak = 0
             audioBar.reset()
@@ -1385,6 +1476,11 @@ final class AppModel: ObservableObject {
             result.duplicates = capture.duplicates
             result.captureFPS = capture.sustainedFPS
             if !takeHeatEvents.isEmpty { result.metadata["heatChanges"] = takeHeatEvents.joined(separator: "; ") }
+            let modes = Self.readingModes(
+                exposure: result.metadata["exposureDuringTake"], whiteBalance: result.metadata["whiteBalanceDuringTake"])
+            result.metadata["shutter"] = takeReadings.shutter(modes.shutter)
+            result.metadata["iso"] = takeReadings.isoText(modes.iso)
+            result.metadata["whiteBalance"] = takeReadings.whiteBalance(modes.whiteBalance)
             let summary = String(
                 format: "%@ %dx%d: %.2f fps written, %d frames, %d lost (%d gpu, %d encoder: %d no buffer, %d not ready), %.1f MB/s, audio %d, capture %.2f fps fail %d missed %d duplicates %d gap %.0f ms, gpu %.1f recent %.1f max ms, steps copy %.1f queue %.1f append %.1f draw %.1f ms, viewfinder yields %d",
                 result.preset, result.width, result.height, result.fps, result.framesWritten,

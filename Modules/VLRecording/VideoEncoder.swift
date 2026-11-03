@@ -14,6 +14,8 @@ public final class VideoEncoder: VideoFrameSink {
         public var audio: Bool
         /// 24-bit PCM instead of AAC.
         public var pcmAudio: Bool
+        /// Two for stereo. The writer converts if the microphone gives otherwise.
+        public var audioChannels: Int
         /// Real-time mode drops frames when busy; benchmarks turn it off and wait instead.
         public var realTime: Bool
         public var metadata: [String: String]
@@ -23,7 +25,7 @@ public final class VideoEncoder: VideoFrameSink {
 
         public init(
             url: URL, preset: EncoderPreset, size: EncoderSize, frameRate: Double = 30, audio: Bool,
-            pcmAudio: Bool = false, realTime: Bool = true, metadata: [String: String] = [:], rotationDegrees: Int = 0,
+            pcmAudio: Bool = false, audioChannels: Int = 1, realTime: Bool = true, metadata: [String: String] = [:], rotationDegrees: Int = 0,
             fileTag: FileTag = .rec2020
         ) {
             self.url = url
@@ -32,6 +34,7 @@ public final class VideoEncoder: VideoFrameSink {
             self.frameRate = frameRate
             self.audio = audio
             self.pcmAudio = pcmAudio
+            self.audioChannels = audioChannels
             self.realTime = realTime
             self.metadata = metadata
             self.fileTag = fileTag
@@ -133,7 +136,7 @@ public final class VideoEncoder: VideoFrameSink {
         pool = created
 
         if config.audio {
-            let audioSettings = Self.audioSettings(pcm: config.pcmAudio)
+            let audioSettings = Self.audioSettings(pcm: config.pcmAudio, channels: config.audioChannels)
             let input = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
             input.expectsMediaDataInRealTime = true
             if writer.canAdd(input) {
@@ -152,19 +155,20 @@ public final class VideoEncoder: VideoFrameSink {
         }
     }
 
-    static func audioSettings(pcm: Bool) -> [String: Any] {
+    /// AAC gets 192 kbps a channel.
+    static func audioSettings(pcm: Bool, channels: Int = 1) -> [String: Any] {
         guard pcm else {
             return [
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
                 AVSampleRateKey: 48000,
-                AVNumberOfChannelsKey: 1,
-                AVEncoderBitRateKey: 192_000,
+                AVNumberOfChannelsKey: channels,
+                AVEncoderBitRateKey: 192_000 * channels,
             ]
         }
         return [
             AVFormatIDKey: kAudioFormatLinearPCM,
             AVSampleRateKey: 48000,
-            AVNumberOfChannelsKey: 1,
+            AVNumberOfChannelsKey: channels,
             AVLinearPCMBitDepthKey: 24,
             AVLinearPCMIsFloatKey: false,
             AVLinearPCMIsBigEndianKey: false,
@@ -178,6 +182,8 @@ public final class VideoEncoder: VideoFrameSink {
         let auxiliary = [kCVPixelBufferPoolAllocationThresholdKey as String: 10] as CFDictionary
         let status = CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(nil, pool, auxiliary, &buffer)
         guard status == kCVReturnSuccess, let buffer else {
+            // An export waits and asks again, so a missing buffer there loses nothing.
+            guard config.realTime else { return nil }
             queue.async { [self] in
                 framesDropped += 1
                 droppedNoBuffer += 1
