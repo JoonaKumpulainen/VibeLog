@@ -257,6 +257,20 @@ extension AppModel {
             guard !isRecording else { return "bakeTarget can't change during a take" }
             return pick(BakeTarget.allCases, \.rawValue) { bakeTarget = $0 }
         case "scopeOverlaid": return flag { scopeOverlaid = $0 }
+        case "effects":
+            // "none", or names and values such as bloom=0.5,grain=0.3, from the FX sliders' ranges.
+            guard !isRecording else { return "effects can't change during a take" }
+            var effects = LookEffects()
+            for part in value.split(separator: ",") where value != "none" {
+                let pair = part.split(separator: "=")
+                guard pair.count == 2, let number = Double(pair[1]),
+                    let control = FXControl.allCases.first(where: { "\($0)" == String(pair[0]) }),
+                    control.range.contains(number)
+                else { return "effects takes none, or halation, bloom, diffusion, vignette and grain as name=value" }
+                effects[keyPath: control.keyPath] = number
+            }
+            lookEffects = effects
+            return nil
         case "style":
             guard !isRecording else { return "style can't change during a take" }
             guard let style = style(forChoice: Self.stylePrefix + value) else {

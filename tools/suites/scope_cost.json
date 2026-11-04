@@ -1,0 +1,7 @@
+[
+  {"cool": 30},
+  {"set": {"lens": "1x", "pipeline": "maximum", "codec": "prores422hq", "bakeLook": false, "uncompressedAudio": true, "distortionCorrection": false, "fixedFrameTime": true, "shutter": "auto", "efficientWhenHot": true, "bilinearWhenHot": false}},
+  {"set": {"tools": "falseColor,peaking,grid,center,level,frameGuide,scope"}},
+  {"take": 600, "label": "SCOPE on, as long take 1 otherwise"},
+  {"set": {"tools": "falseColor,peaking,grid,center,level,frameGuide"}}
+]

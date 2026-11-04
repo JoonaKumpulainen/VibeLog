@@ -1,0 +1,10 @@
+[
+  {"set": {"lens": "1x", "pipeline": "maximum", "look": "rec709", "lut": "ACES 2.0", "uncompressedAudio": false}},
+  {"set": {"bakeLook": true, "bakeTarget": "pq"}},
+  {"take": 10, "label": "ACES 2.0 HDR PQ, baked"},
+  {"set": {"bakeTarget": "hlg"}},
+  {"take": 10, "label": "ACES 2.0 HDR HLG, baked"},
+  {"set": {"bakeTarget": "sdr"}},
+  {"take": 10, "label": "ACES 2.0 SDR, baked"},
+  {"set": {"bakeLook": false}}
+]
