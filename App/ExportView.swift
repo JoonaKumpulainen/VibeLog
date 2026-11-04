@@ -20,6 +20,11 @@ struct ExportView: View {
     @State private var previewFailure: String?
     /// Only the newest look reaches the player, however the builds finish.
     @State private var previewGeneration = 0
+    /// The export's own grade, starting from the LOOK panel's, so changing it here leaves the
+    /// camera's alone.
+    @State private var grade = LookGrade()
+    @State private var editingGrade = false
+    @State private var beforeEditing: (lut: String, grade: LookGrade)?
 
     private static let codecs = ["hevc420", "prores422hq"]
 
@@ -55,8 +60,60 @@ struct ExportView: View {
                     .listRowInsets(EdgeInsets())
                 } footer: {
                     Text("\(curve.label) in \(gamut.label), from the take's details. Plays with the look, as the export will write it"
-                        + (grade.isNeutral ? "." : ", with the grade from the LOOK panel: \(grade.label)."))
+                        + (grade.isNeutral ? "." : ", graded: \(grade.label)."))
                 }
+                if editingGrade {
+                    ExportGradeEditor(lutName: $lutName, lutMadeForRec709: $lutMadeForRec709, grade: $grade)
+                } else {
+                    settingsSections
+                }
+            }
+            .navigationTitle(editingGrade ? "Grade" : "Export with look")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if editingGrade {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Cancel") {
+                            if let before = beforeEditing {
+                                lutName = before.lut
+                                grade = before.grade
+                            }
+                            editingGrade = false
+                        }
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { editingGrade = false }
+                            .fontWeight(.semibold)
+                    }
+                } else {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") {
+                            job.cancel()
+                            player.pause()
+                            dismiss()
+                        }
+                    }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+        .onAppear {
+            lutName = model.linkedLUT(curve, gamut) ?? model.selectedLUT
+            if !model.isAvailableLook(lutName) { lutName = "" }
+            lutMadeForRec709 = model.processing.lutExpectsRec709
+            grade = model.lookGrade
+            player.replaceCurrentItem(with: AVPlayerItem(url: take.url))
+            refreshPreview()
+        }
+        .onDisappear { player.pause() }
+        .onChange(of: lutName) { _, _ in refreshPreview() }
+        .onChange(of: lutMadeForRec709) { _, _ in refreshPreview() }
+        .onChange(of: grade) { _, _ in refreshSoon() }
+        .interactiveDismissDisabled(job.progress != nil || editingGrade)
+    }
+
+    /// The look, codec and export button, which the grade editor replaces while it's open.
+    @ViewBuilder private var settingsSections: some View {
                 Section("Look") {
                     Picker("LUT", selection: $lutName) {
                         Text("Monitor (Rec.709)").tag("")
@@ -68,6 +125,13 @@ struct ExportView: View {
                             Text("Rec.709").tag(true)
                         }
                     }
+                    Button {
+                        beforeEditing = (lutName, grade)
+                        editingGrade = true
+                    } label: {
+                        LabeledContent("Grade", value: grade.isNeutral ? "None" : "Changed")
+                    }
+                    .disabled(job.progress != nil)
                     Picker("Codec", selection: $codec) {
                         Text("HEVC 4:2:0, small").tag("hevc420")
                         Text("ProRes 422 HQ").tag("prores422hq")
@@ -93,31 +157,6 @@ struct ExportView: View {
                         ? "Writes a new take tagged Rec.709 beside this one. Keep VibeLog open until it's done."
                         : "This take already has its look baked in.")
                 }
-            }
-            .navigationTitle("Export with look")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        job.cancel()
-                        player.pause()
-                        dismiss()
-                    }
-                }
-            }
-        }
-        .preferredColorScheme(.dark)
-        .onAppear {
-            lutName = model.linkedLUT(curve, gamut) ?? model.selectedLUT
-            if !model.isAvailableLook(lutName) { lutName = "" }
-            lutMadeForRec709 = model.processing.lutExpectsRec709
-            player.replaceCurrentItem(with: AVPlayerItem(url: take.url))
-            refreshPreview()
-        }
-        .onDisappear { player.pause() }
-        .onChange(of: lutName) { _, _ in refreshPreview() }
-        .onChange(of: lutMadeForRec709) { _, _ in refreshPreview() }
-        .interactiveDismissDisabled(job.progress != nil)
     }
 
     /// Reading a .cube or building an ACES look takes a moment, so this runs off the main thread.
@@ -149,8 +188,15 @@ struct ExportView: View {
             curve: curve, gamut: gamut, lut: lut, lutExpectsRec709: madeForRec709, sourceRec709: sourceRec709)
     }
 
-    /// The grade set in the look panel goes under the look here too.
-    private var grade: LookGrade { model.lookGrade }
+    /// A slider drags faster than a look builds, so the preview waits for a pause in the drag.
+    private func refreshSoon() {
+        previewGeneration += 1
+        let generation = previewGeneration
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            if generation == previewGeneration { refreshPreview() }
+        }
+    }
 
     private var lookInputs: (String, LogCurve, Gamut, Bool, Bool, LookGrade) {
         (lutName, curve, gamut, lutMadeForRec709, take.info?.metadata["fileTag"] == FileTag.rec709.label, grade)
@@ -330,6 +376,154 @@ final class LookExportJob: ObservableObject {
         }
         if session.status != .completed {
             throw LookExporter.Failure.cannotRead(session.error?.localizedDescription ?? "can't join the audio")
+        }
+    }
+}
+
+/// The export's grade at full size: the same LOOKS, ADJUST and COLOR as the camera's LOOK panel,
+/// each as a list of every slider, so a grade can be built while the take plays above. Save as
+/// Style keeps it under its look for the camera too.
+struct ExportGradeEditor: View {
+    @EnvironmentObject private var model: AppModel
+    @Binding var lutName: String
+    @Binding var lutMadeForRec709: Bool
+    @Binding var grade: LookGrade
+    @State private var tab = Tab.adjust
+    @State private var naming = false
+    @State private var styleName = ""
+
+    enum Tab: String, CaseIterable { case looks = "Looks", adjust = "Adjust", color = "Color" }
+
+    var body: some View {
+        Section {
+            Picker("Page", selection: $tab) {
+                ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets())
+        }
+        switch tab {
+        case .looks: looks
+        case .adjust: adjust
+        case .color: colors
+        }
+        Section {
+            Button("Save as Style…") {
+                styleName = ""
+                naming = true
+            }
+            .disabled(grade.isNeutral)
+        } footer: {
+            Text("Keeps this grade, COLOR included, under \(lutName.isEmpty ? "Monitor" : lutName) in the LOOK panel's styles.")
+        }
+        .alert("Save Style", isPresented: $naming) {
+            TextField("Name", text: $styleName)
+            Button("Save") { model.saveStyle(named: styleName, look: lutName, grade: grade) }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    @ViewBuilder private var looks: some View {
+        Section("Look") {
+            lookRow("Monitor (Rec.709)", "")
+            ForEach(model.lookNames, id: \.self) { lookRow($0, $0) }
+            if !lutName.isEmpty, BuiltInLook.named(lutName) == nil {
+                Picker("LUT made for", selection: $lutMadeForRec709) {
+                    Text("Log").tag(false)
+                    Text("Rec.709").tag(true)
+                }
+            }
+        }
+        let styles = model.styles(for: lutName)
+        if !styles.isEmpty {
+            Section("Styles") {
+                ForEach(styles, id: \.name) { style in
+                    Button {
+                        grade = style.grade
+                    } label: {
+                        HStack {
+                            Text(style.name).foregroundStyle(.primary)
+                            Spacer()
+                            if grade == style.grade { Image(systemName: "checkmark") }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func lookRow(_ title: String, _ name: String) -> some View {
+        Button {
+            lutName = name
+        } label: {
+            HStack {
+                Text(title).foregroundStyle(.primary)
+                Spacer()
+                if lutName == name { Image(systemName: "checkmark") }
+            }
+        }
+    }
+
+    @ViewBuilder private var adjust: some View {
+        Section {
+            ForEach(GradeControl.allCases) { control in
+                sliderRow(
+                    control.name, text: control.text(grade[keyPath: control.keyPath]),
+                    value: Binding(
+                        get: { grade[keyPath: control.keyPath] },
+                        set: { grade[keyPath: control.keyPath] = control.snapped($0) }),
+                    range: control.range)
+            }
+            Button("Reset Adjustments", role: .destructive) {
+                let bands = grade.bands
+                grade = LookGrade()
+                grade.bands = bands
+            }
+        }
+    }
+
+    @ViewBuilder private var colors: some View {
+        ForEach(ColorBand.allCases) { band in
+            Section {
+                ForEach(BandControl.allCases) { control in
+                    let value = grade.bands[band.rawValue][keyPath: control.keyPath]
+                    sliderRow(
+                        control.name, text: String(format: "%+.0f", value * 100),
+                        value: Binding(
+                            get: { grade.bands[band.rawValue][keyPath: control.keyPath] },
+                            set: { grade.bands[band.rawValue][keyPath: control.keyPath] = ($0 * 100).rounded() / 100 }),
+                        range: -1...1, tint: band.swatch)
+                }
+                if !grade.bands[band.rawValue].isNeutral {
+                    Button("Reset \(band.name.capitalized)", role: .destructive) {
+                        grade.bands[band.rawValue] = BandAdjust()
+                    }
+                }
+            } header: {
+                HStack(spacing: 6) {
+                    Circle().fill(band.swatch).frame(width: 10, height: 10)
+                    Text(band.name.capitalized)
+                }
+            }
+        }
+    }
+
+    private func sliderRow(
+        _ title: String, text: String, value: Binding<Double>, range: ClosedRange<Double>, tint: Color = Tokens.held
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(text)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: value, in: range)
+                .tint(tint)
+                .accessibilityLabel(title)
+                .accessibilityValue(text)
         }
     }
 }

@@ -2187,6 +2187,19 @@ final class LookStyleTests: XCTestCase {
         }
     }
 
+    /// Built-in styles sit under both ACES looks, and a saved one only under its own look.
+    func testStylesBelongToLooks() {
+        let warm = LookStyle.builtIn[0]
+        XCTAssertTrue(warm.belongs(to: "ACES 2.0"))
+        XCTAssertTrue(warm.belongs(to: "ACES 1.3"))
+        XCTAssertFalse(warm.belongs(to: ""))
+        XCTAssertFalse(warm.belongs(to: "Film.cube"))
+        let mine = LookStyle(name: "Mine", look: "Film.cube", grade: warm.grade)
+        XCTAssertFalse(mine.isBuiltIn)
+        XCTAssertTrue(mine.belongs(to: "Film.cube"))
+        XCTAssertFalse(mine.belongs(to: "ACES 2.0"))
+    }
+
     func testSavedStylesStayOutOfPresets() {
         var config = AppConfig()
         config.styles = [LookStyle(name: "Mine", look: "ACES 2.0", grade: LookStyle.builtIn[0].grade)]

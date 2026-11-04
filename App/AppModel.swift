@@ -147,20 +147,22 @@ final class AppModel: ObservableObject {
         return styles.first { $0.name == name }
     }
 
-    /// The style whose look and grade are on now, so the panel opens on it.
-    var currentStyleChoice: String? {
-        styles.first { $0.look == selectedLUT && $0.grade == lookGrade }.map { Self.stylePrefix + $0.name }
-    }
+    /// The styles under a look in the carousel, built-in first.
+    func styles(for look: String) -> [LookStyle] { styles.filter { $0.belongs(to: look) } }
 
-    /// Shows a style on the viewfinder, as the carousel does with a look.
+    /// The style under the current look whose grade is on now, so the panel opens on it.
+    var currentStyle: LookStyle? { styles(for: selectedLUT).first { $0.grade == lookGrade } }
+    var currentStyleChoice: String? { currentStyle.map { Self.stylePrefix + $0.name } }
+
+    /// Shows a style on the viewfinder. A built-in style keeps whichever ACES look is on.
     func previewStyle(_ style: LookStyle) {
-        previewLUT(isAvailableLook(style.look) ? style.look : "")
+        if !style.belongs(to: selectedLUT) { previewLUT(isAvailableLook(style.look) ? style.look : "") }
         lookGrade = style.grade
     }
 
     /// Keeps the current look and grade as a style, numbered if the name is taken.
     @discardableResult
-    func saveStyle(named wanted: String) -> String {
+    func saveStyle(named wanted: String, look: String? = nil, grade: LookGrade? = nil) -> String {
         let base = wanted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Style" : wanted
         var name = base
         var number = 2
@@ -168,7 +170,7 @@ final class AppModel: ObservableObject {
             name = "\(base) \(number)"
             number += 1
         }
-        savedStyles.append(LookStyle(name: name, look: selectedLUT, grade: lookGrade))
+        savedStyles.append(LookStyle(name: name, look: look ?? selectedLUT, grade: grade ?? lookGrade))
         return name
     }
 

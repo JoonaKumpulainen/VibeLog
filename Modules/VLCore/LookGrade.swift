@@ -105,7 +105,16 @@ public struct LookStyle: Codable, Equatable, Sendable {
         self.grade = grade
     }
 
-    /// Starting points under ACES 2.0, kept gentle, to be tuned on the phone.
+    /// Whether the style sits under a look in the carousel. The built-in styles go with both ACES
+    /// looks; a saved one goes with the look it was saved on.
+    public func belongs(to look: String) -> Bool {
+        isBuiltIn ? look.hasPrefix("ACES ") : look == self.look
+    }
+
+    /// Saved names never take a built-in one, so the name alone tells.
+    public var isBuiltIn: Bool { Self.builtIn.contains { $0.name == name } }
+
+    /// Starting points under the ACES looks, kept gentle, to be tuned on the phone.
     public static let builtIn: [LookStyle] = [
         style("Warm") { $0.temperature = 0.35; $0.saturation = 1.05 },
         style("Cool") { $0.temperature = -0.35; $0.tint = -0.05 },

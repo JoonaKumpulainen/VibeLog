@@ -881,10 +881,13 @@ struct LookPanel: View {
     @State private var bake = false
     @State private var ready = false
     @State private var page = Page.looks
+    @State private var styleChoice = Self.noStyle
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Not a file name, since those end in .cube.
     static let logChoice = "log"
+    /// Not a style name, since saving one asks for a name.
+    static let noStyle = "\u{0}none"
     private static let headerDepth: CGFloat = 52
 
     private var bakeAllowed: Bool { !model.isRecording && choice != Self.logChoice }
@@ -907,10 +910,21 @@ struct LookPanel: View {
             } else if page == .color {
                 ColorPanel(hold: hold)
             } else if ready {
-                LookCarousel(
-                    options: carouselOptions, selection: $choice, hold: hold, label: Self.label,
-                    deletable: { option in model.savedStyles.contains { AppModel.stylePrefix + $0.name == option } },
-                    delete: deleteStyle)
+                // The look's styles flow up from below it, and the looks make room above.
+                VStack(spacing: 0) {
+                    LookCarousel(options: lookOptions, selection: $choice, hold: hold, label: Self.label)
+                    if !stylesHere.isEmpty {
+                        LookCarousel(
+                            options: [Self.noStyle] + stylesHere.map(\.name), selection: $styleChoice, hold: hold,
+                            label: { $0 == Self.noStyle ? "NO STYLE" : $0.uppercased() },
+                            deletable: { name in model.savedStyles.contains { $0.name == name } },
+                            delete: deleteStyle)
+                            .id(stylesHere.map(\.name))
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                .clipped()
+                .animation(reduceMotion ? nil : .spring(duration: 0.4, bounce: 0.15), value: stylesHere.isEmpty)
             }
         }
         .padding(.horizontal, 12)
@@ -919,8 +933,8 @@ struct LookPanel: View {
         .background(Tokens.opaquePanel)
         .onAppear {
             // The carousel opens on the current choice, so it's made once that's known.
-            choice = model.processing.monitor == .log
-                ? Self.logChoice : model.currentStyleChoice ?? model.selectedLUT
+            choice = model.processing.monitor == .log ? Self.logChoice : model.selectedLUT
+            styleChoice = model.currentStyle?.name ?? Self.noStyle
             bake = model.bakeLook
             ready = true
         }
@@ -928,12 +942,22 @@ struct LookPanel: View {
             if value == Self.logChoice {
                 model.processing.monitor = .log
                 bake = false
-            } else if let style = model.style(forChoice: value) {
-                model.processing.monitor = .rec709
-                model.previewStyle(style)
             } else {
                 model.processing.monitor = .rec709
                 model.previewLUT(value)
+            }
+            // A built-in style carries over between the ACES looks; otherwise the row starts on
+            // whichever style the grade matches, or none.
+            if !stylesHere.contains(where: { $0.name == styleChoice }) {
+                styleChoice = model.currentStyle?.name ?? Self.noStyle
+            }
+        }
+        .onChange(of: styleChoice) { _, name in
+            if let style = stylesHere.first(where: { $0.name == name }) {
+                model.previewStyle(style)
+            } else if model.currentStyle != nil {
+                // Off a style back to the look itself. A grade of the owner's own stays.
+                model.lookGrade = LookGrade()
             }
         }
         .onChange(of: bake) { _, on in if !model.isRecording { model.bakeLook = on } }
@@ -979,22 +1003,21 @@ struct LookPanel: View {
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 
-    /// LOG, MONITOR and the ACES looks, then styles, then imported LUTs.
-    private var carouselOptions: [String] {
-        [Self.logChoice, ""] + BuiltInLook.allCases.map(\.name)
-            + model.styles.map { AppModel.stylePrefix + $0.name } + model.lutNames
-    }
+    /// LOG, MONITOR and the ACES looks, then imported LUTs.
+    private var lookOptions: [String] { [Self.logChoice, ""] + model.lookNames }
 
-    /// Only the owner's own styles can go, from a long press in the carousel.
-    private func deleteStyle(_ option: String) {
-        guard let style = model.style(forChoice: option) else { return }
-        if choice == option { choice = BuiltInLook.aces20.name }
-        model.deleteStyle(named: style.name)
+    /// The built-in styles under either ACES look, and the owner's own under the look they were
+    /// saved on. LOG has none.
+    private var stylesHere: [LookStyle] { choice == Self.logChoice ? [] : model.styles(for: choice) }
+
+    /// Only the owner's own styles can go, from a long press in the style row.
+    private func deleteStyle(_ name: String) {
+        if styleChoice == name { styleChoice = Self.noStyle }
+        model.deleteStyle(named: name)
     }
 
     static func label(_ option: String) -> String {
         if option == logChoice { return "LOG" }
-        if option.hasPrefix(AppModel.stylePrefix) { return String(option.dropFirst(AppModel.stylePrefix.count)).uppercased() }
         if option.isEmpty { return "MONITOR" }
         if BuiltInLook.named(option) != nil { return option }
         return (option as NSString).deletingPathExtension
@@ -1105,41 +1128,52 @@ enum GradeControl: CaseIterable, Identifiable {
 /// the chosen value again to put it back. Only the text turns with the hold: a turned slider
 /// would slide the wrong way under a finger. While a slider moves, the grade stays in this view
 /// and only a quick preview reaches the viewfinder, so nothing else on the screen redraws; it's
-/// kept when the finger lifts.
+/// kept when the finger lifts. RESET clears these five and leaves COLOR alone.
 struct GradePanel: View {
     @EnvironmentObject private var model: AppModel
     let hold: Hold
     @State private var selected = GradeControl.exposure
     @State private var draft: LookGrade?
     @State private var haptics = DetentHaptics()
-    @State private var naming = false
-    @State private var styleName = ""
 
     private var shown: LookGrade { draft ?? model.lookGrade }
+
+    /// The grade with these five at neutral and the colours kept.
+    private var cleared: LookGrade {
+        var grade = LookGrade()
+        grade.bands = shown.bands
+        return grade
+    }
 
     var body: some View {
         VStack(spacing: 4) {
             HStack(spacing: 0) {
                 ForEach(GradeControl.allCases) { cell($0) }
-                saveCell
-                resetCell
             }
             .frame(height: 44)
             Slider(value: binding(selected), in: selected.range) { editing in
-                if editing { haptics.prepare() }
-                if !editing, let draft {
-                    model.commitGrade(draft)
-                    self.draft = nil
-                }
+                if editing { haptics.prepare() } else { commit() }
             }
+            // A new slider for each value, so momentum from the last one can't carry into it.
+            .id(selected)
             .tint(Tokens.held)
             .padding(.horizontal, 8)
             .accessibilityLabel(selected.name)
             .accessibilityValue(selected.text(shown[keyPath: selected.keyPath]))
             Spacer(minLength: 0)
+            GradeActions(
+                canSave: !shown.isNeutral, resetTitle: "RESET", canReset: shown != cleared,
+                reset: { model.lookGrade = cleared })
         }
         .disabled(model.isRecording)
         .sensoryFeedback(.selection, trigger: selected)
+        .onChange(of: selected) { _, _ in commit() }
+    }
+
+    private func commit() {
+        guard let draft else { return }
+        model.commitGrade(draft)
+        self.draft = nil
     }
 
     private func binding(_ control: GradeControl) -> Binding<Double> {
@@ -1164,6 +1198,7 @@ struct GradePanel: View {
         let isOn = control == selected
         return Button {
             if isOn {
+                commit()
                 model.lookGrade[keyPath: control.keyPath] = LookGrade()[keyPath: control.keyPath]
             } else {
                 selected = control
@@ -1188,46 +1223,51 @@ struct GradePanel: View {
         .accessibilityValue(control.text(value))
         .accessibilityHint(isOn ? "Tap again to reset" : "")
     }
+}
 
-    /// Keeps the look and grade as a style in the LOOKS carousel. A bare look needs no style.
-    private var saveCell: some View {
-        Button {
-            styleName = ""
-            naming = true
-        } label: {
-            Text("SAVE")
-                .font(Tokens.labelFont)
-                .foregroundStyle(shown.isNeutral ? Tokens.label : Tokens.value)
-                .fixedSize()
-                .turnedToHold()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .contentShape(Rectangle())
+/// SAVE and a reset, along the bottom of ADJUST and COLOR. SAVE keeps the look and the whole
+/// grade as a style under that look.
+struct GradeActions: View {
+    @EnvironmentObject private var model: AppModel
+    let canSave: Bool
+    let resetTitle: String
+    let canReset: Bool
+    let reset: () -> Void
+    @State private var naming = false
+    @State private var styleName = ""
+
+    var body: some View {
+        HStack(spacing: 8) {
+            action("SAVE STYLE", enabled: canSave) {
+                styleName = ""
+                naming = true
+            }
+            .accessibilityLabel("Save as a style")
+            action(resetTitle, enabled: canReset, action: reset)
         }
-        .buttonStyle(.plain)
-        .disabled(shown.isNeutral)
-        .accessibilityLabel("Save as a style")
+        .frame(height: 36)
         .alert("Save Style", isPresented: $naming) {
             TextField("Name", text: $styleName)
             Button("Save") { model.saveStyle(named: styleName) }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Keeps this look and grade, COLOR included, in the LOOKS carousel. Long-press it there to delete it.")
+            Text("Keeps this look's grade, COLOR included, under the look in LOOKS. Long-press it there to delete it.")
         }
     }
 
-    private var resetCell: some View {
-        Button { model.lookGrade = LookGrade() } label: {
-            Text("RESET")
+    private func action(_ title: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
                 .font(Tokens.labelFont)
-                .foregroundStyle(shown.isNeutral ? Tokens.label : Tokens.held)
+                .foregroundStyle(enabled ? Tokens.value : Tokens.label)
                 .fixedSize()
                 .turnedToHold()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Tokens.surface.opacity(enabled ? 1 : 0.5), in: RoundedRectangle(cornerRadius: Tokens.panelRadius))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(shown.isNeutral)
-        .accessibilityLabel("Reset the grade")
+        .disabled(!enabled)
     }
 }
 
@@ -1263,25 +1303,30 @@ enum BandControl: CaseIterable, Identifiable {
 }
 
 extension ColorBand {
-    var swatch: Color {
+    private var rgb: (Double, Double, Double) {
         switch self {
-        case .red: return Color(red: 0.92, green: 0.22, blue: 0.2)
-        case .orange: return Color(red: 0.96, green: 0.56, blue: 0.16)
-        case .yellow: return Color(red: 0.95, green: 0.85, blue: 0.2)
-        case .green: return Color(red: 0.3, green: 0.78, blue: 0.3)
-        case .cyan: return Color(red: 0.2, green: 0.8, blue: 0.85)
-        case .blue: return Color(red: 0.25, green: 0.42, blue: 0.95)
-        case .magenta: return Color(red: 0.85, green: 0.3, blue: 0.8)
-        case .skin: return Color(red: 0.87, green: 0.64, blue: 0.5)
+        case .red: return (0.92, 0.22, 0.2)
+        case .orange: return (0.96, 0.56, 0.16)
+        case .yellow: return (0.95, 0.85, 0.2)
+        case .green: return (0.3, 0.78, 0.3)
+        case .cyan: return (0.2, 0.8, 0.85)
+        case .blue: return (0.25, 0.42, 0.95)
+        case .magenta: return (0.85, 0.3, 0.8)
+        case .skin: return (0.87, 0.64, 0.5)
         }
     }
 
-    var letter: String { self == .skin ? "SKIN" : String(name.prefix(1)).uppercased() }
+    var swatch: Color { Color(red: rgb.0, green: rgb.1, blue: rgb.2) }
+
+    /// The swatch darkened, for its letter.
+    var ink: Color { Color(red: rgb.0 * 0.35, green: rgb.1 * 0.35, blue: rgb.2 * 0.35) }
+
+    var letter: String { self == .skin ? "SK" : String(name.prefix(1)).uppercased() }
 }
 
-/// Each colour's hue, saturation and luminance: tap a swatch, then HUE, SAT or LUM, and drag the
-/// slider beside them. Tapping the chosen swatch again puts that colour back, and the arrow
-/// clears every colour. It works like ADJUST, keeping a draft while a slider moves.
+/// Each colour's hue, saturation and luminance: tap a ball, then HUE, SAT or LUM, and drag the
+/// slider beside them. A changed colour has an amber ring. Tapping the chosen ball again, or
+/// RESET below, puts that colour back. It works like ADJUST, keeping a draft while a slider moves.
 struct ColorPanel: View {
     @EnvironmentObject private var model: AppModel
     let hold: Hold
@@ -1291,44 +1336,43 @@ struct ColorPanel: View {
     @State private var haptics = DetentHaptics()
 
     private var shown: LookGrade { draft ?? model.lookGrade }
-    private var bandsNeutral: Bool { shown.bands.allSatisfy(\.isNeutral) }
 
     var body: some View {
         VStack(spacing: 4) {
             HStack(spacing: 0) {
-                ForEach(ColorBand.allCases) { swatch($0) }
+                ForEach(ColorBand.allCases) { ball($0) }
             }
             .frame(height: 44)
             HStack(spacing: 4) {
                 ForEach(BandControl.allCases) { controlCell($0) }
                 Slider(value: binding, in: -1...1) { editing in
-                    if editing { haptics.prepare() }
-                    if !editing, let draft {
-                        model.commitGrade(draft)
-                        self.draft = nil
-                    }
+                    if editing { haptics.prepare() } else { commit() }
                 }
+                // A new slider for each colour and value, so momentum from the last one can't
+                // carry into it.
+                .id("\(band.rawValue)-\(control.title)")
                 .tint(band.swatch)
                 .accessibilityLabel("\(band.name) \(control.name)")
                 .accessibilityValue(text(shown.bands[band.rawValue][keyPath: control.keyPath]))
-                Button { model.lookGrade.bands = LookGrade().bands } label: {
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(Tokens.statusFont)
-                        .foregroundStyle(bandsNeutral ? Tokens.label : Tokens.held)
-                        .turnedToHold()
-                        .frame(width: 36, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(bandsNeutral)
-                .accessibilityLabel("Reset every colour")
             }
             .frame(height: 44)
             Spacer(minLength: 0)
+            GradeActions(
+                canSave: !shown.isNeutral, resetTitle: "RESET \(band.name.uppercased())",
+                canReset: !shown.bands[band.rawValue].isNeutral,
+                reset: { model.lookGrade.bands[band.rawValue] = BandAdjust() })
         }
         .disabled(model.isRecording)
         .sensoryFeedback(.selection, trigger: band)
         .sensoryFeedback(.selection, trigger: control)
+        .onChange(of: band) { _, _ in commit() }
+        .onChange(of: control) { _, _ in commit() }
+    }
+
+    private func commit() {
+        guard let draft else { return }
+        model.commitGrade(draft)
+        self.draft = nil
     }
 
     private func text(_ value: Double) -> String { String(format: "%+.0f", value * 100) }
@@ -1348,29 +1392,28 @@ struct ColorPanel: View {
             })
     }
 
-    private func swatch(_ item: ColorBand) -> some View {
+    private func ball(_ item: ColorBand) -> some View {
         let isOn = item == band
         let changed = !shown.bands[item.rawValue].isNeutral
         return Button {
             if isOn {
+                commit()
                 model.lookGrade.bands[item.rawValue] = BandAdjust()
             } else {
                 band = item
             }
         } label: {
-            VStack(spacing: 3) {
-                Circle()
-                    .fill(item.swatch)
-                    .frame(width: 14, height: 14)
-                    .overlay(Circle().stroke(Tokens.value, lineWidth: isOn ? 2 : 0).padding(-3))
-                Text(item.letter)
-                    .font(Tokens.markFont)
-                    .foregroundStyle(changed ? Tokens.held : Tokens.label)
-                    .fixedSize()
-            }
-            .turnedToHold()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentShape(Rectangle())
+            Text(item.letter)
+                .font(.system(size: item == .skin ? 8 : 10, weight: .bold, design: .monospaced))
+                .foregroundStyle(item.ink)
+                .fixedSize()
+                .turnedToHold()
+                .frame(width: 24, height: 24)
+                .background(item.swatch, in: Circle())
+                .overlay(Circle().stroke(Tokens.held, lineWidth: changed ? 2 : 0).padding(-3))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(isOn ? Tokens.surface : .clear, in: RoundedRectangle(cornerRadius: Tokens.panelRadius))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(item.name)

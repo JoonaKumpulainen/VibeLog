@@ -277,6 +277,16 @@ Step 2 of the plan below, batched with the export player's rotation fix. `b75941
 - **Link:** `set style Warm` applies a style, and status reports the matching style, if any.
 - **Tests:** built-in styles have distinct names, a real look and a non-neutral grade, saved styles stay out of preset values and survive applying a preset, and styles survive saving the config.
 
+### Batch 4, fixes from the phone on `0b56b1a`, not built
+
+- **Owner's checks on `0b56b1a`:** live grading works and so does the sliding away. Styles weren't tried in real scenes. In COLOR, while a slider was still gliding from a flick, tapping another colour gave both the same value.
+- **Slider momentum:** the slider's glide kept writing through a binding that already pointed at the new colour. Each slider is now made new for its value, `.id` of the control, or of colour and control, so a glide can't carry over, and a draft is committed when the choice changes. Same in ADJUST.
+- **Colour balls:** 24-point balls in each colour with the letter inside in a darker shade of it, SK for skin, and an amber ring when that colour is changed. The chosen one sits on the panel's surface colour, as other chosen cells do.
+- **Bottom row:** SAVE STYLE and a reset along the bottom of ADJUST and COLOR, in `GradeActions`. ADJUST's RESET clears its five values and keeps the colours. COLOR's reads RESET RED and so on, and clears only the chosen colour. Tapping a chosen ball or value again still resets it.
+- **Styles under each look:** the looks carousel holds LOG, MONITOR, the ACES looks and imported LUTs only. Below it, a second carousel of that look's styles flows up, starting with NO STYLE: the built-in styles under both ACES looks, and a saved style only under the look it was saved on, so MONITOR and LUTs show the row only once the owner has saved one for them. `LookStyle.belongs(to:)` decides, and `isBuiltIn` goes by name, since saved names never take a built-in one. A built-in style carries over when switching between the ACES looks. Choosing NO STYLE after a style returns the grade to neutral, and a grade of the owner's own stays. Long-press deletes a saved style there.
+- **Export grade editor:** export has its own grade, starting from the LOOK panel's, so changes there leave the camera's alone. **Grade** in the Look section replaces everything under the preview with the editor, with Cancel and Done in the bar: a segmented Looks, Adjust and Color, Looks listing every look and the chosen look's styles, Adjust the five sliders as a list, and Color all eight colours with their three sliders each. **Save as Style…** keeps the grade under the chosen look for the camera too. The preview rebuilds 150 ms after a drag pauses.
+- **Tests:** built-in styles belong to both ACES looks and not to MONITOR or a LUT, and a saved one only to its own look.
+
 ### Plan agreed on 2026-11-04: grading, scopes, effects and HDR
 
 Batches, each built and tested on the phone before the next. Each works the same live in the viewfinder, baked into takes and in export, since all three share the look step.
