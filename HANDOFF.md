@@ -246,7 +246,7 @@ Step 2 of the plan below, batched with the export player's rotation fix. `b75941
 - **Tests:** a neutral grade leaves the LUT identical, exposure +1 doubles middle gray before the tone curve, contrast keeps 0.18 and neutrals neutral, saturation 0 gives neutral output through ACES 2.0, warmer moves red above blue and magenta moves green down, and the graded Rec.709 LUT matches the per-pixel view.
 - **Phone checks:** how each slider looks and whether the ranges are right, that dragging doesn't cost capture (`Recording:` timing and photo failures while dragging), and a baked take with a grade.
 
-### After `b759417`, not built
+### After `b759417`, built as `68811c4`
 
 - **Owner's checks on `b759417`:** a baked take with a grade works. While dragging a grade slider the haptics lagged and seemed to come only at the ends, and the picture only changed when the finger lifted.
 - **Why:** every slider tick wrote `lookGrade`, a published value on `AppModel`, so the whole camera screen redrew at the drag's rate, and the 65-point LUT was turned into a texture on the main thread. The haptics and the builds' completions both waited behind that.
@@ -258,12 +258,20 @@ Step 2 of the plan below, batched with the export player's rotation fix. `b75941
 - **ACES 2.0 by default:** `AppConfig.monitorLUT` defaults to ACES 2.0, so a fresh install and **Reset all settings** start on it. Saved setups keep their own choice.
 - **Tests:** `CubeLUT.sample` interpolates between grid points and clamps outside the domain, and with an identity cube a grade of exposure +1 comes out exactly a stop up on S-Log3.
 
+### COLOR tab, batch 2, not built
+
+- **Grade:** `LookGrade.bands` holds hue, saturation and luminance, each -1 to 1, for eight `ColorBand`s: red, orange, yellow, green, cyan, blue, magenta and skin. A grade saved without them reads back with every colour neutral, and the label names each changed colour.
+- **Math:** `GradeTransform.applyBands`, last in the grade, in Oklab from Ottosson's published matrices. Each band has a centre in Oklab hue degrees, 29, 56, 110, 142, 195, 264, 328 and 50 for skin, and reaches 40 to 60 degrees either side, 22 for skin, with a cosine-squared falloff, so neighbours blend. Near-grays below chroma 0.05 fade out of every band, so no push tints white or black, and skin fades out above chroma 0.10 to 0.18, so it spares vivid oranges. Hue turns up to 30 degrees, saturation scales chroma from gray to double, and luminance scales the light up to a stop either way. Inside the same LUT, so no GPU cost, and the drag preview works as for ADJUST.
+- **Panel:** COLOR is a third tab, merging into LOOKS with ADJUST for LOG. A row of eight swatches, with the letter turning amber when changed, then HUE, SAT and LUM with their values, the slider tinted with the swatch, and a reset arrow for every colour. Tapping the chosen swatch again resets it. Same draft, preview and haptics as ADJUST.
+- **Tests:** grays stay put, a red hue push turns red by the expected 15 degrees and leaves blue alone, red luminance +1 doubles red, skin desaturation drains a muted skin colour but leaves a vivid one, and an older grade reads without bands.
+- **Phone checks:** whether the band widths and the skin range feel right on real scenes, and whether the panel fits the depth in every hold.
+
 ### Plan agreed on 2026-11-04: grading, scopes, effects and HDR
 
 Batches, each built and tested on the phone before the next. Each works the same live in the viewfinder, baked into takes and in export, since all three share the look step.
 
 1. **Built, waiting:** the live grade, haptics, tab merging, the grade under imported LUTs, MONITOR and ACES 2.0 by default, under **After `b759417`**.
-2. **COLOR tab:** a third tab, LOOKS, ADJUST, COLOR, hiding with ADJUST for LOG. Swatches for red, orange, yellow, green, cyan, blue, magenta and skin, a HUE, SAT and LUM row, and one slider, tapping a chosen swatch again to reset it. Soft overlapping hue windows in Oklab, which is cheaper per LUT point than ACES's JMh and keeps the drag preview fast, with skin a narrower window that spares near-grays. Inside the same LUT, after the global grade.
+2. **COLOR tab, written as batch 2:** a third tab, LOOKS, ADJUST, COLOR, hiding with ADJUST for LOG. Swatches for red, orange, yellow, green, cyan, blue, magenta and skin, a HUE, SAT and LUM row, and one slider, tapping a chosen swatch again to reset it. Soft overlapping hue windows in Oklab, which is cheaper per LUT point than ACES's JMh and keeps the drag preview fast, with skin a narrower window that spares near-grays. Inside the same LUT, after the global grade.
 3. **Styles:** pre-made grades as cards in the LOOKS carousel after the ACES looks, such as Warm, Cool, Punchy, Faded, Mono, Teal & Orange and Bleach bypass, each a look plus a grade that loads into ADJUST and COLOR to adjust further, and SAVE STYLE to add the owner's own, kept in presets. Called styles, not presets, to keep them apart from settings presets. After COLOR, since Teal & Orange and Bleach bypass need per-colour control.
 4. **Scopes:** waveform, RGB parade, Y RGB parade, vectorscope with Rec.709 or Rec.2020 targets and the skin tone line, and a luma or RGB histogram. Standard math, with no licence needed; Blackmagic's "DaVinci YRGB" is a brand name to avoid. GPU bins from a frame about 256 wide with atomic adds, 10 to 15 updates a second, drawn on its own layer, measuring the look's output by default or log. A SCOPE tool in the MON tray, needing a frame-cost test.
 5. **FX tab:** a fourth tab with HALATION, BLOOM, DIFFUSE, VIGNETTE and GRAIN, hiding only for LOG, for any look including imported LUTs. Applied in scene-linear before the look: highlights blurred at an eighth of the size, halation tinted red-orange, read back per pixel with a curve decode and encode before the LUT. Estimated 1 to 3 ms a frame, unmeasured. Viewfinder and export first, then baked takes only after long takes show headroom, likely requiring the Efficient path when hot, and never switching off mid-take. Grain only for export or baked ProRes, since HEVC at 25 MB/s smears it.

@@ -107,6 +107,7 @@ public enum BuiltInLook: String, CaseIterable, Sendable {
 public struct GradeTransform: Sendable {
     public let grade: LookGrade
     private let whiteBalance: simd_double3x3
+    private let hasBands: Bool
 
     /// Rec.2020's luminance weights.
     static let luma = SIMD3<Double>(0.2627, 0.6780, 0.0593)
@@ -115,6 +116,7 @@ public struct GradeTransform: Sendable {
     public init(_ grade: LookGrade) {
         self.grade = grade
         whiteBalance = Self.whiteBalance(temperature: grade.temperature, tint: grade.tint)
+        hasBands = grade.bands.contains { !$0.isNeutral }
     }
 
     public func apply(_ input: SIMD3<Double>) -> SIMD3<Double> {
@@ -130,7 +132,74 @@ public struct GradeTransform: Sendable {
             let graded = simd_dot(rgb, Self.luma)
             rgb = graded + grade.saturation * (rgb - graded)
         }
+        if hasBands { rgb = applyBands(rgb) }
         return rgb
+    }
+
+
+    /// Oklab, from Björn Ottosson's published matrices: XYZ to cone response, then the cube
+    /// roots to lightness and the two opponent axes.
+    private static let xyzToLMS = simd_double3x3(rows: [
+        SIMD3(0.8189330101, 0.3618667424, -0.1288597137),
+        SIMD3(0.0329845436, 0.9293118715, 0.0361456387),
+        SIMD3(0.0482003018, 0.2643662691, 0.6338517070),
+    ])
+    private static let lmsToLab = simd_double3x3(rows: [
+        SIMD3(0.2104542553, 0.7936177850, -0.0040720468),
+        SIMD3(1.9779984951, -2.4285922050, 0.4505937099),
+        SIMD3(0.0259040371, 0.7827717662, -0.8086757660),
+    ])
+    private static let rec2020ToLMS = xyzToLMS * ColorMath.xyzToRec2020.inverse
+    private static let lmsToRec2020 = rec2020ToLMS.inverse
+    private static let labToLMS = lmsToLab.inverse
+
+    /// Each band's centre in Oklab hue degrees, near the colour of its name, and how far either
+    /// side it reaches. Neighbours overlap, so ranges blend without edges. Skin sits between red
+    /// and orange, narrower.
+    static let bandCentres: [Double] = [29, 56, 110, 142, 195, 264, 328, 50]
+    static let bandWidths: [Double] = [45, 40, 50, 55, 55, 60, 55, 22]
+
+    static func oklab(_ rgb: SIMD3<Double>) -> SIMD3<Double> {
+        let lms = rec2020ToLMS * rgb
+        return lmsToLab * SIMD3(cbrt(lms.x), cbrt(lms.y), cbrt(lms.z))
+    }
+
+    /// Back from Oklab, for tests that make colours by hue and chroma.
+    static func rec2020(oklab lab: SIMD3<Double>) -> SIMD3<Double> {
+        let lms = labToLMS * lab
+        return lmsToRec2020 * (lms * lms * lms)
+    }
+
+    private static func smoothstep(_ low: Double, _ high: Double, _ x: Double) -> Double {
+        let t = min(max((x - low) / (high - low), 0), 1)
+        return t * t * (3 - 2 * t)
+    }
+
+    /// Hue and chroma move in Oklab, where equal steps look about equal, and luminance scales the
+    /// light itself. Near-grays are left alone, so a colour push never tints white or black.
+    private func applyBands(_ rgb: SIMD3<Double>) -> SIMD3<Double> {
+        let lab = Self.oklab(rgb)
+        let chroma = (lab.y * lab.y + lab.z * lab.z).squareRoot()
+        guard chroma > 1e-6 else { return rgb }
+        let hue = atan2(lab.z, lab.y) * 180 / .pi
+        let colourful = Self.smoothstep(0.01, 0.05, chroma)
+        var shift = SIMD3<Double>()
+        for band in ColorBand.allCases {
+            let adjust = grade.bands[band.rawValue]
+            guard !adjust.isNeutral else { continue }
+            var distance = abs(hue - Self.bandCentres[band.rawValue]).truncatingRemainder(dividingBy: 360)
+            if distance > 180 { distance = 360 - distance }
+            let width = Self.bandWidths[band.rawValue]
+            guard distance < width else { continue }
+            var weight = pow(cos(.pi / 2 * distance / width), 2) * colourful
+            if band == .skin { weight *= 1 - Self.smoothstep(0.10, 0.18, chroma) }
+            shift += weight * SIMD3(adjust.hue, adjust.saturation, adjust.luminance)
+        }
+        guard shift != .zero else { return rgb }
+        let turned = (hue + shift.x * 30) * .pi / 180
+        let scaled = chroma * max(1 + shift.y, 0)
+        let lms = Self.labToLMS * SIMD3(lab.x, scaled * cos(turned), scaled * sin(turned))
+        return Self.lmsToRec2020 * (lms * lms * lms) * pow(2, shift.z)
     }
 
     /// Bradford adaptation from a daylight white to D65's place, in Rec.2020. A warmer grade

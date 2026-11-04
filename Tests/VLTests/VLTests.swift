@@ -2059,6 +2059,67 @@ final class LookGradeTests: XCTestCase {
         XCTAssertLessThan(tinted.y, tinted.z)
     }
 
+    /// A colour by Oklab lightness, chroma and hue in degrees.
+    private func colour(_ lightness: Double, _ chroma: Double, _ hue: Double) -> SIMD3<Double> {
+        let angle = hue * .pi / 180
+        return GradeTransform.rec2020(oklab: SIMD3(lightness, chroma * cos(angle), chroma * sin(angle)))
+    }
+
+    private func hueAndChroma(_ rgb: SIMD3<Double>) -> (hue: Double, chroma: Double) {
+        let lab = GradeTransform.oklab(rgb)
+        var hue = atan2(lab.z, lab.y) * 180 / .pi
+        if hue < 0 { hue += 360 }
+        return (hue, (lab.y * lab.y + lab.z * lab.z).squareRoot())
+    }
+
+    func testColourBandsLeaveGraysAlone() {
+        var grade = LookGrade()
+        grade.bands[ColorBand.red.rawValue].saturation = 1
+        grade.bands[ColorBand.skin.rawValue].hue = 1
+        let out = GradeTransform(grade).apply(gray)
+        XCTAssertEqual(out.x, 0.18, accuracy: 1e-6)
+        XCTAssertEqual(out.z, 0.18, accuracy: 1e-6)
+    }
+
+    func testRedHueTurnsRedOnly() {
+        var grade = LookGrade()
+        grade.bands[ColorBand.red.rawValue].hue = 0.5
+        let transform = GradeTransform(grade)
+        let red = hueAndChroma(transform.apply(colour(0.6, 0.15, 29)))
+        XCTAssertEqual(red.hue, 44, accuracy: 0.5)
+        XCTAssertEqual(red.chroma, 0.15, accuracy: 1e-4)
+        let blue = colour(0.5, 0.15, 264)
+        let untouched = transform.apply(blue)
+        XCTAssertEqual(untouched.x, blue.x, accuracy: 1e-9)
+        XCTAssertEqual(untouched.z, blue.z, accuracy: 1e-9)
+    }
+
+    func testRedLuminanceIsAStop() {
+        var grade = LookGrade()
+        grade.bands[ColorBand.red.rawValue].luminance = 1
+        let red = colour(0.6, 0.15, 29)
+        let out = GradeTransform(grade).apply(red)
+        XCTAssertEqual(out.x, red.x * 2, accuracy: 1e-6)
+        XCTAssertEqual(out.y, red.y * 2, accuracy: 1e-6)
+    }
+
+    /// Skin is moderate chroma, so draining it leaves a vivid colour of the same hue alone.
+    func testSkinSparesVividColours() {
+        var grade = LookGrade()
+        grade.bands[ColorBand.skin.rawValue].saturation = -1
+        let transform = GradeTransform(grade)
+        XCTAssertLessThan(hueAndChroma(transform.apply(colour(0.65, 0.06, 50))).chroma, 1e-3)
+        XCTAssertEqual(hueAndChroma(transform.apply(colour(0.65, 0.2, 50))).chroma, 0.2, accuracy: 1e-4)
+    }
+
+    /// A grade saved before colour bands existed reads back with every colour neutral.
+    func testOlderGradeReadsWithoutBands() throws {
+        let grade = try JSONDecoder().decode(LookGrade.self, from: Data(#"{"exposure":0.5}"#.utf8))
+        XCTAssertEqual(grade.exposure, 0.5)
+        XCTAssertEqual(grade.bands.count, ColorBand.allCases.count)
+        XCTAssertTrue(grade.bands.allSatisfy(\.isNeutral))
+    }
+
     /// An identity cube over the unit range, red fastest.
     private func identityCube(_ size: Int) -> CubeLUT {
         var samples: [SIMD3<Float>] = []

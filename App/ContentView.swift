@@ -880,7 +880,7 @@ struct LookPanel: View {
     @State private var choice = ""
     @State private var bake = false
     @State private var ready = false
-    @State private var adjusting = false
+    @State private var page = Page.looks
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Not a file name, since those end in .cube.
@@ -902,8 +902,10 @@ struct LookPanel: View {
             }
             .frame(height: Self.headerDepth)
             pageTabs
-            if adjusting {
+            if page == .adjust {
                 GradePanel(hold: hold)
+            } else if page == .color {
+                ColorPanel(hold: hold)
             } else if ready {
                 LookCarousel(
                     options: [Self.logChoice, ""] + model.lookNames, selection: $choice, hold: hold,
@@ -932,25 +934,30 @@ struct LookPanel: View {
         .onChange(of: bake) { _, on in if !model.isRecording { model.bakeLook = on } }
     }
 
-    /// LOOKS and ADJUST. The grade is fixed during a take, as the bake is.
-    /// LOG is for judging exposure and takes no grade, so there ADJUST merges into LOOKS, which
-    /// widens to the whole row, and splits out again when any look is chosen.
+    enum Page { case looks, adjust, color }
+
+    /// LOOKS, ADJUST and COLOR. The grade is fixed during a take, as the bake is.
+    /// LOG is for judging exposure and takes no grade, so there ADJUST and COLOR merge into LOOKS,
+    /// which widens to the whole row, and split out again when any look is chosen.
     private var canAdjust: Bool { choice != Self.logChoice }
 
     private var pageTabs: some View {
         HStack(spacing: 0) {
-            pageTab("LOOKS", on: !adjusting) { adjusting = false }
+            pageTab("LOOKS", on: page == .looks) { page = .looks }
             if canAdjust {
-                pageTab("ADJUST", on: adjusting) { adjusting = true }
-                    .disabled(model.isRecording)
-                    .opacity(model.isRecording ? 0.4 : 1)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                Group {
+                    pageTab("ADJUST", on: page == .adjust) { page = .adjust }
+                    pageTab("COLOR", on: page == .color) { page = .color }
+                }
+                .disabled(model.isRecording)
+                .opacity(model.isRecording ? 0.4 : 1)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
         .frame(height: 34)
         .clipped()
         .animation(reduceMotion ? nil : .spring(duration: 0.35, bounce: 0.15), value: canAdjust)
-        .sensoryFeedback(.selection, trigger: adjusting)
+        .sensoryFeedback(.selection, trigger: page)
     }
 
     private func pageTab(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
@@ -1173,6 +1180,177 @@ struct GradePanel: View {
         .buttonStyle(.plain)
         .disabled(shown.isNeutral)
         .accessibilityLabel("Reset the grade")
+    }
+}
+
+/// One of a colour's three changes.
+enum BandControl: CaseIterable, Identifiable {
+    case hue, saturation, luminance
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .hue: return "HUE"
+        case .saturation: return "SAT"
+        case .luminance: return "LUM"
+        }
+    }
+
+    var name: String {
+        switch self {
+        case .hue: return "Hue"
+        case .saturation: return "Saturation"
+        case .luminance: return "Luminance"
+        }
+    }
+
+    var keyPath: WritableKeyPath<BandAdjust, Double> {
+        switch self {
+        case .hue: return \.hue
+        case .saturation: return \.saturation
+        case .luminance: return \.luminance
+        }
+    }
+}
+
+extension ColorBand {
+    var swatch: Color {
+        switch self {
+        case .red: return Color(red: 0.92, green: 0.22, blue: 0.2)
+        case .orange: return Color(red: 0.96, green: 0.56, blue: 0.16)
+        case .yellow: return Color(red: 0.95, green: 0.85, blue: 0.2)
+        case .green: return Color(red: 0.3, green: 0.78, blue: 0.3)
+        case .cyan: return Color(red: 0.2, green: 0.8, blue: 0.85)
+        case .blue: return Color(red: 0.25, green: 0.42, blue: 0.95)
+        case .magenta: return Color(red: 0.85, green: 0.3, blue: 0.8)
+        case .skin: return Color(red: 0.87, green: 0.64, blue: 0.5)
+        }
+    }
+
+    var letter: String { self == .skin ? "SKIN" : String(name.prefix(1)).uppercased() }
+}
+
+/// Each colour's hue, saturation and luminance: tap a swatch, then HUE, SAT or LUM, and drag the
+/// slider beside them. Tapping the chosen swatch again puts that colour back, and the arrow
+/// clears every colour. It works like ADJUST, keeping a draft while a slider moves.
+struct ColorPanel: View {
+    @EnvironmentObject private var model: AppModel
+    let hold: Hold
+    @State private var band = ColorBand.red
+    @State private var control = BandControl.hue
+    @State private var draft: LookGrade?
+    @State private var haptics = DetentHaptics()
+
+    private var shown: LookGrade { draft ?? model.lookGrade }
+    private var bandsNeutral: Bool { shown.bands.allSatisfy(\.isNeutral) }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 0) {
+                ForEach(ColorBand.allCases) { swatch($0) }
+            }
+            .frame(height: 44)
+            HStack(spacing: 4) {
+                ForEach(BandControl.allCases) { controlCell($0) }
+                Slider(value: binding, in: -1...1) { editing in
+                    if editing { haptics.prepare() }
+                    if !editing, let draft {
+                        model.commitGrade(draft)
+                        self.draft = nil
+                    }
+                }
+                .tint(band.swatch)
+                .accessibilityLabel("\(band.name) \(control.name)")
+                .accessibilityValue(text(shown.bands[band.rawValue][keyPath: control.keyPath]))
+                Button { model.lookGrade.bands = LookGrade().bands } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(Tokens.statusFont)
+                        .foregroundStyle(bandsNeutral ? Tokens.label : Tokens.held)
+                        .turnedToHold()
+                        .frame(width: 36, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(bandsNeutral)
+                .accessibilityLabel("Reset every colour")
+            }
+            .frame(height: 44)
+            Spacer(minLength: 0)
+        }
+        .disabled(model.isRecording)
+        .sensoryFeedback(.selection, trigger: band)
+        .sensoryFeedback(.selection, trigger: control)
+    }
+
+    private func text(_ value: Double) -> String { String(format: "%+.0f", value * 100) }
+
+    private var binding: Binding<Double> {
+        Binding(
+            get: { shown.bands[band.rawValue][keyPath: control.keyPath] },
+            set: { value in
+                var grade = shown
+                let old = grade.bands[band.rawValue][keyPath: control.keyPath]
+                let new = (value * 100).rounded() / 100
+                guard new != old else { return }
+                grade.bands[band.rawValue][keyPath: control.keyPath] = new
+                haptics.moved(from: Int((old * 100).rounded()), to: Int((new * 100).rounded()), neutral: 0)
+                draft = grade
+                model.previewGrade(grade)
+            })
+    }
+
+    private func swatch(_ item: ColorBand) -> some View {
+        let isOn = item == band
+        let changed = !shown.bands[item.rawValue].isNeutral
+        return Button {
+            if isOn {
+                model.lookGrade.bands[item.rawValue] = BandAdjust()
+            } else {
+                band = item
+            }
+        } label: {
+            VStack(spacing: 3) {
+                Circle()
+                    .fill(item.swatch)
+                    .frame(width: 14, height: 14)
+                    .overlay(Circle().stroke(Tokens.value, lineWidth: isOn ? 2 : 0).padding(-3))
+                Text(item.letter)
+                    .font(Tokens.markFont)
+                    .foregroundStyle(changed ? Tokens.held : Tokens.label)
+                    .fixedSize()
+            }
+            .turnedToHold()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(item.name)
+        .accessibilityValue(changed ? "changed" : "unchanged")
+        .accessibilityHint(isOn ? "Tap again to reset" : "")
+    }
+
+    private func controlCell(_ item: BandControl) -> some View {
+        let isOn = item == control
+        let value = shown.bands[band.rawValue][keyPath: item.keyPath]
+        return Button { control = item } label: {
+            VStack(spacing: 2) {
+                Text(item.title)
+                    .font(Tokens.labelFont)
+                    .foregroundStyle(isOn ? Tokens.held : Tokens.label)
+                Text(text(value))
+                    .font(Tokens.statusFont)
+                    .foregroundStyle(value != 0 ? Tokens.held : Tokens.value)
+            }
+            .fixedSize()
+            .turnedToHold()
+            .frame(width: 42, height: 44)
+            .background(isOn ? Tokens.surface : .clear, in: RoundedRectangle(cornerRadius: Tokens.panelRadius))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(item.name)
+        .accessibilityValue(text(value))
     }
 }
 
