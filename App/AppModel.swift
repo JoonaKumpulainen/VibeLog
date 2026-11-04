@@ -557,6 +557,9 @@ final class AppModel: ObservableObject {
 
     var activeToolCount: Int { Tool.allCases.filter(isOn).count }
 
+    /// RGB and YRGB draw their channels in one panel, mixing toward white where they agree.
+    @Published var scopeOverlaid = true { didSet { updateScope() } }
+
     /// The scope the SCOPE tool shows; a tap on it moves to the next.
     @Published var scopeKind = ScopeKind.waveform { didSet { updateScope() } }
     /// Drawn on its own layer from the scope's queue, as the mic bar is, so the main thread
@@ -575,7 +578,7 @@ final class AppModel: ObservableObject {
     func updateScope() {
         let on = isOn(.scope) && processing.monitor != .isp
         let layer = scopeLayer
-        pipeline?.showScope(on ? scopeKind : nil, turns: scopeTurns) { image in
+        pipeline?.showScope(on ? scopeKind : nil, overlaid: scopeOverlaid, turns: scopeTurns) { image in
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             layer.contents = image
@@ -649,6 +652,7 @@ final class AppModel: ObservableObject {
         config.bakeTarget = bakeTarget.rawValue
         config.lookGrade = lookGrade
         config.lookEffects = lookEffects
+        config.scopeOverlaid = scopeOverlaid
         config.testServer = testServer
         config.testToken = testToken
         return config
@@ -729,6 +733,7 @@ final class AppModel: ObservableObject {
         bakeTarget = BakeTarget(rawValue: saved.bakeTarget) ?? .sdr
         lookGrade = saved.lookGrade
         lookEffects = saved.lookEffects
+        scopeOverlaid = saved.scopeOverlaid
     }
 
     /// What a preset keeps. Zebras and false color only ever reach the file through here.
@@ -821,7 +826,7 @@ final class AppModel: ObservableObject {
         lookBeforePanel = (selectedLUT, bakeLook, processing.monitor, lookGrade, lookEffects)
     }
 
-    /// Shows a LUT on the viewfinder without choosing its curve, which only Select does.
+    /// Shows a LUT on the viewfinder without choosing its curve, which only Done does.
     func previewLUT(_ name: String) {
         guard name != selectedLUT else { return }
         adopting = true

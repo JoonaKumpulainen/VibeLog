@@ -194,7 +194,8 @@ extension AppModel {
             "fixedFrameTime": String(fixedFrameTime), "uncompressedAudio": String(pcmAudio),
             "stereoAudio": String(stereoAudio),
             "distortionCorrection": String(distortionCorrection), "twelveBitProRes": String(twelveBitProRes),
-            "bakeLook": String(bakeLook), "bakeToProRes": String(bakeToProRes), "grade": lookGrade.label, "style": currentStyleChoice.map { String($0.dropFirst(Self.stylePrefix.count)) } ?? "",
+            "bakeLook": String(bakeLook), "bakeToProRes": String(bakeToProRes), "bakeTarget": bakeTarget.rawValue,
+            "effects": lookEffects.label, "scopeOverlaid": String(scopeOverlaid), "fileTagWritten": takeFileTag.label, "grade": lookGrade.label, "style": currentStyleChoice.map { String($0.dropFirst(Self.stylePrefix.count)) } ?? "",
             "efficientWhenHot": String(processing.efficientWhenHot), "isoAuto": String(isoAuto),
             "bilinearWhenHot": String(processing.bilinearWhenHot),
             "yields": String(pipelineStats.monitorYields),
@@ -252,6 +253,10 @@ extension AppModel {
         case "twelveBitProRes": return flag { twelveBitProRes = $0 }
         case "bakeLook": return flag { bakeLook = $0 }
         case "bakeToProRes": return flag { bakeToProRes = $0 }
+        case "bakeTarget":
+            guard !isRecording else { return "bakeTarget can't change during a take" }
+            return pick(BakeTarget.allCases, \.rawValue) { bakeTarget = $0 }
+        case "scopeOverlaid": return flag { scopeOverlaid = $0 }
         case "style":
             guard !isRecording else { return "style can't change during a take" }
             guard let style = style(forChoice: Self.stylePrefix + value) else {

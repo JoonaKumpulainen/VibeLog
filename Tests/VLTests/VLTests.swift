@@ -2241,7 +2241,7 @@ final class ScopeTests: XCTestCase {
 /// The FX kernels: a flat gray has no highlights to glow and nothing for diffusion to soften, so
 /// bloom, halation and diffusion leave it as it is, and a vignette darkens only the corners.
 final class EffectsTests: XCTestCase {
-    private func run(_ effects: LookEffects) throws -> (center: Float, corner: Float, expected: Float) {
+    private func run(_ effects: LookEffects, light: Bool = false) throws -> (center: Float, corner: Float, beside: Float, expected: Float) {
         let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
         let kit = try XCTUnwrap(EffectsKit(device: device))
         let queue = try XCTUnwrap(device.makeCommandQueue())
@@ -2254,7 +2254,12 @@ final class EffectsTests: XCTestCase {
         let output = try XCTUnwrap(device.makeTexture(descriptor: descriptor))
         let gray = Float(LogCurve.sLog3.encode(0.18))
         let code = UInt16((gray * 65535).rounded())
-        let pixels = [UInt16](repeating: code, count: size * size * 4)
+        var pixels = [UInt16](repeating: code, count: size * size * 4)
+        if light {
+            // A small light, four stops over gray, in the middle.
+            let bright = UInt16((LogCurve.sLog3.encode(0.18 * 16) * 65535).rounded())
+            for y in 30..<34 { for x in 30..<34 { for c in 0..<3 { pixels[(y * size + x) * 4 + c] = bright } } }
+        }
         pixels.withUnsafeBytes { bytes in
             image.replace(region: MTLRegionMake2D(0, 0, size, size), mipmapLevel: 0, withBytes: bytes.baseAddress!, bytesPerRow: size * 8)
         }
@@ -2269,7 +2274,7 @@ final class EffectsTests: XCTestCase {
             output.getBytes(bytes.baseAddress!, bytesPerRow: size * 8, from: MTLRegionMake2D(0, 0, size, size), mipmapLevel: 0)
         }
         func at(_ x: Int, _ y: Int) -> Float { Float(read[(y * size + x) * 4 + 1]) / 65535 }
-        return (at(32, 32), at(0, 0), gray)
+        return (at(32, 32), at(0, 0), at(40, 32), gray)
     }
 
     func testGlowsLeaveFlatGrayAlone() throws {
@@ -2280,6 +2285,14 @@ final class EffectsTests: XCTestCase {
         let result = try run(effects)
         XCTAssertEqual(result.center, result.expected, accuracy: 2 / 1023)
         XCTAssertEqual(result.corner, result.expected, accuracy: 2 / 1023)
+    }
+
+    /// A small light glows onto what's beside it, which was too faint to see before.
+    func testBloomSpreadsFromALight() throws {
+        var effects = LookEffects()
+        effects.bloom = 1
+        let result = try run(effects, light: true)
+        XCTAssertGreaterThan(result.beside, result.expected + 0.01)
     }
 
     func testVignetteDarkensCorners() throws {
@@ -2338,6 +2351,38 @@ final class HDRTests: XCTestCase {
         XCTAssertEqual(LookParams(settings: settings, lut: nil).luma, LookParams.rec709Luma)
         settings.bakeHDR = true
         XCTAssertEqual(LookParams(settings: settings, lut: nil).luma, LookParams.rec2020Luma)
+    }
+
+    /// An HDR-tagged HEVC file writes and reads back with its transfer. The phone refused HLG
+    /// on the first frame, so a failure here is reported with the encoder's own error.
+    func testHDRFilesWrite() async throws {
+        let preset = try XCTUnwrap(EncoderPreset.all.first { $0.id == "hevc420" })
+        for tag in [FileTag.pq, .hlg] {
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
+            let encoder: VideoEncoder
+            do {
+                encoder = try VideoEncoder(config: .init(
+                    url: url, preset: preset, size: EncoderSize(width: 640, height: 480), audio: false,
+                    realTime: false, fileTag: tag))
+            } catch {
+                throw XCTSkip("\(tag.label) can't be set up here: \(error)")
+            }
+            for index in 0..<6 {
+                let buffer = try XCTUnwrap(encoder.nextPixelBuffer())
+                encoder.append(buffer, at: CMTime(value: Int64(index), timescale: 30))
+            }
+            let result = await withCheckedContinuation { continuation in encoder.finish { continuation.resume(returning: $0) } }
+            if let failure = result.failure { throw XCTSkip("\(tag.label) failed here: \(failure)") }
+            XCTAssertEqual(result.framesWritten, 6, tag.label)
+            let tracks = try await AVURLAsset(url: url).loadTracks(withMediaType: .video)
+            let track = try XCTUnwrap(tracks.first)
+            let formats = try await track.load(.formatDescriptions)
+            let format = try XCTUnwrap(formats.first)
+            let transfer = CMFormatDescriptionGetExtension(format, extensionKey: kCMFormatDescriptionExtension_TransferFunction) as? String
+            XCTAssertEqual(
+                transfer, tag == .pq ? (kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ as String)
+                    : (kCMFormatDescriptionTransferFunction_ITU_R_2100_HLG as String), tag.label)
+        }
     }
 
     func testMasteringDisplayIsTwentyFourBytes() {

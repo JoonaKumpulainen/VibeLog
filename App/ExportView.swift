@@ -5,8 +5,9 @@ import VLCore
 import VLProcessing
 import VLRecording
 
-/// Bakes a look into a copy of a take: the Rec.709 view, or a LUT, played through first. The copy is
-/// tagged Rec.709 and saved beside the take, with its audio, and the take itself is left as it is.
+/// Bakes a look into a copy of a take: Monitor's Rec.709 view, an ACES look or a LUT, with its
+/// grade and effects, played through first. The copy is tagged Rec.709, or PQ or HLG for HDR,
+/// and saved beside the take with its audio; the take itself is left as it is.
 struct ExportView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -46,30 +47,25 @@ struct ExportView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    ZStack {
-                        Color.black
-                        VideoPlayer(player: player)
-                            .opacity(previewReady ? 1 : 0)
-                        if !previewReady {
-                            Text(previewFailure ?? "Loading preview")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+            // The preview holds still and only the settings scroll. Sideways, it sits on the
+            // side of the phone's top, with the settings beside it.
+            GeometryReader { geometry in
+                let sideways = geometry.size.width > geometry.size.height
+                let layout = sideways ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
+                layout {
+                    if !sideways || previewLeads { preview(sideways) }
+                    Form {
+                        if editingGrade {
+                            ExportGradeEditor(
+                                lutName: $lutName, lutMadeForRec709: $lutMadeForRec709, grade: $grade, effects: $effects)
+                        } else {
+                            settingsSections
                         }
                     }
-                    .aspectRatio(4 / 3, contentMode: .fit)
-                    .listRowInsets(EdgeInsets())
-                } footer: {
-                    Text("\(curve.label) in \(gamut.label), from the take's details. Plays with the look, as the export will write it"
-                        + (grade.isNeutral ? "." : ", graded: \(grade.label)."))
+                    if sideways, !previewLeads { preview(sideways) }
                 }
-                if editingGrade {
-                    ExportGradeEditor(
-                        lutName: $lutName, lutMadeForRec709: $lutMadeForRec709, grade: $grade, effects: $effects)
-                } else {
-                    settingsSections
-                }
+                .onChange(of: geometry.size) { _, _ in readOrientation() }
+                .onAppear { readOrientation() }
             }
             .navigationTitle(editingGrade ? "Grade" : "Export with look")
             .navigationBarTitleDisplayMode(.inline)
@@ -116,6 +112,40 @@ struct ExportView: View {
         .onChange(of: grade) { _, _ in refreshSoon() }
         .onChange(of: effects) { _, _ in refreshSoon() }
         .interactiveDismissDisabled(job.progress != nil || editingGrade)
+    }
+
+    /// Whether the phone's top is on the screen's leading side, held sideways.
+    @State private var previewLeads = true
+
+    private func readOrientation() {
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        // Landscape right has the Dynamic Island on the left.
+        previewLeads = scene?.interfaceOrientation != .landscapeLeft
+    }
+
+    private func preview(_ sideways: Bool) -> some View {
+        VStack(spacing: 4) {
+            ZStack {
+                Color.black
+                VideoPlayer(player: player)
+                    .opacity(previewReady ? 1 : 0)
+                if !previewReady {
+                    Text(previewFailure ?? "Loading preview")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .aspectRatio(4 / 3, contentMode: .fit)
+            Text("\(curve.label) in \(gamut.label). Plays with the look, as the export will write it"
+                + (grade.isNeutral ? "." : ", graded."))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .padding(.horizontal, 12)
+        }
+        .padding(.bottom, 6)
+        .frame(maxWidth: sideways ? .infinity : nil, maxHeight: sideways ? .infinity : nil)
+        .background(Color(white: 0.06))
     }
 
     /// The look, codec and export button, which the grade editor replaces while it's open.

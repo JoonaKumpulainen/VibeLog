@@ -498,7 +498,7 @@ public final class ProcessingPipeline: NSObject {
     /// Turns the scope on, measuring what the viewfinder shows about ten times a second and handing
     /// each drawing to `deliver` on its own queue, or off with nil. `turns` is the hold, in
     /// clockwise quarter turns from portrait, so a waveform runs across the picture as held.
-    public func showScope(_ kind: ScopeKind?, turns: Int, deliver: @escaping (CGImage) -> Void) {
+    public func showScope(_ kind: ScopeKind?, overlaid: Bool = true, turns: Int, deliver: @escaping (CGImage) -> Void) {
         lock.lock()
         defer { lock.unlock() }
         guard let kind else {
@@ -506,7 +506,7 @@ public final class ProcessingPipeline: NSObject {
             return
         }
         if scopes == nil { scopes = ScopeMeter(device: device) }
-        scopes?.configure(kind: kind, turns: turns, deliver: deliver)
+        scopes?.configure(kind: kind, overlaid: overlaid, turns: turns, deliver: deliver)
         scopeOn = scopes != nil
     }
 

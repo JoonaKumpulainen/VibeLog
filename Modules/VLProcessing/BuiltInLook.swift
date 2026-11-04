@@ -11,7 +11,7 @@ public enum BuiltInLook: String, CaseIterable, Sendable {
 
     public var name: String { rawValue }
 
-    /// For the status line and the LOOK cell.
+    /// For the status line and the LOOK button.
     public var shortLabel: String {
         switch self {
         case .aces20: return "ACES2"
@@ -276,6 +276,15 @@ public enum BakeTarget: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .sdr: return "SDR Rec.709"
         case .pq: return "HDR PQ (HDR10)"
+        case .hlg: return "HDR HLG"
+        }
+    }
+
+    /// For the look carousel, under ACES 2.0.
+    public var shortLabel: String {
+        switch self {
+        case .sdr: return "SDR"
+        case .pq: return "HDR PQ"
         case .hlg: return "HDR HLG"
         }
     }

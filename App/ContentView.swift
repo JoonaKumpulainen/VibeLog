@@ -26,6 +26,8 @@ struct CameraScreen: View {
     @State private var showSettings = false
     @State private var showMonitor = false
     @State private var showFormat = false
+    /// The look panel, which Settings can open too.
+    @State private var showLook = false
     @State private var selectedDial: ControlDial?
     @State private var focusMark: CGPoint?
     @State private var hideFocusMark: Task<Void, Never>?
@@ -46,7 +48,7 @@ struct CameraScreen: View {
                 viewfinder(layout.picture.size)
                     .position(x: layout.picture.midX, y: layout.picture.midY)
                 CameraHUD(
-                    selectedDial: $selectedDial, showMonitor: $showMonitor, showFormat: $showFormat,
+                    selectedDial: $selectedDial, showMonitor: $showMonitor, showFormat: $showFormat, showLook: $showLook,
                     hold: hold.hold, insets: insets, stripDepth: screen.height - layout.picture.maxY,
                     openSettings: {
                         model.settingsOpened()
@@ -64,6 +66,8 @@ struct CameraScreen: View {
         }
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
+        // Control Center's swipe from the top corner otherwise holds back taps on the gear.
+        .defersSystemGestures(on: .top)
         .sensoryFeedback(.impact(weight: .medium), trigger: model.isRecording)
         .sensoryFeedback(.selection, trigger: model.lensID)
         .sensoryFeedback(.warning, trigger: model.takeAlert) { _, alert in alert != nil }
@@ -76,10 +80,14 @@ struct CameraScreen: View {
             if recording { showFormat = false }
         }
         .sheet(isPresented: $showSettings, onDismiss: { model.settingsClosed() }) {
-            SettingsView {
+            SettingsView(openFormat: {
                 model.fullView = false
                 showFormat = true
-            }
+            }, openLook: {
+                model.fullView = false
+                model.openLookPanel()
+                showLook = true
+            })
         }
         .background(TouchWatcher { model.noteTouch() })
         .overlay {
@@ -126,9 +134,9 @@ struct CameraScreen: View {
         // The Metal monitor punches in by itself, with real pixels.
         .scaleEffect(model.isOn(.punchIn) && !model.monitorIsProcessed ? 3 : 1)
         .frame(width: size.width, height: size.height)
-        .overlay(alignment: .bottomLeading) {
+        .overlay(alignment: ScopeOverlay.corner(hold.hold)) {
             if model.isOn(.scope), model.monitorIsProcessed {
-                ScopeOverlay()
+                ScopeOverlay(hold: hold.hold)
                     .padding(8)
             }
         }
@@ -262,7 +270,7 @@ struct CameraHUD: View {
     @Binding var showMonitor: Bool
     @Binding var showFormat: Bool
     /// The look panel, over the controls like Format, so the picture shows each LUT.
-    @State private var showLook = false
+    @Binding var showLook: Bool
     let hold: Hold
     let insets: EdgeInsets
     /// What's left beneath the picture.
@@ -322,9 +330,13 @@ struct CameraHUD: View {
                 .zIndex(1)
             }
             if showLook {
-                // Holds touches off the picture and controls, so only Cancel or Select closes it.
+                // A tap outside keeps the changes and closes it, as Done does, like Format.
                 Color.clear
                     .contentShape(Rectangle())
+                    .onTapGesture {
+                        model.closeLookPanel(keep: true)
+                        withAnimation(lookFade) { showLook = false }
+                    }
                     .accessibilityHidden(true)
                 VStack(spacing: 0) {
                     Spacer(minLength: 0)
@@ -462,7 +474,8 @@ struct CameraHUD: View {
                 tint: model.bakeLook ? Tokens.held : Tokens.value, hold: hold)
         }
         .buttonStyle(.plain)
-        .disabled(model.isBusy != nil || model.processing.monitor == .isp)
+        // The ISP preview can't change during a take, and choosing a look would turn it off.
+        .disabled(model.isBusy != nil || (model.isRecording && model.processing.monitor == .isp))
         .accessibilityLabel("Look")
         .accessibilityValue(model.bakeLook ? "\(model.monitorName), baked into takes" : model.monitorName)
     }
@@ -728,19 +741,18 @@ struct StatusBlocks: View {
                 .accessibilityElement(children: .combine)
             }
             Spacer(minLength: 0)
-            // The gauges turn as their own small square, and the gear on its own, centred in
-            // what's left between them and the screen's edge.
-            HStack(spacing: 0) {
+            // The gauges turn as their own small square and the gear on its own, side by side,
+            // kept in from the corner as the format lines are on the left.
+            HStack(spacing: 4) {
                 StatGauges()
                     .allowsHitTesting(false)
                     .frame(width: Self.gaugeSide, height: Self.gaugeSide)
                     .turnedToHold()
                 settingsButton
-                    .frame(maxWidth: .infinity)
             }
-            .frame(width: CameraGeometry.statusSide + 24, height: CameraGeometry.statusSide)
+            .frame(height: CameraGeometry.statusSide)
         }
-        .padding(.leading, 24)
+        .padding(.horizontal, 24)
         .padding(.top, (CameraGeometry.statusDepth - CameraGeometry.statusSide) / 2)
     }
 
@@ -895,6 +907,22 @@ struct StatGauges: View {
 /// The scope in a corner of the picture, drawn on its own layer. A tap moves to the next kind.
 struct ScopeOverlay: View {
     @EnvironmentObject private var model: AppModel
+    let hold: Hold
+
+    /// The picture's bottom left as held, so the scope keeps the same margins in every hold.
+    static func corner(_ hold: Hold) -> Alignment {
+        switch hold {
+        case .portrait: return .bottomLeading
+        case .landscapeLeft: return .bottomTrailing
+        case .landscapeRight: return .topLeading
+        case .upsideDown: return .topTrailing
+        }
+    }
+
+    /// A vectorscope is round, so it's square; the others are wide.
+    private var size: CGSize {
+        model.scopeKind == .vectorscope ? CGSize(width: 110, height: 110) : CGSize(width: 176, height: 104)
+    }
 
     var body: some View {
         Button {
@@ -907,9 +935,13 @@ struct ScopeOverlay: View {
                     .foregroundStyle(Tokens.label)
                     .padding(3)
             }
-            .frame(width: 168, height: 100)
+            .frame(width: size.width, height: size.height)
             .clipShape(RoundedRectangle(cornerRadius: Tokens.panelRadius))
             .turnedToHold()
+            // Laid out at its turned size, so a sideways scope stays inside the picture.
+            .frame(
+                width: hold.isLandscape ? size.height : size.width,
+                height: hold.isLandscape ? size.width : size.height)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1034,8 +1066,8 @@ struct MonitorPanel: View {
 
 /// The viewfinder's look: LOG, Rec.709 or a LUT, each shown on the picture as it reaches the
 /// middle of the carousel, and ADJUST to grade it. BAKE in the header records that look into
-/// takes. Cancel puts back what was there, and Select keeps it. Every control keeps its place and
-/// turns with the hold.
+/// takes. Cancel puts back what was there, and Done or a tap outside keeps it. Every control
+/// keeps its place and turns with the hold.
 struct LookPanel: View {
     @EnvironmentObject private var model: AppModel
     let hold: Hold
@@ -1048,13 +1080,14 @@ struct LookPanel: View {
     @State private var ready = false
     @State private var page = Page.looks
     @State private var styleChoice = Self.noStyle
+    @State private var choosingRange = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Not a file name, since those end in .cube.
     static let logChoice = "log"
     /// Not a style name, since saving one asks for a name.
     static let noStyle = "\u{0}none"
-    private static let headerDepth: CGFloat = 52
+    private static let headerDepth: CGFloat = 44
 
     private var bakeAllowed: Bool { !model.isRecording && choice != Self.logChoice }
 
@@ -1067,7 +1100,7 @@ struct LookPanel: View {
                 Spacer(minLength: 0)
                 bakeToggle
                 Spacer(minLength: 0)
-                headerButton("Select", weight: .semibold) { close(true) }
+                headerButton("Done", weight: .semibold) { close(true) }
             }
             .frame(height: Self.headerDepth)
             pageTabs
@@ -1081,7 +1114,9 @@ struct LookPanel: View {
                 // The look's styles flow up from below it, and the looks make room above.
                 VStack(spacing: 0) {
                     LookCarousel(
-                        options: lookOptions, selection: $choice, hold: hold, label: Self.label, showsBand: false)
+                        options: lookOptions, selection: $choice, hold: hold, label: Self.label, showsBand: false,
+                        subtitle: { $0 == BuiltInLook.aces20.name ? model.bakeTarget.shortLabel : nil },
+                        tappedChosen: { option in if option == BuiltInLook.aces20.name { choosingRange = true } })
                     if !stylesHere.isEmpty {
                         LookCarousel(
                             options: [Self.noStyle] + stylesHere.map(\.name), selection: $styleChoice, hold: hold,
@@ -1104,7 +1139,9 @@ struct LookPanel: View {
         }
         .padding(.horizontal, 12)
         .padding(.bottom, bottomInset)
-        .frame(height: depth)
+        // Anything too deep is cut at the bottom, never pushed up over the picture.
+        .frame(height: depth, alignment: .top)
+        .clipped()
         .background(Tokens.opaquePanel)
         .onAppear {
             // The carousel opens on the current choice, so it's made once that's known.
@@ -1114,6 +1151,13 @@ struct LookPanel: View {
             ready = true
         }
         .onChange(of: choice) { _, value in
+            if model.processing.monitor == .isp {
+                // Apple's picture can't show a look, so choosing one turns it off.
+                model.showNotice(
+                    model.bakeLook
+                        ? "ISP preview is off, to show the look. Baked takes record it either way"
+                        : "ISP preview is off, to show the look. Turn it back on in Settings", seconds: 5)
+            }
             if value == Self.logChoice {
                 model.processing.monitor = .log
                 bake = false
@@ -1136,6 +1180,13 @@ struct LookPanel: View {
             }
         }
         .onChange(of: bake) { _, on in if !model.isRecording { model.bakeLook = on } }
+        .confirmationDialog("Dynamic Range", isPresented: $choosingRange, titleVisibility: .visible) {
+            ForEach(BakeTarget.allCases) { target in
+                Button(target == model.bakeTarget ? "\(target.label) ✓" : target.label) { model.bakeTarget = target }
+            }
+        } message: {
+            Text("What ACES 2.0 records when BAKE is on. HDR is 1000 nits in Rec.2020, as PQ for HDR10 or as HLG. The viewfinder shows SDR either way.")
+        }
     }
 
     enum Page { case looks, adjust, color, fx }
@@ -1159,7 +1210,7 @@ struct LookPanel: View {
                 .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
-        .frame(height: 34)
+        .frame(height: 32)
         .clipped()
         .animation(reduceMotion ? nil : .spring(duration: 0.35, bounce: 0.15), value: canAdjust)
         .sensoryFeedback(.selection, trigger: page)
@@ -1167,11 +1218,13 @@ struct LookPanel: View {
 
     private func pageTab(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
+            // Turned, a name runs across the row's depth, so it's kept to that.
             Text(title)
                 .font(Tokens.labelFont)
                 .foregroundStyle(on ? Tokens.held : Tokens.label)
-                .fixedSize()
-                .turnedToHold()
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .upright(hold, depth: 28)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
         }
@@ -1204,9 +1257,10 @@ struct LookPanel: View {
             Text(title)
                 .font(Tokens.statusFont.weight(weight))
                 .foregroundStyle(Tokens.held)
-                .fixedSize()
-                .turnedToHold()
-                .frame(width: 72, height: 44)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .upright(hold, depth: 40)
+                .frame(width: 64, height: 44)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1322,11 +1376,11 @@ struct GradePanel: View {
     }
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 2) {
             HStack(spacing: 0) {
                 ForEach(GradeControl.allCases) { cell($0) }
             }
-            .frame(height: 44)
+            .frame(height: 40)
             Slider(value: binding(selected), in: selected.range) { editing in
                 if editing { haptics.prepare() } else { commit() }
             }
@@ -1440,7 +1494,7 @@ struct PanelButton: View {
     let hold: Hold
     let action: () -> Void
 
-    static let size = CGSize(width: 96, height: 36)
+    static let size = CGSize(width: 96, height: 30)
 
     var body: some View {
         Button(action: action) {
@@ -1526,11 +1580,11 @@ struct ColorPanel: View {
     private var shown: LookGrade { draft ?? model.lookGrade }
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 2) {
             HStack(spacing: 0) {
                 ForEach(ColorBand.allCases) { ball($0) }
             }
-            .frame(height: 44)
+            .frame(height: 36)
             HStack(spacing: 4) {
                 ForEach(BandControl.allCases) { controlCell($0) }
                 Slider(value: binding, in: -1...1) { editing in
@@ -1550,14 +1604,14 @@ struct ColorPanel: View {
                         .font(Tokens.statusFont)
                         .foregroundStyle(shown.bands[band.rawValue].isNeutral ? Tokens.label : Tokens.held)
                         .turnedToHold()
-                        .frame(width: 36, height: 44)
+                        .frame(width: 32, height: 40)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .disabled(shown.bands[band.rawValue].isNeutral)
                 .accessibilityLabel("Reset \(band.name)")
             }
-            .frame(height: 44)
+            .frame(height: 40)
             Spacer(minLength: 0)
             GradeActions(
                 hold: hold, canSave: !shown.isNeutral, canReset: !shown.bands.allSatisfy(\.isNeutral),
@@ -1639,7 +1693,7 @@ struct ColorPanel: View {
             }
             .fixedSize()
             .turnedToHold()
-            .frame(width: 42, height: 44)
+            .frame(width: 40, height: 40)
             .background(isOn ? Tokens.surface : .clear, in: RoundedRectangle(cornerRadius: Tokens.panelRadius))
             .contentShape(Rectangle())
         }
@@ -1705,11 +1759,11 @@ struct FXPanel: View {
     private var shown: LookEffects { draft ?? model.lookEffects }
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 2) {
             HStack(spacing: 0) {
                 ForEach(FXControl.allCases) { cell($0) }
             }
-            .frame(height: 44)
+            .frame(height: 40)
             Slider(value: binding(selected), in: selected.range) { editing in
                 if editing { haptics.prepare() } else { commit() }
             }
@@ -1833,6 +1887,10 @@ struct LookCarousel: View {
     var delete: (String) -> Void = { _ in }
     /// Off when rows stack, so one band runs through both.
     var showsBand = true
+    /// A second, grey line under a name, such as ACES 2.0's dynamic range.
+    var subtitle: (String) -> String? = { _ in nil }
+    /// A tap on the name already in the middle, which opens its own choices.
+    var tappedChosen: ((String) -> Void)? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var centered: String?
 
@@ -1884,15 +1942,26 @@ struct LookCarousel: View {
         // Turned sideways, a name runs across the row's depth, so it gets that much room.
         let length = hold.isLandscape ? min(Self.itemWidth - 12, height - 8) : Self.itemWidth - 12
         return Button {
-            withAnimation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.1)) { centered = option }
+            if isOn, let tappedChosen {
+                tappedChosen(option)
+            } else {
+                withAnimation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.1)) { centered = option }
+            }
         } label: {
-            Text(label(option))
-                .font(Tokens.statusFont)
-                .foregroundStyle(isOn ? Tokens.held : Tokens.value)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .frame(width: length)
-                .turnedToHold()
+            VStack(spacing: 1) {
+                Text(label(option))
+                    .font(Tokens.statusFont)
+                    .foregroundStyle(isOn ? Tokens.held : Tokens.value)
+                if let line = subtitle(option) {
+                    Text("<\(line)>")
+                        .font(Tokens.markFont)
+                        .foregroundStyle(Tokens.label)
+                }
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+            .frame(width: length)
+            .turnedToHold()
                 .frame(width: Self.itemWidth, height: height)
                 .contentShape(Rectangle())
         }

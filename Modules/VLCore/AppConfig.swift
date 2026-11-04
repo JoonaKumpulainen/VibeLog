@@ -108,6 +108,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var lookGrade = LookGrade()
     /// The FX tab's effects on the viewfinder and in export.
     public var lookEffects = LookEffects()
+    /// RGB and YRGB scopes overlaid in one panel rather than side by side.
+    public var scopeOverlaid = true
     /// Styles the owner saved, kept on the device apart from presets, as the presets are.
     public var styles: [LookStyle] = []
     /// Moves to the Efficient path while the phone is hot.
@@ -174,6 +176,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         bakeTarget = read(.bakeTarget, defaults.bakeTarget)
         lookGrade = read(.lookGrade, defaults.lookGrade)
         lookEffects = read(.lookEffects, defaults.lookEffects)
+        scopeOverlaid = read(.scopeOverlaid, defaults.scopeOverlaid)
         styles = read(.styles, defaults.styles)
         efficientWhenHot = read(.efficientWhenHot, defaults.efficientWhenHot)
         frameGuide = read(.frameGuide, defaults.frameGuide)

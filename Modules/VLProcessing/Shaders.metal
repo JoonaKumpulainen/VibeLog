@@ -443,26 +443,42 @@ static inline float3 encodeLog3(float3 v, uint curve) {
     return float3(encodeLog(v.r, curve), encodeLog(v.g, curve), encodeLog(v.b, curve));
 }
 
-static inline float grainNoise(float2 p) {
-    return fract(sin(dot(p, float2(12.9898, 78.233))) * 43758.5453);
+// A hash of a pixel and frame, evenly spread in 0 to 1. Integer maths, since sin() of large
+// coordinates loses its precision on the GPU and stopped varying.
+static inline float grainNoise(uint2 p, uint frame) {
+    uint h = p.x * 1973u + p.y * 9277u + frame * 26699u;
+    h = (h ^ (h >> 15)) * 0x2c1b3c6du;
+    h = (h ^ (h >> 12)) * 0x297a2d39u;
+    h ^= h >> 15;
+    return float(h & 0xffffffu) / 16777215.0;
 }
 
-// An eighth-size copy of the picture in linear light, each texel the average of sixteen taps
-// across the block under it, which the glows come from.
+// What glows: light above about middle gray plus a stop, rising smoothly so the glow has no edge.
+static inline float3 glowSource(float3 linear) {
+    float3 over = max(linear - 0.3, 0.0);
+    return over * over / (over + 0.3);
+}
+
+// An eighth-size copy of the picture, each texel from sixteen taps across the block under it:
+// in RGB what glows, taken before the blur so a small bright light keeps its strength, and in
+// alpha the luminance, which diffusion lifts the shadows toward.
 kernel void effectsDownsample(texture2d<float, access::sample> image [[texture(0)]],
                               texture2d<float, access::write> small [[texture(1)]],
                               constant EffectsParams &e [[buffer(0)]],
                               uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= small.get_width() || gid.y >= small.get_height()) return;
     float2 size = float2(small.get_width(), small.get_height());
-    float3 sum = 0.0;
+    float3 glow = 0.0;
+    float y = 0.0;
     for (uint i = 0; i < 4; i++) {
         for (uint j = 0; j < 4; j++) {
             float2 uv = (float2(gid) + (float2(i, j) + 0.5) / 4.0) / size;
-            sum += decodeLog3(saturate(logSample(image, uv)), e.curve);
+            float3 linear = decodeLog3(saturate(logSample(image, uv)), e.curve);
+            glow += glowSource(linear);
+            y += rec2020Luma(linear);
         }
     }
-    small.write(float4(sum / 16.0, 1.0), gid);
+    small.write(float4(glow / 16.0, y / 16.0), gid);
 }
 
 // One direction of a wide Gaussian blur on the small copy, sigma six texels, about 50 sensor
@@ -473,37 +489,42 @@ kernel void effectsBlur(texture2d<float, access::read> input [[texture(0)]],
                         uint2 gid [[thread_position_in_grid]]) {
     int2 size = int2(input.get_width(), input.get_height());
     if (int(gid.x) >= size.x || int(gid.y) >= size.y) return;
-    float3 sum = 0.0;
+    float4 sum = 0.0;
     float total = 0.0;
     for (int step = -12; step <= 12; step++) {
         float weight = exp(-float(step * step) / 72.0);
         int2 at = clamp(int2(gid) + direction * step, int2(0), size - 1);
-        sum += input.read(uint2(at)).rgb * weight;
+        sum += input.read(uint2(at)) * weight;
         total += weight;
     }
-    output.write(float4(sum / total, 1.0), gid);
+    output.write(sum / total, gid);
 }
 
 // The effects on one pixel, in linear light in the recorded gamut, and back to the curve.
 // Halation is the red-orange glow film's backing reflects around highlights, bloom a neutral
-// glow, and diffusion a soft mist like a filter on the lens. Vignette darkens or lightens the
-// corners, and grain is noise that follows brightness.
+// glow, and diffusion a soft mist like a filter on the lens, lifting shadows toward the light
+// around them and glowing highlights. Vignette darkens or lightens the corners, and grain is
+// noise that follows brightness, at the size of a sensor pixel.
 static inline float3 applyEffects(float3 logColor, float2 uv, float2 pixel, texture2d<float, access::sample> glow,
                                   constant EffectsParams &e) {
     constexpr sampler linearSampler(filter::linear, address::clamp_to_edge);
     float3 linear = decodeLog3(saturate(logColor), e.curve);
-    float3 soft = glow.sample(linearSampler, uv).rgb;
-    float3 highlights = max(soft - 0.6, 0.0);
-    linear = mix(linear, soft, e.diffusion * 0.5) + highlights * e.diffusion * 0.5;
-    linear += highlights * e.bloom;
-    linear += highlights * e.halation * float3(1.0, 0.32, 0.12);
+    float4 soft = glow.sample(linearSampler, uv);
+    float3 halo = soft.rgb;
+    linear += halo * e.bloom * 3.0;
+    linear += halo * e.halation * 4.0 * float3(1.0, 0.3, 0.08);
+    // Toward the surrounding light, which leaves an even area as it is, plus a glow.
+    float mist = e.diffusion;
+    linear = mix(linear, float3(soft.a), 0.3 * mist) + halo * 2.0 * mist;
     float2 centered = uv - 0.5;
     float corner = dot(centered, centered) * 2.0;
     linear *= max(1.0 - e.vignette * corner, 0.0);
     if (e.grain > 0.0) {
-        float noise = grainNoise(pixel + e.frame * 17.0) + grainNoise(pixel * 1.7 - e.frame * 5.0) - 1.0;
+        uint2 at = uint2(pixel);
+        uint frame = uint(e.frame);
+        float noise = grainNoise(at, frame) + grainNoise(at + uint2(7919u, 104729u), frame) - 1.0;
         float y = max(rec2020Luma(linear), 0.0);
-        linear += noise * e.grain * 0.06 * sqrt(y + 0.002);
+        linear *= 1.0 + noise * e.grain * 0.5 * rsqrt(y + 0.02) * 0.12;
     }
     return saturate(encodeLog3(max(linear, 0.0), e.curve));
 }

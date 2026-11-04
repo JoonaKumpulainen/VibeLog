@@ -135,6 +135,12 @@ public struct EncoderPreset: Identifiable, Hashable, Sendable {
             if tag == .pq, codec == .hevc, hdrMetadata {
                 compression[kVTCompressionPropertyKey_MasteringDisplayColorVolume as String] = Self.hdr10MasteringDisplay
             }
+            // An HLG take failed on its first frame with -12902, a parameter the encoder refused,
+            // where PQ wrote. Left to itself, the encoder makes its own HDR metadata for HLG,
+            // so it's told not to; the tags still mark the file HLG.
+            if tag == .hlg, codec == .hevc {
+                compression[kVTCompressionPropertyKey_HDRMetadataInsertionMode as String] = kVTHDRMetadataInsertionMode_None
+            }
             settings[AVVideoCompressionPropertiesKey] = compression
         }
         return settings

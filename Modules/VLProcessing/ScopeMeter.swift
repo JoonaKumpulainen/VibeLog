@@ -27,13 +27,13 @@ struct ScopeParams {
     var levels: UInt32
 }
 
-/// Counts a 96 by 128 grid of the viewfinder's picture into bins on the GPU about ten times a
+/// Counts a 192 by 256 grid of the viewfinder's picture into bins on the GPU about ten times a
 /// second, then draws the chosen scope as a small image on its own queue, so neither the main
 /// thread nor capture waits for it. Waveforms run across the picture as held.
 final class ScopeMeter: @unchecked Sendable {
-    static let levels = 128
-    private static let shortSide = 96
-    private static let longSide = 128
+    static let levels = 192
+    private static let shortSide = 192
+    private static let longSide = 256
 
     private let state: MTLComputePipelineState
     private let wave: MTLBuffer
@@ -42,6 +42,8 @@ final class ScopeMeter: @unchecked Sendable {
     private let queue = DispatchQueue(label: "VibeLog.scopes", qos: .utility)
     private let lock = NSLock()
     private var kind = ScopeKind.waveform
+    /// RGB and YRGB in one panel, mixing toward white where the channels agree.
+    private var overlaid = true
     private var turns = 0
     private var deliver: (CGImage) -> Void = { _ in }
     private var busy = false
@@ -62,9 +64,10 @@ final class ScopeMeter: @unchecked Sendable {
         self.histogram = histogram
     }
 
-    func configure(kind: ScopeKind, turns: Int, deliver: @escaping (CGImage) -> Void) {
+    func configure(kind: ScopeKind, overlaid: Bool, turns: Int, deliver: @escaping (CGImage) -> Void) {
         lock.lock()
         self.kind = kind
+        self.overlaid = overlaid
         self.turns = ((turns % 4) + 4) % 4
         self.deliver = deliver
         lock.unlock()
@@ -84,6 +87,7 @@ final class ScopeMeter: @unchecked Sendable {
     ) {
         lock.lock()
         let kind = self.kind
+        let overlaid = self.overlaid
         let turns = self.turns
         let deliver = self.deliver
         busy = true
@@ -120,7 +124,7 @@ final class ScopeMeter: @unchecked Sendable {
         encoder.endEncoding()
         commands.addCompletedHandler { [self] _ in
             queue.async { [self] in
-                if let image = render(kind, params: params) { deliver(image) }
+                if let image = render(kind, overlaid: overlaid, params: params) { deliver(image) }
                 finish()
             }
         }
@@ -184,19 +188,21 @@ final class ScopeMeter: @unchecked Sendable {
         count == 0 ? 0 : min(0.25 + 0.75 * log(1 + Double(count)) / log(1 + top), 1)
     }
 
-    private func render(_ kind: ScopeKind, params: ScopeParams) -> CGImage? {
+    private func render(_ kind: ScopeKind, overlaid: Bool, params: ScopeParams) -> CGImage? {
         let levels = Self.levels
         let columns = Int(params.columns)
         let rows = Double(params.rows)
         switch kind {
         case .waveform, .parade, .yrgbParade:
             let channels: [Int] = kind == .waveform ? [0] : kind == .parade ? [1, 2, 3] : [0, 1, 2, 3]
+            // Overlaid, every channel shares one panel; otherwise each has its own, side by side.
+            let panels = overlaid ? 1 : channels.count
             let gap = 2
-            var canvas = Canvas(width: channels.count * columns + (channels.count - 1) * gap, height: levels)
+            var canvas = Canvas(width: panels * columns + (panels - 1) * gap, height: levels)
             let bins = counts(wave, 4 * levels * columns)
             for (panel, channel) in channels.enumerated() {
-                let left = panel * (columns + gap)
-                for quarter in 0...4 {
+                let left = overlaid ? 0 : panel * (columns + gap)
+                for quarter in 0...4 where !overlaid || panel == 0 {
                     let y = (levels - 1) * (4 - quarter) / 4
                     for x in 0..<columns { canvas.add(left + x, y, Self.line, 0.5) }
                 }
