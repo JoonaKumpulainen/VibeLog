@@ -248,6 +248,8 @@ Step 2 of the plan below, batched with the export player's rotation fix. `b75941
 
 ### After `b759417`, built as `68811c4`
 
+`0b56b1a` holds batches 1 to 3 and passed CI with 137 tests and the usual one skip; untested on the phone. Pushes sometimes queue no run, or queue it late, so check `gh run list --commit` before starting one by hand, or two runs build the same commit.
+
 - **Owner's checks on `b759417`:** a baked take with a grade works. While dragging a grade slider the haptics lagged and seemed to come only at the ends, and the picture only changed when the finger lifted.
 - **Why:** every slider tick wrote `lookGrade`, a published value on `AppModel`, so the whole camera screen redrew at the drag's rate, and the 65-point LUT was turned into a texture on the main thread. The haptics and the builds' completions both waited behind that.
 - **Live grade:** `GradePanel` keeps a draft while a slider moves and only calls `AppModel.previewGrade`, which publishes nothing. It builds a 33-point LUT, about an eighth of the work. On release `commitGrade` keeps the grade and builds the full 65-point LUT. All looks, imported LUTs included, now reach the pipeline through one serial `lookQueue` with a request counter: a request overtaken by the time its turn comes is skipped, so a fast drag builds only the newest grade, and building and uploading never touch the main thread.
@@ -266,7 +268,7 @@ Step 2 of the plan below, batched with the export player's rotation fix. `b75941
 - **Tests:** grays stay put, a red hue push turns red by the expected 15 degrees and leaves blue alone, red luminance +1 doubles red, skin desaturation drains a muted skin colour but leaves a vivid one, and an older grade reads without bands.
 - **Phone checks:** whether the band widths and the skin range feel right on real scenes, and whether the panel fits the depth in every hold.
 
-### Styles, batch 3, not built
+### Styles, batch 3, built as `0b56b1a`
 
 - **What:** `LookStyle` in `VLCore`, a name, a look and a grade, COLOR included. Seven built in, all on ACES 2.0 and gentle, to be tuned on the phone: Warm, Cool, Punchy, Faded, Mono, Teal & Orange, which turns green and blue toward teal and enriches orange and skin, and Bleach bypass.
 - **Carousel:** LOG, MONITOR, the ACES looks, then every style by name, then imported LUTs. A style's choice carries the prefix `style:`, which no file name has. Choosing one shows its look and loads its grade into ADJUST and COLOR, to change further, and Cancel restores the grade as before. The panel opens on a style when the current look and grade match one.
