@@ -277,7 +277,7 @@ Step 2 of the plan below, batched with the export player's rotation fix. `b75941
 - **Link:** `set style Warm` applies a style, and status reports the matching style, if any.
 - **Tests:** built-in styles have distinct names, a real look and a non-neutral grade, saved styles stay out of preset values and survive applying a preset, and styles survive saving the config.
 
-### Batch 4, fixes from the phone on `0b56b1a`, not built
+### Batch 4, fixes from the phone on `0b56b1a`, built as `658ba3d`
 
 - **Owner's checks on `0b56b1a`:** live grading works and so does the sliding away. Styles weren't tried in real scenes. In COLOR, while a slider was still gliding from a flick, tapping another colour gave both the same value.
 - **Slider momentum:** the slider's glide kept writing through a binding that already pointed at the new colour. Each slider is now made new for its value, `.id` of the control, or of colour and control, so a glide can't carry over, and a draft is committed when the choice changes. Same in ADJUST.
@@ -287,14 +287,14 @@ Step 2 of the plan below, batched with the export player's rotation fix. `b75941
 - **Export grade editor:** export has its own grade, starting from the LOOK panel's, so changes there leave the camera's alone. **Grade** in the Look section replaces everything under the preview with the editor, with Cancel and Done in the bar: a segmented Looks, Adjust and Color, Looks listing every look and the chosen look's styles, Adjust the five sliders as a list, and Color all eight colours with their three sliders each. **Save as Style…** keeps the grade under the chosen look for the camera too. The preview rebuilds 150 ms after a drag pauses.
 - **Tests:** built-in styles belong to both ACES looks and not to MONITOR or a LUT, and a saved one only to its own look.
 
-### Batch 5, camera screen, not built
+### Batch 5, camera screen, built as `658ba3d`
 
 - **Top:** the left block keeps the three format lines. The right block is the settings gear, on the phone's outer edge, beside three gauges in rows matching the lines opposite: storage, battery and heat, each a 42 by 14 point bar in green, orange or red with its reading inside, dark on the fill once it reaches the middle. Storage empties with free space as a share of the disk, `SystemStatus.totalDisk`, and reads the GB left above the 10 GB floor, or during a take the minutes they hold when the codec's rate is known. Battery has a nub, its level without a percent sign, green while charging, orange under 30 and red under 15. Heat is filled green at nominal, orange at fair and red at serious or critical, with HEAT in a darker shade of the colour. The gauges turn as their own 56-point square, and the gear, 26 points, turns on its own, centred between the gauges and the screen's edge.
 - **Bottom row:** FORMAT and LOOK side by side on the left, record in the middle, MON and the last take on the right. LOOK reads the look's short name, or BAKED in amber, and opens the look panel; it's off for the ISP preview. MON now holds only the monitoring tools, reading OFF or how many are on. During a take the clock takes FORMAT and LOOK's place, since neither changes then, and MON stays. Full view shows the gauges where it showed the remaining lines.
 - **Removed:** the settings button in the bottom row, the look cell inside the MON tray, and `RemainingLines`.
 - **Phone checks:** that the gauges read at arm's length and fit beside the gear in every hold, and that nothing in the bottom row moves during a take.
 
-### Batch 6, scopes, not built
+### Batch 6, scopes, built as `f443ce8`
 
 - **Tool:** SCOPE in the MON tray, the ninth tool. Its scope sits in the picture's bottom left corner, 168 by 100 points, turned with the hold, and a tap moves to the next: WAVE, a luma waveform; RGB, a parade; YRGB, luma and the three channels side by side; VECTOR, a Rec.709 vectorscope with its edge, 75% targets for the six colours and the skin tone line at 123 degrees; and HIST, an RGB histogram. Off for the ISP preview.
 - **How:** `monitorLook` in the shader is now the viewfinder's look step, shared by `monitorFragment` and the new `scopeBins` kernel, so the scopes measure exactly what the viewfinder shows: log, MONITOR, a look, graded or not. Every third viewfinder draw, about ten a second, `ScopeMeter` adds to the draw's own command buffer a clear of its bins and a count of a 96 by 128 grid of the picture, 12,288 samples, with atomic adds into 128 levels per column for luma, red, green and blue, a histogram of each, and 128 by 128 Cb and Cr bins. The grid runs across the picture as held, from `scopeTurns`, so a waveform reads left to right as the viewer sees it. When the GPU finishes, the scope's own utility queue draws the image on a log brightness scale and sets it on `AppModel.scopeLayer` inside a `CATransaction`, as the mic bar does, so the main thread never draws a scope. A count waits if the last drawing isn't finished.
@@ -302,7 +302,7 @@ Step 2 of the plan below, batched with the export player's rotation fix. `b75941
 - **Licence:** standard signal math and published Rec.709 coefficients, nothing licensed. Named WAVE, RGB, YRGB, VECTOR and HIST, never Blackmagic's "DaVinci YRGB".
 - **Tests:** the kernel loads on the simulator's GPU, and the kinds cycle through all five and back.
 
-### Batch 7, FX in the viewfinder and export, not built
+### Batch 7, FX in the viewfinder and export, built as `f53121e`
 
 - **Tab:** FX, a fourth tab beside ADJUST and COLOR, hiding with them for LOG: HAL, BLOOM, DIFF, VIG and GRAIN, one slider at a time with the same draft, haptics and tap-again reset, and RESET FX at the bottom. Halation, bloom, diffusion and grain go 0 to 100, vignette -100 to 100, where below zero lightens the corners. `LookEffects` in `VLCore`, in `AppConfig` and presets, and put back by Cancel. Not in styles yet.
 - **How:** effects aren't in the LUT, since they need neighbours. `EffectsKit` makes an eighth-size copy of the log image in linear light, sixteen taps per texel, then blurs it both ways with a 25-tap Gaussian, sigma six texels, about 50 sensor pixels at full size. `applyEffects` in the shader then works per pixel in linear light in the recorded gamut: diffusion mixes toward the blurred copy and adds its highlights, highlights being what's above 0.6, about 1.7 stops over middle gray; bloom adds them neutral; halation adds them tinted red-orange (1, 0.32, 0.12); vignette scales by distance from the centre; and grain adds noise that follows the square root of luminance and moves each frame. The result is encoded back to the curve, then the look runs as usual, so FX work under every look, imported LUTs included.
@@ -311,7 +311,9 @@ Step 2 of the plan below, batched with the export player's rotation fix. `b75941
 - **Not in takes:** takes are recorded without effects, baked or not, and the FX tab says NOT IN BAKED TAKES YET in orange while BAKE is on. Baking them needs the encode kernels to sample the glow and a long take to show the GPU has room.
 - **Tests:** on a flat gray, full bloom, halation and diffusion leave it within two 10-bit codes, a vignette leaves the centre and darkens a corner, and settings saved without effects read back neutral.
 
-### Batch 8, HDR baked and exported, and panel fixes, not built
+### Batch 8, HDR baked and exported, and panel fixes, built as `f53121e`
+
+`f53121e` holds batches 4 to 8 and passed CI with 148 tests and the usual one skip; none of 6 to 8 has been on the phone. Watch CI by run id or full SHA: `gh run list --commit` doesn't match a short one.
 
 - **Owner's notes on `658ba3d`:** the bottom buttons' labels ran out of their grey areas when turned, the areas reached the panel's edges unevenly, and COLOR lost its per-colour reset. Fixed: `PanelButton` is a 96 by 36 point button with its label held inside it by `upright`, SAVE and RESET sit as a centred pair, COLOR has its arrow beside the slider again for the chosen colour while its RESET clears every colour, and FX's note reads NOT IN TAKES, or NOT BAKED in orange while BAKE is on. Gauge readings are now light over the empty part and dark over the fill, split where the fill ends. The owner preferred these fixes to locking the look panel upright.
 - **HDR look:** `ACES2Renderer.hdr`, the same port at 1000 nits with P3-D65 limiting, `ACES2OutputTransform.p3d65`, and an AP1 bound of 4096 from the same formula as SDR's 1024. Its output, linear in P3-D65 where 1 is 100 nits, moves to Rec.2020, is clamped to 0 to 1000 nits, and `HDREncoding` encodes it as SMPTE ST 2084 PQ, or as HLG by BT.2100's inverse system gamma of 1.2 for a 1000-nit display and the HLG curve. `BuiltInLook.hdrLUT` builds it as a 65-point LUT on log with the grade, so a baked HDR take still does one lookup per pixel. ACES 2.0 only.
