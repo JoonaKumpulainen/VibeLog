@@ -62,8 +62,6 @@ struct CameraGeometry {
     static let statusLineGap: CGFloat = 3
     /// The most Full view keeps beneath the picture.
     static let fullViewDepth: CGFloat = 80
-    /// What the format panel leaves between itself and the picture.
-    static let formatGap: CGFloat = 4
 
     /// Share of the spare height above the picture. Estimated, not measured from the Camera app.
     private static let topShare: CGFloat = 0.3

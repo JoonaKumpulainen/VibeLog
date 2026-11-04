@@ -68,16 +68,20 @@ struct CameraScreen: View {
         .persistentSystemOverlays(.hidden)
         // Control Center's swipe from the top corner otherwise holds back taps on the gear.
         .defersSystemGestures(on: .top)
-        .sensoryFeedback(.impact(weight: .medium), trigger: model.isRecording)
-        .sensoryFeedback(.selection, trigger: model.lensID)
-        .sensoryFeedback(.warning, trigger: model.takeAlert) { _, alert in alert != nil }
+        .haptic(.impact(weight: .medium), trigger: model.isRecording)
+        .haptic(.selection, trigger: model.lensID)
+        .haptic(.warning, trigger: model.takeAlert) { _, alert in alert != nil }
         .modifier(VolumeRecord {
             if !showSettings, model.playingTake == nil, model.isBusy == nil { model.toggleRecord() }
         })
         .onChange(of: model.isRecording) { _, recording in
             // Any focus change during a take costs frames.
             if recording, selectedDial == .focus { selectedDial = nil }
-            if recording { showFormat = false }
+            if recording {
+                showFormat = false
+                // The tools tray gives way to the take's own readings.
+                showMonitor = false
+            }
         }
         .sheet(isPresented: $showSettings, onDismiss: { model.settingsClosed() }) {
             SettingsView(openFormat: {
@@ -134,12 +138,13 @@ struct CameraScreen: View {
         // The Metal monitor punches in by itself, with real pixels.
         .scaleEffect(model.isOn(.punchIn) && !model.monitorIsProcessed ? 3 : 1)
         .frame(width: size.width, height: size.height)
-        .overlay(alignment: ScopeOverlay.corner(hold.hold)) {
+        .overlay(alignment: model.scopeCorner.alignment(hold.hold)) {
             if model.isOn(.scope), model.monitorIsProcessed {
-                ScopeOverlay(hold: hold.hold)
+                ScopeOverlay(hold: hold.hold, picture: size)
                     .padding(8)
             }
         }
+        .coordinateSpace(name: ScopeOverlay.space)
         .clipped()
         .overlay {
             LiveFrameGuides(
@@ -271,6 +276,8 @@ struct CameraHUD: View {
     @Binding var showFormat: Bool
     /// The look panel, over the controls like Format, so the picture shows each LUT.
     @Binding var showLook: Bool
+    /// The look panel's page, kept when it closes by a tap outside.
+    @State private var lookPage = LookPanel.Page.looks
     let hold: Hold
     let insets: EdgeInsets
     /// What's left beneath the picture.
@@ -323,10 +330,11 @@ struct CameraHUD: View {
                     Spacer(minLength: 0)
                     FormatPanel(
                         hold: hold, bottomInset: max(insets.bottom, 10),
-                        depth: stripDepth - CameraGeometry.formatGap)
+                        depth: panelDepth)
                         .accessibilityAction(.escape) { setFormat(false) }
                 }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                // A fade in place, as the look panel does.
+                .transition(.opacity)
                 .zIndex(1)
             }
             if showLook {
@@ -342,8 +350,10 @@ struct CameraHUD: View {
                     Spacer(minLength: 0)
                     LookPanel(
                         hold: hold, bottomInset: max(insets.bottom, 10),
-                        depth: stripDepth - CameraGeometry.formatGap
+                        depth: panelDepth, page: $lookPage
                     ) { keep in
+                        // Done or Cancel opens it on LOOKS next time; a tap outside keeps the page.
+                        lookPage = .looks
                         model.closeLookPanel(keep: keep)
                         withAnimation(lookFade) { showLook = false }
                     }
@@ -379,8 +389,12 @@ struct CameraHUD: View {
     }
 
     private func setFormat(_ isOpen: Bool) {
-        withAnimation(motion) { showFormat = isOpen }
+        withAnimation(lookFade) { showFormat = isOpen }
     }
+
+    /// Format and look panels reach from the screen's edge to the picture, rounded up so no
+    /// hairline of black shows between them on any phone's point grid.
+    private var panelDepth: CGFloat { stripDepth.rounded(.up) }
 
     /// Five columns, matching the bars above.
     private func columns<Content: View>(
@@ -651,6 +665,7 @@ struct CameraHUD: View {
         .disabled(model.isBusy != nil)
         .accessibilityLabel("Format")
         .accessibilityValue(model.aspectLabel)
+        .haptic(.selection, trigger: showFormat)
     }
 
     /// Only changes what the monitor draws, so it stays available while recording. The ISP
@@ -669,6 +684,8 @@ struct CameraHUD: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Monitoring tools")
+            // Quiet during a take, where a buzz could reach the microphones.
+            .haptic(.selection, trigger: showMonitor) { _, _ in !model.isRecording }
             .accessibilityValue(model.monitorName)
             .accessibilityAddTraits(showMonitor ? .isSelected : [])
         } else {
@@ -760,15 +777,18 @@ struct StatusBlocks: View {
     private static let gaugeSide: CGFloat = 56
 
     private var settingsButton: some View {
+        // A square target centred on the gear, the same in every hold.
         Button(action: openSettings) {
             Image(systemName: "gearshape")
                 .font(.system(size: 26))
                 .foregroundStyle(Tokens.value)
+                .frame(width: 30, height: 30)
                 .turnedToHold()
-                .frame(width: 44, height: 44)
+                .frame(width: 52, height: 52)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contentShape(Rectangle())
         .disabled(model.isBusy != nil)
         .accessibilityLabel("Settings")
     }
@@ -908,16 +928,9 @@ struct StatGauges: View {
 struct ScopeOverlay: View {
     @EnvironmentObject private var model: AppModel
     let hold: Hold
-
-    /// The picture's bottom left as held, so the scope keeps the same margins in every hold.
-    static func corner(_ hold: Hold) -> Alignment {
-        switch hold {
-        case .portrait: return .bottomLeading
-        case .landscapeLeft: return .bottomTrailing
-        case .landscapeRight: return .topLeading
-        case .upsideDown: return .topTrailing
-        }
-    }
+    /// The picture's size, which the scope snaps to the corners of.
+    let picture: CGSize
+    @State private var drag = CGSize.zero
 
     /// A vectorscope is round, so it's square; the others are wide.
     private var size: CGSize {
@@ -944,10 +957,83 @@ struct ScopeOverlay: View {
                 height: hold.isLandscape ? size.width : size.height)
             .contentShape(Rectangle())
         }
+        .offset(drag)
+        // A drag carries it, and it snaps to whichever corner it was let go nearest, which it
+        // keeps, as held, in every hold and across launches.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 12, coordinateSpace: .named(ScopeOverlay.space))
+                .onChanged { drag = $0.translation }
+                .onEnded { value in
+                    let end = value.predictedEndLocation
+                    let corner = HeldCorner(
+                        screenRight: end.x > picture.width / 2, screenBottom: end.y > picture.height / 2, hold: hold)
+                    withAnimation(.spring(duration: 0.35, bounce: 0.2)) {
+                        model.scopeCorner = corner
+                        drag = .zero
+                    }
+                })
+        .haptic(.impact(weight: .light), trigger: model.scopeCorner)
         .buttonStyle(.plain)
-        .sensoryFeedback(.selection, trigger: model.scopeKind)
+        .haptic(.selection, trigger: model.scopeKind)
         .accessibilityLabel("Scope, \(model.scopeKind.label)")
         .accessibilityHint("Shows the next scope")
+    }
+}
+
+extension ScopeOverlay {
+    static let space = "picture"
+}
+
+/// A corner of the picture as the phone is held, so the scope stays where it was put however the
+/// phone turns.
+enum HeldCorner: String {
+    case bottomLeft, bottomRight, topLeft, topRight
+
+    /// Right and down as held, each -1 or 1.
+    private var held: (x: Int, y: Int) {
+        switch self {
+        case .bottomLeft: return (-1, 1)
+        case .bottomRight: return (1, 1)
+        case .topLeft: return (-1, -1)
+        case .topRight: return (1, -1)
+        }
+    }
+
+    /// The same corner on the portrait screen, for the hold.
+    func alignment(_ hold: Hold) -> Alignment {
+        let (x, y) = held
+        let screen: (Int, Int)
+        switch hold {
+        case .portrait: screen = (x, y)
+        case .landscapeLeft: screen = (y, -x)
+        case .landscapeRight: screen = (-y, x)
+        case .upsideDown: screen = (-x, -y)
+        }
+        switch screen {
+        case (-1, -1): return .topLeading
+        case (1, -1): return .topTrailing
+        case (-1, 1): return .bottomLeading
+        default: return .bottomTrailing
+        }
+    }
+
+    /// The held corner at a corner of the portrait screen.
+    init(screenRight: Bool, screenBottom: Bool, hold: Hold) {
+        let sx = screenRight ? 1 : -1
+        let sy = screenBottom ? 1 : -1
+        let held: (Int, Int)
+        switch hold {
+        case .portrait: held = (sx, sy)
+        case .landscapeLeft: held = (-sy, sx)
+        case .landscapeRight: held = (sy, -sx)
+        case .upsideDown: held = (-sx, -sy)
+        }
+        switch held {
+        case (-1, 1): self = .bottomLeft
+        case (1, 1): self = .bottomRight
+        case (-1, -1): self = .topLeft
+        default: self = .topRight
+        }
     }
 }
 
@@ -1074,11 +1160,11 @@ struct LookPanel: View {
     let bottomInset: CGFloat
     /// From the screen's edge to just short of the picture.
     let depth: CGFloat
+    @Binding var page: Page
     let close: (Bool) -> Void
     @State private var choice = ""
     @State private var bake = false
     @State private var ready = false
-    @State private var page = Page.looks
     @State private var styleChoice = Self.noStyle
     @State private var choosingRange = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1104,12 +1190,12 @@ struct LookPanel: View {
             }
             .frame(height: Self.headerDepth)
             pageTabs
-            if page == .adjust {
-                GradePanel(hold: hold)
-            } else if page == .color {
-                ColorPanel(hold: hold)
-            } else if page == .fx {
-                FXPanel(hold: hold)
+            if page != .looks {
+                // On a phone with less room under the picture, a page scrolls rather than breaks.
+                ViewThatFits(in: .vertical) {
+                    gradePage
+                    ScrollView(.vertical, showsIndicators: false) { gradePage }
+                }
             } else if ready {
                 // The look's styles flow up from below it, and the looks make room above.
                 VStack(spacing: 0) {
@@ -1146,6 +1232,7 @@ struct LookPanel: View {
         .onAppear {
             // The carousel opens on the current choice, so it's made once that's known.
             choice = model.processing.monitor == .log ? Self.logChoice : model.selectedLUT
+            if choice == Self.logChoice { page = .looks }
             styleChoice = model.currentStyle?.name ?? Self.noStyle
             bake = model.bakeLook
             ready = true
@@ -1191,6 +1278,15 @@ struct LookPanel: View {
 
     enum Page { case looks, adjust, color, fx }
 
+    @ViewBuilder private var gradePage: some View {
+        switch page {
+        case .adjust: GradePanel(hold: hold)
+        case .color: ColorPanel(hold: hold)
+        case .fx: FXPanel(hold: hold)
+        case .looks: EmptyView()
+        }
+    }
+
     /// LOOKS, ADJUST and COLOR. The grade is fixed during a take, as the bake is.
     /// LOG is for judging exposure and takes no grade, so there ADJUST and COLOR merge into LOOKS,
     /// which widens to the whole row, and split out again when any look is chosen.
@@ -1213,7 +1309,7 @@ struct LookPanel: View {
         .frame(height: 32)
         .clipped()
         .animation(reduceMotion ? nil : .spring(duration: 0.35, bounce: 0.15), value: canAdjust)
-        .sensoryFeedback(.selection, trigger: page)
+        .haptic(.selection, trigger: page)
     }
 
     private func pageTab(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
@@ -1396,7 +1492,7 @@ struct GradePanel: View {
                 reset: { model.lookGrade = cleared })
         }
         .disabled(model.isRecording)
-        .sensoryFeedback(.selection, trigger: selected)
+        .haptic(.selection, trigger: selected)
         .onChange(of: selected) { _, _ in commit() }
     }
 
@@ -1621,8 +1717,8 @@ struct ColorPanel: View {
                 })
         }
         .disabled(model.isRecording)
-        .sensoryFeedback(.selection, trigger: band)
-        .sensoryFeedback(.selection, trigger: control)
+        .haptic(.selection, trigger: band)
+        .haptic(.selection, trigger: control)
         .onChange(of: band) { _, _ in commit() }
         .onChange(of: control) { _, _ in commit() }
     }
@@ -1790,7 +1886,7 @@ struct FXPanel: View {
             .frame(maxWidth: .infinity)
         }
         .disabled(model.isRecording)
-        .sensoryFeedback(.selection, trigger: selected)
+        .haptic(.selection, trigger: selected)
         .onChange(of: selected) { _, _ in commit() }
     }
 
@@ -1862,7 +1958,7 @@ final class DetentHaptics {
     }
 
     func moved(from old: Int, to new: Int, neutral: Int) {
-        guard old != new else { return }
+        guard old != new, Haptics.isOn else { return }
         let now = Date()
         // Passing over neutral counts too, so a fast swipe through it still marks it.
         if new == neutral || (old - neutral).signum() * (new - neutral).signum() < 0 {
@@ -1929,7 +2025,7 @@ struct LookCarousel: View {
                 }
             }
         }
-        .sensoryFeedback(.selection, trigger: centered)
+        .haptic(.selection, trigger: centered)
         .onChange(of: centered) { _, value in
             if let value, value != selection { selection = value }
         }
@@ -2035,7 +2131,7 @@ struct FormatWheel<Value: Hashable>: View {
             .frame(height: rowDepth * 3)
         }
         .frame(maxWidth: .infinity)
-        .sensoryFeedback(.selection, trigger: centered)
+        .haptic(.selection, trigger: centered)
         .onChange(of: centered) { _, value in
             if let value, value != selection { selection = value }
         }

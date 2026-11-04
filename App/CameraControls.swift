@@ -459,7 +459,7 @@ struct Dial: View {
                 }
                 .onEnded { _ in dragStart = nil }
         )
-        .sensoryFeedback(.selection, trigger: Int(position.rounded())) { _, _ in
+        .haptic(.selection, trigger: Int(position.rounded())) { _, _ in
             dragStart != nil && !model.isRecording
         }
         .accessibilityElement()

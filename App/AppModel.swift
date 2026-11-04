@@ -557,6 +557,11 @@ final class AppModel: ObservableObject {
 
     var activeToolCount: Int { Tool.allCases.filter(isOn).count }
 
+    /// Haptic ticks across the app, from Settings.
+    @Published var hapticsOn = true { didSet { Haptics.isOn = hapticsOn } }
+    /// Where the scope sits, as held, after the owner drags it to a corner.
+    @Published var scopeCorner = HeldCorner.bottomLeft
+
     /// RGB and YRGB draw their channels in one panel, mixing toward white where they agree.
     @Published var scopeOverlaid = true { didSet { updateScope() } }
 
@@ -653,6 +658,8 @@ final class AppModel: ObservableObject {
         config.lookGrade = lookGrade
         config.lookEffects = lookEffects
         config.scopeOverlaid = scopeOverlaid
+        config.haptics = hapticsOn
+        config.scopeCorner = scopeCorner.rawValue
         config.testServer = testServer
         config.testToken = testToken
         return config
@@ -734,6 +741,8 @@ final class AppModel: ObservableObject {
         lookGrade = saved.lookGrade
         lookEffects = saved.lookEffects
         scopeOverlaid = saved.scopeOverlaid
+        hapticsOn = saved.haptics
+        scopeCorner = HeldCorner(rawValue: saved.scopeCorner) ?? .bottomLeft
     }
 
     /// What a preset keeps. Zebras and false color only ever reach the file through here.

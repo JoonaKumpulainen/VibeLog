@@ -335,6 +335,16 @@ Step 2 of the plan below, batched with the export player's rotation fix. `b75941
 - **Export:** the preview holds still above the settings, which scroll alone, grade editor included. Sideways, the preview sits on the side of the phone's top, from the scene's interface orientation, with the settings beside it.
 - **README:** the camera screen paragraph describes the gauges, gear, LOOK beside FORMAT, scopes, styles, ADJUST, COLOR and FX, the dynamic range and Done.
 
+### Batch 10, after `596b90b`, not built
+
+- **Scope:** a drag carries it and it snaps, with a spring and a light tick, to the picture's corner nearest where it was let go. `HeldCorner` keeps that corner as held, maps it to the screen for each hold, and is saved in `AppConfig.scopeCorner`, so it stays put across turns and launches. A tap still cycles the kind.
+- **Gear:** still awkward to hit on `596b90b`. It's now a 52-point square target with the 26-point gear centred in it and a content shape on the button. Whether that settles it isn't known; if not, the next step is a test on the phone of where taps land.
+- **Haptics:** every SwiftUI tick goes through `haptic(_:trigger:)` in `App/Haptics.swift`, and `DetentHaptics` checks the same flag, so **Haptics** in Settings under Viewfinder, on by default and kept in presets, silences them all. FORMAT now ticks as it opens and closes, and MON does outside takes. Export ticks on look, codec, output, page, grade editor and a finished export, and its sliders tick per hundredth of their range as the LOOK panel's do.
+- **Look panel:** a tap outside keeps the page it was on for next time; Done or Cancel opens it on LOOKS again. LOG always opens on LOOKS. The ADJUST, COLOR and FX pages scroll, through `ViewThatFits`, where a phone has less room under the picture than they need.
+- **Panels reach the picture:** `CameraGeometry.formatGap` is gone, and the Format and look panels' depth is the strip under the picture rounded up to a whole point, so no black line shows. FORMAT now fades in place as the look panel does.
+- **Recording:** starting a take closes the MON tray.
+- **Export:** it opens on the camera's look, or ACES 2.0 when the camera shows LOG or Apple's preview, and on the camera's dynamic range, with no grade or FX: the camera's grade used to come along, which read as a pre-grade. A second tap on the checked style in the grade editor's Looks unchecks it, back to no grade. The form is grouped in every orientation on the same ground as the preview, `systemGroupedBackground`, where sideways it had turned black and the preview's ground didn't match.
+
 ### Plan agreed on 2026-11-04: grading, scopes, effects and HDR
 
 Batches, each built and tested on the phone before the next. Each works the same live in the viewfinder, baked into takes and in export, since all three share the look step.
@@ -441,7 +451,7 @@ For vignette correction, also ask for a short RAW clip's `reference.dng` and `re
 - **Control bar:** ISO, shutter, white balance and focus. Amber means set by the user, an A badge means auto and a lock means frozen for the take.
 - **Tray:** above the control bar, it shows the tools and lenses, a dial or the **MON** tools, so the control bar always stays. During a take the mic meter replaces the lenses.
 - **Dials:** they have **AUTO** and **FINE**. The white balance dial also sets tint, the shutter dial has **180°**, and the focus dial has **PUNCH** and **PEAK**. Shutter angle shows while the shutter dial is open.
-- **Format:** **FORMAT** opens slidable columns for codec, chroma or ProRes profile, size, log curve, aspect and frame rate. **ASPECT** calls 4:3 **OPEN GATE**, and **SIZE** shows the full recorded size for the chosen aspect. It's square-cornered and reaches from the screen's edge to `CameraGeometry.formatGap` short of the picture, with its rows sharing the depth. ProRes has no 4:2:0. Changing frame rate rebuilds the session 0.3 seconds after the column settles, unlike the other columns, and record waits for it.
+- **Format:** **FORMAT** opens slidable columns for codec, chroma or ProRes profile, size, log curve, aspect and frame rate. **ASPECT** calls 4:3 **OPEN GATE**, and **SIZE** shows the full recorded size for the chosen aspect. It's square-cornered and reaches from the screen's edge to the picture, with its rows sharing the depth. ProRes has no 4:2:0. Changing frame rate rebuilds the session 0.3 seconds after the column settles, unlike the other columns, and record waits for it.
 - **Clock:** with the drop count, it takes the two columns right of record in every hold. It shows only the digits in use, at the largest size that fits.
 - **Notices:** short notices cover the tray and control bar for a few seconds, and a tap clears them. A take that ends early leaves an orange card until dismissed.
 - **EV:** an offset stays visible in the tool row, and a tap resets it.

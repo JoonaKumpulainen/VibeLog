@@ -21,8 +21,8 @@ struct ExportView: View {
     @State private var previewFailure: String?
     /// Only the newest look reaches the player, however the builds finish.
     @State private var previewGeneration = 0
-    /// The export's own grade, starting from the LOOK panel's, so changing it here leaves the
-    /// camera's alone.
+    /// The export's own grade, starting neutral, so a take isn't graded until the owner grades it,
+    /// and changing it here leaves the camera's alone.
     @State private var grade = LookGrade()
     @State private var effects = LookEffects()
     @State private var target = BakeTarget.sdr
@@ -62,8 +62,12 @@ struct ExportView: View {
                             settingsSections
                         }
                     }
+                    // Grouped in every orientation, on the same ground as the preview.
+                    .formStyle(.grouped)
+                    .scrollContentBackground(.hidden)
                     if sideways, !previewLeads { preview(sideways) }
                 }
+                .background(Self.ground)
                 .onChange(of: geometry.size) { _, _ in readOrientation() }
                 .onAppear { readOrientation() }
             }
@@ -98,11 +102,11 @@ struct ExportView: View {
         }
         .preferredColorScheme(.dark)
         .onAppear {
-            lutName = model.linkedLUT(curve, gamut) ?? model.selectedLUT
-            if !model.isAvailableLook(lutName) { lutName = "" }
+            // The camera's look, or ACES 2.0 when the camera shows log or Apple's preview.
+            let cameraLook = model.processing.monitor == .rec709 ? model.selectedLUT : BuiltInLook.aces20.name
+            lutName = model.isAvailableLook(cameraLook) || cameraLook.isEmpty ? cameraLook : BuiltInLook.aces20.name
             lutMadeForRec709 = model.processing.lutExpectsRec709
-            grade = model.lookGrade
-            effects = model.lookEffects
+            target = model.bakeTarget
             player.replaceCurrentItem(with: AVPlayerItem(url: take.url))
             refreshPreview()
         }
@@ -112,7 +116,15 @@ struct ExportView: View {
         .onChange(of: grade) { _, _ in refreshSoon() }
         .onChange(of: effects) { _, _ in refreshSoon() }
         .interactiveDismissDisabled(job.progress != nil || editingGrade)
+        .haptic(.selection, trigger: lutName)
+        .haptic(.selection, trigger: codec)
+        .haptic(.selection, trigger: target)
+        .haptic(.selection, trigger: editingGrade)
+        .haptic(.success, trigger: job.message) { _, message in message?.hasPrefix("Saved") == true }
     }
+
+    /// One ground behind the preview and the settings, which keep their own row colour.
+    static let ground = Color(uiColor: .systemGroupedBackground)
 
     /// Whether the phone's top is on the screen's leading side, held sideways.
     @State private var previewLeads = true
@@ -145,7 +157,7 @@ struct ExportView: View {
         }
         .padding(.bottom, 6)
         .frame(maxWidth: sideways ? .infinity : nil, maxHeight: sideways ? .infinity : nil)
-        .background(Color(white: 0.06))
+        .background(Self.ground)
     }
 
     /// The look, codec and export button, which the grade editor replaces while it's open.
@@ -450,6 +462,7 @@ struct ExportGradeEditor: View {
     @Binding var grade: LookGrade
     @Binding var effects: LookEffects
     @State private var tab = Tab.adjust
+    @State private var haptics = DetentHaptics()
     @State private var naming = false
     @State private var styleName = ""
 
@@ -457,12 +470,13 @@ struct ExportGradeEditor: View {
 
     var body: some View {
         Section {
-            Picker("Page", selection: $tab) {
+            Picker("Page", selection: $tab.animation()) {
                 ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets())
+            .haptic(.selection, trigger: tab)
         }
         switch tab {
         case .looks: looks
@@ -502,7 +516,8 @@ struct ExportGradeEditor: View {
             Section("Styles") {
                 ForEach(styles, id: \.name) { style in
                     Button {
-                        grade = style.grade
+                        // A second tap on the checked style takes it off, back to no grade.
+                        grade = grade == style.grade ? LookGrade() : style.grade
                     } label: {
                         HStack {
                             Text(style.name).foregroundStyle(.primary)
@@ -599,10 +614,26 @@ struct ExportGradeEditor: View {
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
-            Slider(value: value, in: range)
-                .tint(tint)
-                .accessibilityLabel(title)
-                .accessibilityValue(text)
+            Slider(value: ticking(value, range: range), in: range) { editing in
+                if editing { haptics.prepare() }
+            }
+            .tint(tint)
+            .accessibilityLabel(title)
+            .accessibilityValue(text)
         }
+    }
+
+    /// The same ticks as the LOOK panel's sliders, one per hundredth of the range's width.
+    private func ticking(_ value: Binding<Double>, range: ClosedRange<Double>) -> Binding<Double> {
+        let step = (range.upperBound - range.lowerBound) / 100
+        return Binding(
+            get: { value.wrappedValue },
+            set: { new in
+                let old = value.wrappedValue
+                value.wrappedValue = new
+                haptics.moved(
+                    from: Int((old / step).rounded()), to: Int((value.wrappedValue / step).rounded()),
+                    neutral: range.contains(0) ? 0 : Int((1 / step).rounded()))
+            })
     }
 }

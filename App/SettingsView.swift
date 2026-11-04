@@ -88,6 +88,7 @@ struct SettingsView: View {
     private static let peakingDetail = "High also marks softer detail."
     private static let guideDetail = "The shape the GUIDE tool marks. It never reaches the file."
     private static let desqueezeDetail = "Viewfinder only. The file stays squeezed."
+    private static let hapticsDetail = "Ticks for dials, sliders, carousels and taps across the app. Off silences every one."
     private static let scopeDetail = "RGB and YRGB draw their channels in one waveform, mixing toward white where they agree. Off sets them side by side."
     private static let offsetDetail = "Baked into the file, in stops."
     private static let bakeDetail = "Records the look into takes instead of log: Monitor's Rec.709 view, an ACES look or a LUT, with its grade, tagged Rec.709 or HDR. It can't be graded back. Switches to HEVC 4:2:0 for small files, or ProRes, and the look is fixed as a take starts. BAKE in the LOOK panel does the same. FX aren't baked yet."
@@ -118,7 +119,8 @@ struct SettingsView: View {
     private static let guideTerms = "frame guide aspect 2.39 1.85 framing " + guideDetail
     private static let desqueezeTerms = "anamorphic desqueeze squeeze lens " + desqueezeDetail
     private static let scopeTerms = "scope scopes waveform parade rgb yrgb overlay blend vectorscope histogram " + scopeDetail
-    private static let viewfinderTerms = [lookTerms, lutTerms, pauseTerms, peakingTerms, guideTerms, desqueezeTerms, scopeTerms].joined(separator: " ")
+    private static let hapticTerms = "haptics haptic vibration vibrate taptic feedback ticks " + hapticsDetail
+    private static let viewfinderTerms = [lookTerms, lutTerms, pauseTerms, peakingTerms, guideTerms, desqueezeTerms, scopeTerms, hapticTerms].joined(separator: " ")
     private static let offsetTerms = "exposure offset stops brightness baked " + offsetDetail
     private static let bakeTerms = "bake baked look lut rec.709 file record prores hevc hdr pq hlg hdr10 dynamic range " + bakeDetail + proResDetail + rangeDetail
     private static let gamutTerms = "color colour space gamut native pair sync s-gamut3 s-gamut3.cine cine s-gamut s-log3 s-log2 arri wide logc3 logc4 awg3 awg4 canon cinema rec.2020 " + pairDetail
@@ -351,6 +353,9 @@ struct SettingsView: View {
             }
             if matches(Self.scopeTerms) {
                 switchRow("Overlay scope channels", Self.scopeDetail, isOn: $model.scopeOverlaid)
+            }
+            if matches(Self.hapticTerms) {
+                switchRow("Haptics", Self.hapticsDetail, isOn: $model.hapticsOn)
             }
             if matches(Self.pauseTerms) {
                 switchRow("Freeze viewfinder during a take", Self.freezeDetail, isOn: $model.processing.pauseMonitorWhileRecording)

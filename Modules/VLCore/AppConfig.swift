@@ -110,6 +110,10 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var lookEffects = LookEffects()
     /// RGB and YRGB scopes overlaid in one panel rather than side by side.
     public var scopeOverlaid = true
+    /// Haptic ticks across the app.
+    public var haptics = true
+    /// The picture's corner the scope sits in, as held: bottomLeft, bottomRight, topLeft or topRight.
+    public var scopeCorner = "bottomLeft"
     /// Styles the owner saved, kept on the device apart from presets, as the presets are.
     public var styles: [LookStyle] = []
     /// Moves to the Efficient path while the phone is hot.
@@ -177,6 +181,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
         lookGrade = read(.lookGrade, defaults.lookGrade)
         lookEffects = read(.lookEffects, defaults.lookEffects)
         scopeOverlaid = read(.scopeOverlaid, defaults.scopeOverlaid)
+        haptics = read(.haptics, defaults.haptics)
+        scopeCorner = read(.scopeCorner, defaults.scopeCorner)
         styles = read(.styles, defaults.styles)
         efficientWhenHot = read(.efficientWhenHot, defaults.efficientWhenHot)
         frameGuide = read(.frameGuide, defaults.frameGuide)
