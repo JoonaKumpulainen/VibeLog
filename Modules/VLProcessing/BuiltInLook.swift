@@ -60,6 +60,24 @@ public enum BuiltInLook: String, CaseIterable, Sendable {
         makeLUT(curve: curve, gamut: gamut, grade: grade, size: size, display: MonitorTransform.display(linearRec2020:))
     }
 
+    /// An imported LUT with a grade under it, as one LUT on log, so the GPU still does one lookup.
+    /// Each grid point is decoded, graded in scene-linear and encoded back to the curve, then,
+    /// through the Rec.709 view if the LUT was made for it, looked up in the imported LUT. Grading
+    /// past the top of the curve's range clips there, where ACES would roll it off.
+    public static func graded(
+        _ cube: CubeLUT, expectsRec709: Bool, curve: LogCurve, gamut: Gamut, grade: LookGrade, size: Int = 65
+    ) -> CubeLUT {
+        let fromRec2020 = gamut.fromRec2020
+        return makeLUT(curve: curve, gamut: gamut, grade: grade, size: size) { linear in
+            let native = fromRec2020 * linear
+            func encode(_ value: Double) -> Double { min(max(curve.encode(max(value, 0)), 0), 1) }
+            let log = SIMD3(encode(native.x), encode(native.y), encode(native.z))
+            let input = expectsRec709 ? MonitorTransform.display(log: log, curve: curve, gamut: gamut) : log
+            let out = cube.sample(SIMD3<Float>(Float(input.x), Float(input.y), Float(input.z)))
+            return SIMD3(Double(out.x), Double(out.y), Double(out.z))
+        }
+    }
+
     private static func makeLUT(
         curve: LogCurve, gamut: Gamut, grade: LookGrade, size: Int,
         display: @escaping (SIMD3<Double>) -> SIMD3<Double>

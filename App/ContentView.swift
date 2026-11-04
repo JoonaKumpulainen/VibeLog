@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import VLCapture
 import VLCore
 import VLProcessing
@@ -880,6 +881,7 @@ struct LookPanel: View {
     @State private var bake = false
     @State private var ready = false
     @State private var adjusting = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Not a file name, since those end in .cube.
     static let logChoice = "log"
@@ -931,14 +933,23 @@ struct LookPanel: View {
     }
 
     /// LOOKS and ADJUST. The grade is fixed during a take, as the bake is.
+    /// LOG is for judging exposure and takes no grade, so there ADJUST merges into LOOKS, which
+    /// widens to the whole row, and splits out again when any look is chosen.
+    private var canAdjust: Bool { choice != Self.logChoice }
+
     private var pageTabs: some View {
         HStack(spacing: 0) {
             pageTab("LOOKS", on: !adjusting) { adjusting = false }
-            pageTab("ADJUST", on: adjusting) { adjusting = true }
-                .disabled(model.isRecording)
-                .opacity(model.isRecording ? 0.4 : 1)
+            if canAdjust {
+                pageTab("ADJUST", on: adjusting) { adjusting = true }
+                    .disabled(model.isRecording)
+                    .opacity(model.isRecording ? 0.4 : 1)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
         .frame(height: 34)
+        .clipped()
+        .animation(reduceMotion ? nil : .spring(duration: 0.35, bounce: 0.15), value: canAdjust)
         .sensoryFeedback(.selection, trigger: adjusting)
     }
 
@@ -958,7 +969,7 @@ struct LookPanel: View {
 
     static func label(_ option: String) -> String {
         if option == logChoice { return "LOG" }
-        if option.isEmpty { return "REC.709" }
+        if option.isEmpty { return "MONITOR" }
         if BuiltInLook.named(option) != nil { return option }
         return (option as NSString).deletingPathExtension
     }
@@ -1049,6 +1060,12 @@ enum GradeControl: CaseIterable, Identifiable {
         return (value / step).rounded() * step
     }
 
+    /// The value as the cell shows it, so a haptic tick lands on each number shown: tenths of a
+    /// stop for exposure, points for the others.
+    func shownStep(_ value: Double) -> Int {
+        Int((value * (self == .exposure ? 10 : 100)).rounded())
+    }
+
     func text(_ value: Double) -> String {
         switch self {
         case .exposure: return String(format: "%+.1f", value)
@@ -1060,11 +1077,17 @@ enum GradeControl: CaseIterable, Identifiable {
 
 /// The grade, one slider at a time: tap a value to choose it and drag the slider below, and tap
 /// the chosen value again to put it back. Only the text turns with the hold: a turned slider
-/// would slide the wrong way under a finger.
+/// would slide the wrong way under a finger. While a slider moves, the grade stays in this view
+/// and only a quick preview reaches the viewfinder, so nothing else on the screen redraws; it's
+/// kept when the finger lifts.
 struct GradePanel: View {
     @EnvironmentObject private var model: AppModel
     let hold: Hold
     @State private var selected = GradeControl.exposure
+    @State private var draft: LookGrade?
+    @State private var haptics = DetentHaptics()
+
+    private var shown: LookGrade { draft ?? model.lookGrade }
 
     var body: some View {
         VStack(spacing: 4) {
@@ -1073,34 +1096,41 @@ struct GradePanel: View {
                 resetCell
             }
             .frame(height: 44)
-            if model.gradeApplies {
-                Slider(value: binding(selected), in: selected.range)
-                    .tint(Tokens.held)
-                    .padding(.horizontal, 8)
-                    .accessibilityLabel(selected.name)
-                    .accessibilityValue(selected.text(model.lookGrade[keyPath: selected.keyPath]))
-            } else {
-                Text("LUTS KEEP THEIR LOOK")
-                    .font(Tokens.labelFont)
-                    .foregroundStyle(Tokens.label)
-                    .fixedSize()
-                    .turnedToHold()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Slider(value: binding(selected), in: selected.range) { editing in
+                if editing { haptics.prepare() }
+                if !editing, let draft {
+                    model.commitGrade(draft)
+                    self.draft = nil
+                }
             }
+            .tint(Tokens.held)
+            .padding(.horizontal, 8)
+            .accessibilityLabel(selected.name)
+            .accessibilityValue(selected.text(shown[keyPath: selected.keyPath]))
             Spacer(minLength: 0)
         }
-        .disabled(!model.gradeApplies || model.isRecording)
+        .disabled(model.isRecording)
         .sensoryFeedback(.selection, trigger: selected)
     }
 
     private func binding(_ control: GradeControl) -> Binding<Double> {
         Binding(
-            get: { model.lookGrade[keyPath: control.keyPath] },
-            set: { model.lookGrade[keyPath: control.keyPath] = control.snapped($0) })
+            get: { shown[keyPath: control.keyPath] },
+            set: { value in
+                var grade = shown
+                grade[keyPath: control.keyPath] = control.snapped(value)
+                guard grade != shown else { return }
+                haptics.moved(
+                    from: control.shownStep(shown[keyPath: control.keyPath]),
+                    to: control.shownStep(grade[keyPath: control.keyPath]),
+                    neutral: control.shownStep(LookGrade()[keyPath: control.keyPath]))
+                draft = grade
+                model.previewGrade(grade)
+            })
     }
 
     private func cell(_ control: GradeControl) -> some View {
-        let value = model.lookGrade[keyPath: control.keyPath]
+        let value = shown[keyPath: control.keyPath]
         let changed = value != LookGrade()[keyPath: control.keyPath]
         let isOn = control == selected
         return Button {
@@ -1134,15 +1164,44 @@ struct GradePanel: View {
         Button { model.lookGrade = LookGrade() } label: {
             Text("RESET")
                 .font(Tokens.labelFont)
-                .foregroundStyle(model.lookGrade.isNeutral ? Tokens.label : Tokens.held)
+                .foregroundStyle(shown.isNeutral ? Tokens.label : Tokens.held)
                 .fixedSize()
                 .turnedToHold()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(model.lookGrade.isNeutral)
+        .disabled(shown.isNeutral)
         .accessibilityLabel("Reset the grade")
+    }
+}
+
+/// A tick for each number a slider passes, at most one every 35 ms, so a slow drag ticks on
+/// every step and a fast one feels like a ratchet rather than a buzz, which is what the Taptic
+/// Engine makes of taps closer together. Neutral always gets its firmer tick.
+final class DetentHaptics {
+    private let tick = UISelectionFeedbackGenerator()
+    private let neutralTick = UIImpactFeedbackGenerator(style: .medium)
+    private var last = Date.distantPast
+    private static let gap: TimeInterval = 0.035
+
+    func prepare() {
+        tick.prepare()
+        neutralTick.prepare()
+    }
+
+    func moved(from old: Int, to new: Int, neutral: Int) {
+        guard old != new else { return }
+        let now = Date()
+        // Passing over neutral counts too, so a fast swipe through it still marks it.
+        if new == neutral || (old - neutral).signum() * (new - neutral).signum() < 0 {
+            neutralTick.impactOccurred()
+            last = now
+        } else if now.timeIntervalSince(last) >= Self.gap {
+            tick.selectionChanged()
+            last = now
+        }
+        tick.prepare()
     }
 }
 

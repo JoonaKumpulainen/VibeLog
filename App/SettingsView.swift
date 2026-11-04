@@ -285,10 +285,10 @@ struct SettingsView: View {
             }
             if matches(Self.lutTerms) {
                 Picker(selection: $model.selectedLUT) {
-                    Text("None").tag("")
+                    Text("Monitor (Rec.709)").tag("")
                     ForEach(model.lookNames, id: \.self) { Text($0).tag($0) }
                 } label: {
-                    explained("LUT", "Replaces Rec.709 in the viewfinder, and in the file when the look is baked.")
+                    explained("LUT", "Monitor is VibeLog's Rec.709 view for judging exposure, which holds middle gray. A look replaces it in the viewfinder, and in the file when the look is baked.")
                 }
                 Button("Import .cube LUT") { importingLUT = true }
                 // Built-in looks always work on log.

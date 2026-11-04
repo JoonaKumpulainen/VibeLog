@@ -73,7 +73,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
     /// Stops the stream after this long with no touch. Zero never does.
     public var idlePauseMinutes = 2.0
     public var monitor = "rec709"
-    public var monitorLUT = ""
+    /// ACES 2.0 for a fresh start. Empty is the Monitor view, VibeLog's own Rec.709.
+    public var monitorLUT = "ACES 2.0"
     public var lutExpectsRec709 = false
     public var monitorOffWhileRecording = false
     public var telemetry = true

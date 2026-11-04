@@ -1,4 +1,5 @@
 import Foundation
+import simd
 
 /// A 3D LUT from a .cube file, used for monitoring only.
 public struct CubeLUT: Sendable {
@@ -76,6 +77,25 @@ public struct CubeLUT: Sendable {
         domainMin = SIMD3(repeating: 0)
         domainMax = SIMD3(repeating: 1)
         self.samples = samples
+    }
+
+    /// The LUT at a point, interpolated between the eight grid points around it, as the GPU's
+    /// texture lookup does. For building a LUT from this one on the CPU.
+    public func sample(_ input: SIMD3<Float>) -> SIMD3<Float> {
+        let last = Float(size - 1)
+        let unit = simd_clamp((input - domainMin) / (domainMax - domainMin), SIMD3(repeating: 0), SIMD3(repeating: 1))
+        let position = unit * last
+        let low = SIMD3<Int>(Int(position.x), Int(position.y), Int(position.z))
+        let high = pointwiseMin(low &+ 1, SIMD3(repeating: size - 1))
+        let t = position - SIMD3<Float>(Float(low.x), Float(low.y), Float(low.z))
+        func at(_ r: Int, _ g: Int, _ b: Int) -> SIMD3<Float> { samples[(b * size + g) * size + r] }
+        let c00 = simd_mix(at(low.x, low.y, low.z), at(high.x, low.y, low.z), SIMD3(repeating: t.x))
+        let c10 = simd_mix(at(low.x, high.y, low.z), at(high.x, high.y, low.z), SIMD3(repeating: t.x))
+        let c01 = simd_mix(at(low.x, low.y, high.z), at(high.x, low.y, high.z), SIMD3(repeating: t.x))
+        let c11 = simd_mix(at(low.x, high.y, high.z), at(high.x, high.y, high.z), SIMD3(repeating: t.x))
+        let c0 = simd_mix(c00, c10, SIMD3(repeating: t.y))
+        let c1 = simd_mix(c01, c11, SIMD3(repeating: t.y))
+        return simd_mix(c0, c1, SIMD3(repeating: t.z))
     }
 
     /// RGBA samples for a cubic rgba16Unorm texture.

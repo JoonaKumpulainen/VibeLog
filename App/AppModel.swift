@@ -128,23 +128,25 @@ final class AppModel: ObservableObject {
         let graded = gradeApplies && !lookGrade.isNeutral ? ", graded (\(lookGrade.label))" : ""
         guard !selectedLUT.isEmpty else { return "Rec.709 view\(graded), baked in" }
         if BuiltInLook.named(selectedLUT) != nil { return "\(selectedLUT) Rec.709\(graded), baked in" }
-        return "\(selectedLUT), baked in" + (processing.lutExpectsRec709 ? " after the Rec.709 view" : " on log")
+        return "\(selectedLUT)\(graded), baked in" + (processing.lutExpectsRec709 ? " after the Rec.709 view" : " on log")
     }
 
-    /// The grade under the built-in looks and the Rec.709 view, kept in presets. An imported LUT
-    /// is someone else's look, so it isn't graded.
+    /// The grade under the look, any look but LOG, kept in presets.
     @Published var lookGrade = LookGrade() {
         didSet { if lookGrade != oldValue { buildLook() } }
     }
-    /// Whether the chosen look takes the grade.
-    var gradeApplies: Bool { selectedLUT.isEmpty || BuiltInLook.named(selectedLUT) != nil }
+    /// Whether the viewfinder shows a look that takes the grade. LOG is for judging exposure.
+    var gradeApplies: Bool { processing.monitor == .rec709 }
 
     @Published var processing = ProcessingSettings() {
         didSet {
             pipeline?.update(processing)
             if processing.curve != oldValue.curve || processing.gamut != oldValue.gamut {
                 if !adopting { followPairLUT(from: Self.lutKey(oldValue.curve, oldValue.gamut)) }
-                if gradeApplies { buildLook() }
+                buildLook()
+            } else if processing.lutExpectsRec709 != oldValue.lutExpectsRec709, !lookGrade.isNeutral {
+                // A graded imported LUT has the Rec.709 view built into it, or not.
+                buildLook()
             }
         }
     }
@@ -167,13 +169,14 @@ final class AppModel: ObservableObject {
             movePunch(to: punchCenter)
         }
     }
-    @Published var lutNames: [String] = []
+    @Published var lutNames: [String] = [] {
+        // A LUT imported again under the same name must be read again.
+        didSet { lookQueue.async { [weak self] in self?.importedCubes = [:] } }
+    }
     /// The built-in ACES looks, then every imported LUT.
     var lookNames: [String] { BuiltInLook.allCases.map(\.name) + lutNames }
     /// Built-in looks for each curve and gamut, made once a session.
     private var builtInLUTs: [String: CubeLUT] = [:]
-    /// One look is built at a time. A change meanwhile builds again once it's done.
-    private var lookBuilding = false
 
     func isAvailableLook(_ name: String) -> Bool { BuiltInLook.named(name) != nil || lutNames.contains(name) }
     /// Empty selects the built-in Rec.709 view.
@@ -899,62 +902,98 @@ final class AppModel: ObservableObject {
         processing.restore(curve: pair.0, gamut: pair.1)
     }
 
-    private func loadSelectedLUT() {
-        let name = selectedLUT
-        if gradeApplies {
-            buildLook()
-            return
-        }
-        DispatchQueue.global(qos: .userInitiated).async { [pipeline] in
-            do {
-                let url = Storage.luts.appendingPathComponent(name)
-                let lut = try CubeLUT(text: String(contentsOf: url, encoding: .utf8))
-                pipeline?.setCustomLUT(lut)
-            } catch {
-                Log.shared.error("Cannot load LUT \(name): \(error)")
-            }
-        }
+    private func loadSelectedLUT() { buildLook() }
+
+    /// Every look reaches the pipeline through this one queue, newest request only: a request
+    /// that's been overtaken by the time its turn comes is skipped, so a fast drag builds only
+    /// the latest grade, and building and uploading the LUT never touch the main thread.
+    private let lookQueue = DispatchQueue(label: "VibeLog.look", qos: .userInitiated)
+    private let lookLock = NSLock()
+    private var lookRequest = 0
+
+    private func nextLookRequest() -> Int {
+        lookLock.lock()
+        defer { lookLock.unlock() }
+        lookRequest += 1
+        return lookRequest
     }
 
-    /// A built-in look, or the Rec.709 view with a grade, is made as a LUT on log for the curve,
-    /// gamut and grade, and remade when any of them changes. The plain Rec.709 view needs no LUT.
-    /// Ungraded looks are kept for the session; graded ones change too often while a slider moves.
-    private func buildLook() {
+    private func isCurrentLook(_ request: Int) -> Bool {
+        lookLock.lock()
+        defer { lookLock.unlock() }
+        return request == lookRequest
+    }
+
+    /// Shows a grade on the viewfinder while a slider moves, from a 33-point LUT that builds in a
+    /// fraction of the full one's time, without publishing anything. Committing the grade builds
+    /// the full LUT.
+    func previewGrade(_ grade: LookGrade) {
+        guard gradeApplies, !isRecording else { return }
+        buildLook(grade: grade, size: 33)
+    }
+
+    /// Keeps a grade set by a slider, and replaces its preview with the full LUT even when the
+    /// grade ends where it started.
+    func commitGrade(_ grade: LookGrade) {
+        if lookGrade == grade { buildLook() } else { lookGrade = grade }
+    }
+
+    /// Imported LUTs as read from their files, touched only on `lookQueue`.
+    private var importedCubes: [String: CubeLUT] = [:]
+
+    /// Every look is made as a LUT on log for the curve, gamut and grade, and remade when any of
+    /// them changes: a built-in look graded before its transform, the Rec.709 view the same way,
+    /// and an imported LUT with the grade folded in front of it. Ungraded, the Rec.709 view needs
+    /// no LUT and an imported one goes as read. Ungraded built-in looks are kept for the session;
+    /// graded ones change too often while a slider moves.
+    private func buildLook(grade override: LookGrade? = nil, size: Int = 65) {
         let name = selectedLUT
         let look = BuiltInLook.named(name)
-        let grade = lookGrade
-        guard look != nil || (name.isEmpty && !grade.isNeutral) else {
-            if name.isEmpty { pipeline?.setCustomLUT(nil) }
-            return
-        }
+        let grade = override ?? lookGrade
+        let request = nextLookRequest()
+        let pipeline = self.pipeline
         let curve = processing.curve
         let gamut = processing.gamut
-        let key = "\(look?.name ?? "Rec.709") · \(curve.label) · \(gamut.label)"
-        if grade.isNeutral, let lut = builtInLUTs[key] {
-            pipeline?.setCustomLUT(lut, expectsRec709: false)
-            return
-        }
-        guard !lookBuilding else { return }
-        lookBuilding = true
-        DispatchQueue.global(qos: .userInitiated).async { [weak self, pipeline] in
-            let start = Date()
-            let lut = look?.lut(curve: curve, gamut: gamut, grade: grade)
-                ?? BuiltInLook.rec709LUT(curve: curve, gamut: gamut, grade: grade)
-            if grade.isNeutral {
-                Log.shared.info("Built \(key) in \(String(format: "%.2f", Date().timeIntervalSince(start))) s")
-            }
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.lookBuilding = false
-                if grade.isNeutral { self.builtInLUTs[key] = lut }
-                // The choice may have moved on while this was made, so it's built again for that.
-                if self.selectedLUT == name, self.processing.curve == curve, self.processing.gamut == gamut,
-                    self.lookGrade == grade {
-                    pipeline?.setCustomLUT(lut, expectsRec709: false)
-                } else if self.gradeApplies {
-                    self.buildLook()
+        let madeForRec709 = processing.lutExpectsRec709
+        if look == nil, !name.isEmpty {
+            lookQueue.async { [weak self] in
+                guard let self, self.isCurrentLook(request) else { return }
+                do {
+                    let cube = try self.importedCubes[name] ?? CubeLUT(
+                        text: String(contentsOf: Storage.luts.appendingPathComponent(name), encoding: .utf8))
+                    self.importedCubes[name] = cube
+                    guard self.isCurrentLook(request) else { return }
+                    if grade.isNeutral {
+                        pipeline?.setCustomLUT(cube)
+                    } else {
+                        let lut = BuiltInLook.graded(
+                            cube, expectsRec709: madeForRec709, curve: curve, gamut: gamut, grade: grade, size: size)
+                        if self.isCurrentLook(request) { pipeline?.setCustomLUT(lut, expectsRec709: false) }
+                    }
+                } catch {
+                    Log.shared.error("Cannot load LUT \(name): \(error)")
                 }
             }
+            return
+        }
+        guard look != nil || !grade.isNeutral else {
+            lookQueue.async { [weak self] in
+                if self?.isCurrentLook(request) == true { pipeline?.setCustomLUT(nil) }
+            }
+            return
+        }
+        let key = "\(look?.name ?? "Rec.709") · \(curve.label) · \(gamut.label)"
+        let cached = grade.isNeutral && size == 65 ? builtInLUTs[key] : nil
+        lookQueue.async { [weak self] in
+            guard let self, self.isCurrentLook(request) else { return }
+            let start = Date()
+            let lut = cached ?? look?.lut(curve: curve, gamut: gamut, grade: grade, size: size)
+                ?? BuiltInLook.rec709LUT(curve: curve, gamut: gamut, grade: grade, size: size)
+            if cached == nil, grade.isNeutral, size == 65 {
+                Log.shared.info("Built \(key) in \(String(format: "%.2f", Date().timeIntervalSince(start))) s")
+                DispatchQueue.main.async { self.builtInLUTs[key] = lut }
+            }
+            if self.isCurrentLook(request) { pipeline?.setCustomLUT(lut, expectsRec709: false) }
         }
     }
 

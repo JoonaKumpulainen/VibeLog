@@ -59,7 +59,7 @@ struct ExportView: View {
                 }
                 Section("Look") {
                     Picker("LUT", selection: $lutName) {
-                        Text("Rec.709 view").tag("")
+                        Text("Monitor (Rec.709)").tag("")
                         ForEach(model.lookNames, id: \.self) { Text($0).tag($0) }
                     }
                     if !lutName.isEmpty, BuiltInLook.named(lutName) == nil {
@@ -139,14 +139,18 @@ struct ExportView: View {
             let url = Storage.luts.appendingPathComponent(name)
             lut = (try? String(contentsOf: url, encoding: .utf8)).flatMap { try? CubeLUT(text: $0) }
         }
+        if let cube = lut, !grade.isNeutral {
+            return LookExporter.Look(
+                curve: curve, gamut: gamut,
+                lut: BuiltInLook.graded(cube, expectsRec709: madeForRec709, curve: curve, gamut: gamut, grade: grade),
+                lutExpectsRec709: false, sourceRec709: sourceRec709)
+        }
         return LookExporter.Look(
             curve: curve, gamut: gamut, lut: lut, lutExpectsRec709: madeForRec709, sourceRec709: sourceRec709)
     }
 
-    /// The grade set in the look panel goes under the built-in looks and the Rec.709 view here too.
-    private var grade: LookGrade {
-        lutName.isEmpty || BuiltInLook.named(lutName) != nil ? model.lookGrade : LookGrade()
-    }
+    /// The grade set in the look panel goes under the look here too.
+    private var grade: LookGrade { model.lookGrade }
 
     private var lookInputs: (String, LogCurve, Gamut, Bool, Bool, LookGrade) {
         (lutName, curve, gamut, lutMadeForRec709, take.info?.metadata["fileTag"] == FileTag.rec709.label, grade)
@@ -191,7 +195,7 @@ struct ExportView: View {
         let lutLabel = lutName.isEmpty
             ? "Rec.709 view\(graded), baked in"
             : BuiltInLook.named(lutName) != nil ? "\(lutName) Rec.709\(graded), baked in"
-            : "\(lutName), baked in" + (lutMadeForRec709 ? " after the Rec.709 view" : " on log")
+            : "\(lutName)\(graded), baked in" + (lutMadeForRec709 ? " after the Rec.709 view" : " on log")
         let take = take
         Task.detached(priority: .userInitiated) {
             let look = Self.makeLook(

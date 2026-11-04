@@ -2059,6 +2059,43 @@ final class LookGradeTests: XCTestCase {
         XCTAssertLessThan(tinted.y, tinted.z)
     }
 
+    /// An identity cube over the unit range, red fastest.
+    private func identityCube(_ size: Int) -> CubeLUT {
+        var samples: [SIMD3<Float>] = []
+        for b in 0..<size { for g in 0..<size { for r in 0..<size {
+            samples.append(SIMD3(Float(r), Float(g), Float(b)) / Float(size - 1))
+        } } }
+        return CubeLUT(size: size, samples: samples)
+    }
+
+    func testCubeSamplesBetweenGridPoints() {
+        let cube = identityCube(5)
+        let point = SIMD3<Float>(0.3, 0.55, 0.9)
+        let got = cube.sample(point)
+        XCTAssertEqual(got.x, point.x, accuracy: 1e-6)
+        XCTAssertEqual(got.y, point.y, accuracy: 1e-6)
+        XCTAssertEqual(got.z, point.z, accuracy: 1e-6)
+        XCTAssertEqual(cube.sample(SIMD3(repeating: 2)), SIMD3(repeating: 1))
+    }
+
+    /// A grade folded in front of an imported LUT: with an identity cube, exposure +1 is exactly
+    /// a stop up on the log curve, so the round trip from log to linear and back holds.
+    func testGradeFoldsInFrontOfAnImportedLUT() {
+        var grade = LookGrade()
+        grade.exposure = 1
+        let size = 9
+        let lut = BuiltInLook.graded(
+            identityCube(size), expectsRec709: false, curve: .sLog3, gamut: .sGamut3Cine, grade: grade, size: size)
+        for (r, g, b) in [(4, 4, 4), (2, 5, 3), (6, 1, 4)] {
+            let log = SIMD3(Double(r), Double(g), Double(b)) / Double(size - 1)
+            let got = lut.samples[(b * size + g) * size + r]
+            for channel in 0..<3 {
+                let up = LogCurve.sLog3.encode(LogCurve.sLog3.decode(log[channel]) * 2)
+                XCTAssertEqual(Double(got[channel]), min(up, 1), accuracy: 1e-4)
+            }
+        }
+    }
+
     /// The Rec.709 view's LUT matches the per-pixel view, since a grade there swaps one for the other.
     func testGradedRec709MatchesTheView() {
         var grade = LookGrade()
