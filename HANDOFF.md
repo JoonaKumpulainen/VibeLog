@@ -322,7 +322,9 @@ Step 2 of the plan below, batched with the export player's rotation fix. `b75941
 - **Not yet:** an HDR viewfinder through the screen's extended range; MaxCLL and MaxFALL measured in export; ACES 1.3 HDR.
 - **Tests:** PQ at 0, 100, 1000 and 10000 nits, HLG at black and peak, the HDR look's middle gray in PQ 0.25 to 0.5, never past 1000 nits and never darker for brighter input, the HDR bake's Rec.2020 matrix, and the 24-byte mastering display.
 
-### Batch 9, fixes from the phone on `f53121e`, not built
+### Batch 9, fixes from the phone on `f53121e`, built as `596b90b`
+
+`596b90b` passed CI with 150 tests and the usual one skip, including `testHDRFilesWrite`, so PQ and HLG HEVC both write on the simulator; untested on the phone. `043ca32` before it failed only `testBloomSpreadsFromALight`, whose light was a quarter of one eighth-size texel.
 
 - **Owner's checks on `f53121e`:** the look panel works well. HDR PQ bakes work. HDR HLG stops a take at once: the phone's log shows `-11800`, underlying `-12902` (`kVTParameterErr`), after 1 frame, at 22:29:59 and 22:30:00, where PQ takes wrote, as one did again over the link. The likely cause is the HEVC encoder making its own HDR metadata for HLG, so HLG HEVC now sets `kVTCompressionPropertyKey_HDRMetadataInsertionMode` to none; that's unproven until an HLG take records. `testHDRFilesWrite` writes PQ and HLG HEVC on the simulator and reads back each transfer, skipping with the encoder's error if one fails. The link can set `bakeTarget hlg` to test it. Halation, bloom and grain showed little or nothing. The gear was hard to tap.
 - **Gear:** it sat in the top right corner, where iOS holds taps back to see whether a swipe opens Control Center. The camera screen now defers top-edge system gestures, `defersSystemGestures(on: .top)`, and the gear sits beside the gauges, 24 points in from the edge as the format lines are on the left.
