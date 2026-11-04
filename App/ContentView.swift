@@ -57,6 +57,7 @@ struct CameraScreen: View {
                 .frame(width: screen.width, height: screen.height)
             }
             .environment(\.heldTurn, hold.turn)
+            .onChange(of: hold.hold, initial: true) { _, held in model.scopeTurns = Int((held.angle / 90).rounded()) }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: hold.turn)
             .frame(width: screen.width, height: screen.height)
             .ignoresSafeArea()
@@ -125,6 +126,12 @@ struct CameraScreen: View {
         // The Metal monitor punches in by itself, with real pixels.
         .scaleEffect(model.isOn(.punchIn) && !model.monitorIsProcessed ? 3 : 1)
         .frame(width: size.width, height: size.height)
+        .overlay(alignment: .bottomLeading) {
+            if model.isOn(.scope), model.monitorIsProcessed {
+                ScopeOverlay()
+                    .padding(8)
+            }
+        }
         .clipped()
         .overlay {
             LiveFrameGuides(
@@ -868,6 +875,57 @@ struct StatGauges: View {
         default: return .bad
         }
     }
+}
+
+/// The scope in a corner of the picture, drawn on its own layer. A tap moves to the next kind.
+struct ScopeOverlay: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        Button {
+            model.scopeKind = model.scopeKind.next
+        } label: {
+            ZStack(alignment: .topLeading) {
+                LayerHost(layer: model.scopeLayer)
+                Text(model.scopeKind.label)
+                    .font(Tokens.markFont)
+                    .foregroundStyle(Tokens.label)
+                    .padding(3)
+            }
+            .frame(width: 168, height: 100)
+            .clipShape(RoundedRectangle(cornerRadius: Tokens.panelRadius))
+            .turnedToHold()
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .sensoryFeedback(.selection, trigger: model.scopeKind)
+        .accessibilityLabel("Scope, \(model.scopeKind.label)")
+        .accessibilityHint("Shows the next scope")
+    }
+}
+
+/// Shows a layer that something off the main thread draws into.
+struct LayerHost: UIViewRepresentable {
+    let layer: CALayer
+
+    final class HostView: UIView {
+        var hosted: CALayer?
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            hosted?.frame = bounds
+        }
+    }
+
+    func makeUIView(context: Context) -> HostView {
+        let view = HostView()
+        view.isUserInteractionEnabled = false
+        view.layer.addSublayer(layer)
+        view.hosted = layer
+        return view
+    }
+
+    func updateUIView(_ view: HostView, context: Context) {}
 }
 
 /// A message over the tray and control bar, large enough to read at arm's length. Tapping it

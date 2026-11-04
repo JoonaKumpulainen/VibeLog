@@ -184,6 +184,7 @@ final class AppModel: ObservableObject {
     @Published var processing = ProcessingSettings() {
         didSet {
             pipeline?.update(processing)
+            if processing.monitor != oldValue.monitor { updateScope() }
             if processing.curve != oldValue.curve || processing.gamut != oldValue.gamut {
                 if !adopting { followPairLUT(from: Self.lutKey(oldValue.curve, oldValue.gamut)) }
                 buildLook()
@@ -520,6 +521,33 @@ final class AppModel: ObservableObject {
 
     var activeToolCount: Int { Tool.allCases.filter(isOn).count }
 
+    /// The scope the SCOPE tool shows; a tap on it moves to the next.
+    @Published var scopeKind = ScopeKind.waveform { didSet { updateScope() } }
+    /// Drawn on its own layer from the scope's queue, as the mic bar is, so the main thread
+    /// never draws a scope.
+    let scopeLayer: CALayer = {
+        let layer = CALayer()
+        layer.contentsGravity = .resize
+        layer.magnificationFilter = .linear
+        return layer
+    }()
+    /// The hold, in clockwise quarter turns from portrait, so a waveform runs across the picture as held.
+    var scopeTurns = 0 {
+        didSet { if scopeTurns != oldValue { updateScope() } }
+    }
+
+    func updateScope() {
+        let on = isOn(.scope) && processing.monitor != .isp
+        let layer = scopeLayer
+        pipeline?.showScope(on ? scopeKind : nil, turns: scopeTurns) { image in
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            layer.contents = image
+            CATransaction.commit()
+        }
+        if !on { layer.contents = nil }
+    }
+
     func isOn(_ tool: Tool) -> Bool {
         switch tool {
         case .zebras: return processing.overlay == .zebras
@@ -535,6 +563,7 @@ final class AppModel: ObservableObject {
         default:
             if activeTools.contains(tool) { activeTools.remove(tool) } else { activeTools.insert(tool) }
         }
+        if tool == .scope { updateScope() }
     }
 
     private var config: AppConfig {
@@ -647,6 +676,7 @@ final class AppModel: ObservableObject {
         mainsHz = saved.mainsHz
         toolbar = saved.toolbar.compactMap(Tool.init(rawValue:))
         activeTools = Set(saved.activeTools.compactMap(Tool.init(rawValue:)))
+        updateScope()
         processing.overlay = ExposureOverlay(rawValue: UInt32(saved.overlay)) ?? .none
         processing.peakingSensitivity = PeakingSensitivity(rawValue: saved.peakingSensitivity) ?? .low
         fixedFrameTime = saved.fixedFrameTime

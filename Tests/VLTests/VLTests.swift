@@ -2218,3 +2218,22 @@ final class LookStyleTests: XCTestCase {
         XCTAssertEqual(read.styles, config.styles)
     }
 }
+
+/// The scope's kernel loads, and the SCOPE tool cycles through every kind and back.
+final class ScopeTests: XCTestCase {
+    func testScopeMeterLoads() throws {
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        XCTAssertNotNil(ScopeMeter(device: device))
+    }
+
+    func testScopeKindsCycle() {
+        var kind = ScopeKind.waveform
+        var seen: [ScopeKind] = []
+        for _ in ScopeKind.allCases {
+            seen.append(kind)
+            kind = kind.next
+        }
+        XCTAssertEqual(kind, .waveform)
+        XCTAssertEqual(Set(seen.map(\.rawValue)).count, ScopeKind.allCases.count)
+    }
+}

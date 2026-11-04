@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Monitoring tools, switched on from the monitor panel.
 enum Tool: String, CaseIterable, Identifiable {
-    case zebras, falseColor, peaking, grid, center, level, frameGuide, punchIn
+    case zebras, falseColor, peaking, grid, center, level, frameGuide, punchIn, scope
 
     var id: String { rawValue }
 
@@ -16,6 +16,7 @@ enum Tool: String, CaseIterable, Identifiable {
         case .level: return "Level"
         case .frameGuide: return "Frame guide"
         case .punchIn: return "Punch-in"
+        case .scope: return "Scope"
         }
     }
 
@@ -29,6 +30,7 @@ enum Tool: String, CaseIterable, Identifiable {
         case .level: return "LEVEL"
         case .frameGuide: return "GUIDE"
         case .punchIn: return "PUNCH"
+        case .scope: return "SCOPE"
         }
     }
 
@@ -42,6 +44,7 @@ enum Tool: String, CaseIterable, Identifiable {
         case .level: return "level"
         case .frameGuide: return "rectangle.dashed"
         case .punchIn: return "plus.magnifyingglass"
+        case .scope: return "waveform.path.ecg"
         }
     }
 }

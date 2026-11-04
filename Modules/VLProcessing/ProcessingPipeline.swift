@@ -403,6 +403,8 @@ public final class ProcessingPipeline: NSObject {
     private var monitorScale: Float = 1
     private var monitorPeaking = false
     private var pacer = MonitorPacer()
+    private var scopes: ScopeMeter?
+    private var scopeOn = false
     private var loggedFailure = false
 
     public init?(pixelFormat: MTLPixelFormat = .bgra8Unorm) {
@@ -484,6 +486,21 @@ public final class ProcessingPipeline: NSObject {
         lock.lock()
         customLUT = custom
         lock.unlock()
+    }
+
+    /// Turns the scope on, measuring what the viewfinder shows about ten times a second and handing
+    /// each drawing to `deliver` on its own queue, or off with nil. `turns` is the hold, in
+    /// clockwise quarter turns from portrait, so a waveform runs across the picture as held.
+    public func showScope(_ kind: ScopeKind?, turns: Int, deliver: @escaping (CGImage) -> Void) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let kind else {
+            scopeOn = false
+            return
+        }
+        if scopes == nil { scopes = ScopeMeter(device: device) }
+        scopes?.configure(kind: kind, turns: turns, deliver: deliver)
+        scopeOn = scopes != nil
     }
 
     /// Sends finished frames to an encoder until set back to nil. A baked look is fixed for the
@@ -1130,6 +1147,7 @@ extension ProcessingPipeline: MTKViewDelegate {
         let viewOrigin = monitorOrigin
         let viewScale = monitorScale
         let peaking = monitorPeaking
+        let scopeMeter = scopeOn ? scopes : nil
         lock.unlock()
         guard current.monitor != .isp, let image, let placeholder = placeholderLUT(),
             let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
@@ -1165,6 +1183,14 @@ extension ProcessingPipeline: MTKViewDelegate {
         encoder.setFragmentBytes(&parameters, length: MemoryLayout<MonitorParams>.stride, index: 0)
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         encoder.endEncoding()
+        if let scopeMeter, scopeMeter.wantsFrame() {
+            let lut = custom?.texture ?? placeholder
+            withUnsafeBytes(of: &parameters) { bytes in
+                scopeMeter.encode(
+                    into: commands, image: image, lut: lut, monitor: bytes.baseAddress!,
+                    length: MemoryLayout<MonitorParams>.stride)
+            }
+        }
         commands.addCompletedHandler { [self] finished in
             let milliseconds = (finished.gpuEndTime - finished.gpuStartTime) * 1000
             lock.lock()

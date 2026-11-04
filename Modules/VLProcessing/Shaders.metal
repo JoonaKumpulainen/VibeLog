@@ -423,6 +423,71 @@ vertex VertexOut monitorVertex(uint vertexID [[vertex_id]]) {
     return out;
 }
 
+// The look the viewfinder shows, before its tools: log, the Rec.709 view, a LUT on log, or the
+// view then a LUT. The scopes measure the same.
+static inline float3 monitorLook(float3 logColor, constant MonitorParams &m, texture3d<float> custom) {
+    constexpr sampler linearSampler(filter::linear, address::clamp_to_edge);
+    float3 color = logColor;
+    if (m.useLUT == 1 || m.useLUT == 3) {
+        color = monitorDisplay(saturate(color), m);
+    }
+    if (m.useLUT >= 2) {
+        float3 normalized = saturate((color - m.lutOffset.rgb) * m.lutScale.rgb);
+        float3 coordinate = (normalized * (m.lutSize - 1.0) + 0.5) / m.lutSize;
+        color = custom.sample(linearSampler, coordinate).rgb;
+    }
+    return color;
+}
+
+// Must match ScopeParams in ScopeMeter.swift.
+struct ScopeParams {
+    uint columns;  // Across the picture as held.
+    uint rows;  // Down it.
+    uint turns;  // Clockwise quarter turns from the portrait screen to the hold.
+    uint levels;  // Bins from black to white, and across the vectorscope.
+};
+
+// Counts a grid of the picture into scope bins: for each column across the picture as held, how
+// many samples sit at each level of luma, red, green and blue, plus a histogram of each and the
+// vectorscope's Cb and Cr in Rec.709. Atomic adds, since many threads land in one bin.
+kernel void scopeBins(texture2d<float, access::sample> image [[texture(0)]],
+                      texture3d<float> custom [[texture(2)]],
+                      constant MonitorParams &m [[buffer(0)]],
+                      constant ScopeParams &s [[buffer(1)]],
+                      device atomic_uint *wave [[buffer(2)]],
+                      device atomic_uint *vector [[buffer(3)]],
+                      device atomic_uint *histogram [[buffer(4)]],
+                      uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= s.columns || gid.y >= s.rows) {
+        return;
+    }
+    constexpr sampler linearSampler(filter::linear, address::clamp_to_edge);
+    float2 held = (float2(gid) + 0.5) / float2(s.columns, s.rows);
+    // Back to the portrait screen, then to the landscape image, as the viewfinder turns it.
+    float2 screen = held;
+    if (s.turns == 1) {
+        screen = float2(1.0 - held.y, held.x);
+    } else if (s.turns == 2) {
+        screen = 1.0 - held;
+    } else if (s.turns == 3) {
+        screen = float2(held.y, 1.0 - held.x);
+    }
+    float2 rotated = float2(screen.y, 1.0 - screen.x);
+    float3 color = saturate(monitorLook(image.sample(linearSampler, rotated).rgb, m, custom));
+    float y = dot(color, float3(0.2126, 0.7152, 0.0722));
+    float top = float(s.levels - 1);
+    uint4 level = uint4(round(float4(y, color) * top));
+    for (uint channel = 0; channel < 4; channel++) {
+        atomic_fetch_add_explicit(&wave[(channel * s.levels + level[channel]) * s.columns + gid.x], 1, memory_order_relaxed);
+        atomic_fetch_add_explicit(&histogram[channel * s.levels + level[channel]], 1, memory_order_relaxed);
+    }
+    float cb = (color.b - y) / 1.8556;
+    float cr = (color.r - y) / 1.5748;
+    uint across = uint(clamp(round((cb + 0.5) * top), 0.0, top));
+    uint up = uint(clamp(round((0.5 - cr) * top), 0.0, top));
+    atomic_fetch_add_explicit(&vector[up * s.levels + across], 1, memory_order_relaxed);
+}
+
 // Shows the log image, optionally through the Rec.709 LUT. The sensor is landscape, so the
 // image is rotated 90 degrees for the portrait screen.
 fragment float4 monitorFragment(VertexOut in [[stage_in]],
@@ -437,15 +502,7 @@ fragment float4 monitorFragment(VertexOut in [[stage_in]],
     float2 shown = m.viewOrigin + float2(across, in.uv.y) * m.viewScale;
     float2 rotated = float2(shown.y, 1.0 - shown.x);
     float3 logColor = image.sample(linearSampler, rotated).rgb;
-    float3 color = logColor;
-    if (m.useLUT == 1 || m.useLUT == 3) {
-        color = monitorDisplay(saturate(color), m);
-    }
-    if (m.useLUT >= 2) {
-        float3 normalized = saturate((color - m.lutOffset.rgb) * m.lutScale.rgb);
-        float3 coordinate = (normalized * (m.lutSize - 1.0) + 0.5) / m.lutSize;
-        color = custom.sample(linearSampler, coordinate).rgb;
-    }
+    float3 color = monitorLook(logColor, m, custom);
 
     float clip = m.bandsHigh.z;
     if (m.overlay == 1) {
