@@ -10,8 +10,8 @@
 | 4 | Heat, crop, exposure tools, LUT import | Done: 10 minutes at 30 fps |
 | 5 | Camera experience redesign | Done, apart from the long heat tests |
 | 6 | Image quality and capture | In progress |
-| 7 | Shooting tools | Planned |
-| 8 | On-phone finishing | Planned |
+| 7 | Shooting tools | In progress: grading, styles, scopes, FX and HDR built |
+| 8 | On-phone finishing | Started: export with look, grade, FX and HDR |
 
 ## Design rules for new additions
 
@@ -107,13 +107,13 @@ The rule for this phase: anything that adds to real-time GPU load must prove it 
 
 - Focus peaking and a focus punch-in: done.
 - Focus peaking sensitivity: a low and high switch in Settings, so it's there but out of the way. Added, untested.
-- RAW histogram, waveform and vectorscope.
+- Scopes: a luma waveform, RGB and YRGB parades, overlaid by default, a Rec.709 vectorscope with the skin tone line, and an RGB histogram, measuring the viewfinder's look. Built, untested in long takes. A RAW histogram is left.
 - Horizon indicator: the Level tool does this.
 - Frame guides, a 3x3 grid and anamorphic desqueeze: added, with frame guides and desqueeze untested.
-- Look adjustments: sliders that grade the built-in ACES looks live in the viewfinder before a take and bake in with it. Planned, with the design in HANDOFF.md.
-- Baked HDR: ACES 2.0 at 1000 nits recorded as PQ or HLG, as Bake does for SDR. Planned, with the design in HANDOFF.md.
-- Halation, bloom and diffusion: export and viewfinder first, baked takes if the GPU allows. Planned.
-- LUTs baked into recordings, as an option: built, untested. It records the Rec.709 view and its LUT, tagged Rec.709, and needs a long take to prove its GPU cost.
+- Look adjustments: ADJUST and COLOR grade any look but LOG live in the viewfinder, in scene-linear before the look, and bake in with it. Built, with styles, built-in and saved, under each look.
+- Baked HDR: ACES 2.0 at 1000 nits recorded as PQ with HDR10 metadata or as HLG, as Bake does for SDR. Built; PQ works on the phone, HLG's first-frame failure has a fix awaiting a take. An HDR viewfinder is left.
+- Halation, bloom, diffusion, vignette and grain: built for the viewfinder and export. Baking them waits on a frame-cost take.
+- Looks baked into recordings: built and proven, at no measurable GPU cost in a 60-second take, to HEVC or ProRes.
 - Timecode and Apple Watch control, if they prove useful.
 
 ## Phase 8: on-phone finishing
@@ -122,7 +122,7 @@ Keep recording clean, and do the heavy work after the shot, when real-time limit
 
 - **One-tap stabilization:** use the saved gyro data and the spare sensor area from open gate, with an optional horizon lock.
 - **One-tap denoise:** use the noise profile from the metadata, with temporal denoise where quality justifies the time.
-- **Export presets:** baking a LUT or the Rec.709 view into a copy, with a preview, is built, untested. HDR renders and small proxies are left.
+- **Export with look:** a copy with any look, its grade, FX and SDR or HDR, played through first, is built. Small proxies are left.
 - **Roll-off and gamut conversions:** convert between log curves and gamuts for different grading workflows.
 
 ## Later ideas

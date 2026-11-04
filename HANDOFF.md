@@ -1,6 +1,6 @@
 # VibeLog handoff
 
-For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of early Phase 6. Phase 5 is built, and only a few phone checks remain. The latest build is `4241f0d`, which is `ad509d3` plus the look carousel fix and passed CI with 120 tests, one skipped because the simulator has no ProRes encoder, and hasn't been tested on the phone. `6497b5e` adds what's under **After `4241f0d`** and **After `fa15863`**, and passed CI with the same 120 tests and one skip; it hasn't been tested on the phone. It holds everything under **New since `c459497`**; `c1e1041` in between had stereo and baking, and its phone results are below. Results from earlier builds are under **Session on `623c5a9`**. The latest phone results came from `021248e`. The last logged session came from `9f9a456`.
+For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of mid Phase 7. The latest build is `15bb26c`, **Batch 10**, building in CI when this was written; `596b90b`, **Batch 9**, passed CI with 150 tests and one skip, the simulator having no ProRes encoder. Batches 1 to 10 below are this stretch's work in order: grading, COLOR, styles, the camera screen, scopes, FX, HDR and the owner's fixes. The owner tested up to `f53121e` on the phone and gave notes on it. Phone results for older builds are under **What's proven on the phone** and the **Session on** entries.
 
 ## What this is
 
@@ -25,13 +25,13 @@ An iPhone camera app that records full-sensor RAW frames, processes them on the 
 
 | Path | Role |
 |---|---|
-| `App/` | SwiftUI UI, `AppModel`, `FrameRouter`, camera screen, format panel, library, Settings, Diagnostics, `DesignTokens` |
-| `Modules/VLCore` | Frames, stats, DNG reader, RAW levels, logging, storage, device status, `VideoFrameSink`, `GyroLog` |
+| `App/` | SwiftUI UI, `AppModel`, `FrameRouter`, camera screen with the look panel and its ADJUST, COLOR and FX pages, format panel, library, export with its grade editor, Settings, Diagnostics, `DesignTokens`, `Haptics` |
+| `Modules/VLCore` | Frames, stats, DNG reader, RAW levels, logging, storage, device status, `VideoFrameSink`, `GyroLog`, `AppConfig`, `LookGrade`, `LookStyle`, `LookEffects` |
 | `Modules/VLCapture` | Session, photo RAW driver, video driver, manual controls, audio, `MotionLogger`, probe |
-| `Modules/VLProcessing` | Log curves, color math, `GamutPairing`, `.cube` parser, Metal pipeline with `LookParams`, `ACES2.swift`, `ACES13.swift`, `BuiltInLook`, `LookExporter`, still export, `Shaders.metal` |
+| `Modules/VLProcessing` | Log curves, color math, `GamutPairing`, `.cube` parser, Metal pipeline with `LookParams`, `ACES2.swift`, `ACES13.swift`, `BuiltInLook` with the grade and HDR encodings, `LookExporter`, `LookPlayback`, `LookEffects`, `ScopeMeter`, still export, `Shaders.metal` |
 | `Modules/VLRecording` | RAW dump writer, `VideoEncoder`, encoder presets, encoder benchmark, `TakeLibrary` |
 | `Modules/ObjCGuard` | Catches Objective-C exceptions from AVFoundation, runtime scan |
-| `Tests/VLTests` | 120 tests, including real GPU tests on the simulator |
+| `Tests/VLTests` | 150 tests, including real GPU tests on the simulator |
 | `tools/inspect_clip.py` | Summarizes a RAW clip and exports a frame |
 | `tools/test_server.py` | The test link's server, which sends the phone commands and collects its files |
 
@@ -335,7 +335,7 @@ Step 2 of the plan below, batched with the export player's rotation fix. `b75941
 - **Export:** the preview holds still above the settings, which scroll alone, grade editor included. Sideways, the preview sits on the side of the phone's top, from the scene's interface orientation, with the settings beside it.
 - **README:** the camera screen paragraph describes the gauges, gear, LOOK beside FORMAT, scopes, styles, ADJUST, COLOR and FX, the dynamic range and Done.
 
-### Batch 10, after `596b90b`, not built
+### Batch 10, after `596b90b`, built as `15bb26c`
 
 - **Scope:** a drag carries it and it snaps, with a spring and a light tick, to the picture's corner nearest where it was let go. `HeldCorner` keeps that corner as held, maps it to the screen for each hold, and is saved in `AppConfig.scopeCorner`, so it stays put across turns and launches. A tap still cycles the kind.
 - **Gear:** still awkward to hit on `596b90b`. It's now a 52-point square target with the 26-point gear centred in it and a content shape on the button. Whether that settles it isn't known; if not, the next step is a test on the phone of where taps land.
@@ -345,16 +345,25 @@ Step 2 of the plan below, batched with the export player's rotation fix. `b75941
 - **Recording:** starting a take closes the MON tray.
 - **Export:** it opens on the camera's look, or ACES 2.0 when the camera shows LOG or Apple's preview, and on the camera's dynamic range, with no grade or FX: the camera's grade used to come along, which read as a pre-grade. A second tap on the checked style in the grade editor's Looks unchecks it, back to no grade. The form is grouped in every orientation on the same ground as the preview, `systemGroupedBackground`, where sideways it had turned black and the preview's ground didn't match.
 
+### Still to build
+
+- **FX baked into takes**, after the frame-cost take: the encode kernels need to sample the glow.
+- **An HDR viewfinder** through the screen's extended range, and MaxCLL and MaxFALL measured in export. ACES 1.3 HDR.
+- **Shadow, midtone and highlight wheels** in COLOR.
+- **Per-phone lens profiles**, under **Planned: per-phone lens profiles**, from what the calibration probe found.
+- **Stabilized export**, after the stabilization check. Then Phase 8: denoise, proxies and log-to-log conversion.
+- **ACES end-to-end check** against OpenColorIO's camera inputs, under **Not verified**, which needs no phone.
+
 ### Plan agreed on 2026-11-04: grading, scopes, effects and HDR
 
 Batches, each built and tested on the phone before the next. Each works the same live in the viewfinder, baked into takes and in export, since all three share the look step.
 
-1. **Built, waiting:** the live grade, haptics, tab merging, the grade under imported LUTs, MONITOR and ACES 2.0 by default, under **After `b759417`**.
-2. **COLOR tab, written as batch 2:** a third tab, LOOKS, ADJUST, COLOR, hiding with ADJUST for LOG. Swatches for red, orange, yellow, green, cyan, blue, magenta and skin, a HUE, SAT and LUM row, and one slider, tapping a chosen swatch again to reset it. Soft overlapping hue windows in Oklab, which is cheaper per LUT point than ACES's JMh and keeps the drag preview fast, with skin a narrower window that spares near-grays. Inside the same LUT, after the global grade.
-3. **Styles, written as batch 3:** pre-made grades as cards in the LOOKS carousel after the ACES looks, such as Warm, Cool, Punchy, Faded, Mono, Teal & Orange and Bleach bypass, each a look plus a grade that loads into ADJUST and COLOR to adjust further, and SAVE STYLE to add the owner's own, kept beside the presets. Called styles, not presets, to keep them apart from settings presets. After COLOR, since Teal & Orange and Bleach bypass need per-colour control.
-4. **Scopes, written as batch 6:** waveform, RGB parade, Y RGB parade, vectorscope with Rec.709 or Rec.2020 targets and the skin tone line, and a luma or RGB histogram. Standard math, with no licence needed; Blackmagic's "DaVinci YRGB" is a brand name to avoid. GPU bins from a frame about 256 wide with atomic adds, 10 to 15 updates a second, drawn on its own layer, measuring the look's output by default or log. A SCOPE tool in the MON tray, needing a frame-cost test.
-5. **FX tab, viewfinder and export written as batch 7:** a fourth tab with HALATION, BLOOM, DIFFUSE, VIGNETTE and GRAIN, hiding only for LOG, for any look including imported LUTs. Applied in scene-linear before the look: highlights blurred at an eighth of the size, halation tinted red-orange, read back per pixel with a curve decode and encode before the LUT. Estimated 1 to 3 ms a frame, unmeasured. Viewfinder and export first, then baked takes only after long takes show headroom, likely requiring the Efficient path when hot, and never switching off mid-take. Grain only for export or baked ProRes, since HEVC at 25 MB/s smears it.
-6. **HDR, baked and exported, written as batch 8:** ACES 2.0 at 1000 nits with P3-D65 limiting in Rec.2020, as OpenColorIO's ACES 2.0 HDR views do. PQ for HDR10 as the master, tagged Rec.2020 PQ with HDR10 mastering display metadata for P3-D65 at 1000 nits; export measures MaxCLL and MaxFALL in a first pass, and live takes carry the mastering values only. HLG from the same picture by the BT.2100 conversion. HEVC Main10 by default, ProRes 422 HQ with **Bake to ProRes**, and 12-bit ProRes 4444 as the top master for short takes or a cool phone. An HDR viewfinder through the screen's extended range. Dolby Vision and HDR10+ are left out, since both need licensed metadata tools. Details under **Planned: baked HDR**.
+1. **Built in `68811c4`:** the live grade, haptics, tab merging, the grade under imported LUTs, MONITOR and ACES 2.0 by default, under **After `b759417`**.
+2. **COLOR tab, built in `9da3d7b`:** a third tab, LOOKS, ADJUST, COLOR, hiding with ADJUST for LOG. Swatches for red, orange, yellow, green, cyan, blue, magenta and skin, a HUE, SAT and LUM row, and one slider, tapping a chosen swatch again to reset it. Soft overlapping hue windows in Oklab, which is cheaper per LUT point than ACES's JMh and keeps the drag preview fast, with skin a narrower window that spares near-grays. Inside the same LUT, after the global grade.
+3. **Styles, built in `0b56b1a`:** pre-made grades as cards in the LOOKS carousel after the ACES looks, such as Warm, Cool, Punchy, Faded, Mono, Teal & Orange and Bleach bypass, each a look plus a grade that loads into ADJUST and COLOR to adjust further, and SAVE STYLE to add the owner's own, kept beside the presets. Called styles, not presets, to keep them apart from settings presets. After COLOR, since Teal & Orange and Bleach bypass need per-colour control.
+4. **Scopes, built in `f443ce8`:** waveform, RGB parade, Y RGB parade, vectorscope with Rec.709 or Rec.2020 targets and the skin tone line, and a luma or RGB histogram. Standard math, with no licence needed; Blackmagic's "DaVinci YRGB" is a brand name to avoid. GPU bins from a frame about 256 wide with atomic adds, 10 to 15 updates a second, drawn on its own layer, measuring the look's output by default or log. A SCOPE tool in the MON tray, needing a frame-cost test.
+5. **FX tab, viewfinder and export built in `f53121e`:** a fourth tab with HALATION, BLOOM, DIFFUSE, VIGNETTE and GRAIN, hiding only for LOG, for any look including imported LUTs. Applied in scene-linear before the look: highlights blurred at an eighth of the size, halation tinted red-orange, read back per pixel with a curve decode and encode before the LUT. Estimated 1 to 3 ms a frame, unmeasured. Viewfinder and export first, then baked takes only after long takes show headroom, likely requiring the Efficient path when hot, and never switching off mid-take. Grain only for export or baked ProRes, since HEVC at 25 MB/s smears it.
+6. **HDR, baked and exported, built in `f53121e`:** ACES 2.0 at 1000 nits with P3-D65 limiting in Rec.2020, as OpenColorIO's ACES 2.0 HDR views do. PQ for HDR10 as the master, tagged Rec.2020 PQ with HDR10 mastering display metadata for P3-D65 at 1000 nits; export measures MaxCLL and MaxFALL in a first pass, and live takes carry the mastering values only. HLG from the same picture by the BT.2100 conversion. HEVC Main10 by default, ProRes 422 HQ with **Bake to ProRes**, and 12-bit ProRes 4444 as the top master for short takes or a cool phone. An HDR viewfinder through the screen's extended range. Dolby Vision and HDR10+ are left out, since both need licensed metadata tools. Details under **Planned: baked HDR**.
 
 ### Plan for the rest of Phase 7, agreed
 
@@ -369,7 +378,7 @@ Timecode and Apple Watch control are left out. Each step gets its own build and 
 
 Phase 8 also gets **log conversion** in export: a take turned from one curve and gamut into another, such as Apple Log 2 into S-Log3 in S-Gamut3.Cine, written as ProRes. The pipeline already has the math, so it's a small export option.
 
-### Planned: baked HDR, not started
+### Baked HDR, the first design, built in Batch 8
 
 Record an HDR look straight from the shot, as Bake does for SDR. It costs what a baked look costs now: one LUT lookup per pixel, which the 60-second baked ACES take showed adds no GPU time.
 
@@ -380,7 +389,7 @@ Record an HDR look straight from the shot, as Bake does for SDR. It costs what a
 - **Viewfinder:** first it shows the SDR look while HDR records, with a note. A true HDR viewfinder needs the screen's extended range, a 16-bit float drawable and its own draw path, so it's a later step with a `draw` time check.
 - **Tests:** compare against OpenColorIO's ACES 2.0 1000-nit output for the same 148 colours, from `tools/make_aces_reference.py`, and check the file's tags read back.
 
-### Planned: look adjustments, not started
+### Look adjustments, the first design, built in Batches 1 to 3
 
 The owner wants sliders that grade the built-in looks, set while watching the viewfinder before a take and baked in with it. Agreed design:
 
@@ -410,7 +419,7 @@ The owner wants sliders that grade the built-in looks, set while watching the vi
 
 The app is for every iPhone, so lens data is per device, in layers from free to manual. Apple's per-frame metadata already gives the color matrices, `FixVignetteRadial` and the 35 mm focal length on any phone, with nothing stored. Apple's factory calibration, if the probe shows it comes with RAW, gives intrinsics and a distortion table, read once per lens and saved. What Apple doesn't give comes from the owner: color from a ColorChecker photo with a patch grid overlay, fitting a 3x3 matrix per lens, and distortion from a lens profile imported from Gyroflow's calibrator rather than checkerboard detection in the app. Each profile is a JSON file per model, lens and format, such as `lenses/iPhone15,2/back-wide-4032x3024.json`, noting each value's source and date, on a **Lenses** page under Advanced with export, import and reset, kept out of presets. A phone without one falls back to Apple's metadata.
 
-### Planned: spatial effects, not started
+### Spatial effects, the first design, built for the viewfinder and export in Batch 7
 
 The owner asked about halation and other grading effects, and baking them during takes. Per-pixel effects such as vignette, split toning or a print look can go in the look's LUT or `lookColor` at no extra cost. Spatial ones, halation, bloom and diffusion, need neighbours: highlights above a threshold in scene-linear, blurred wide and added back tinted, red-orange for halation. They're low-frequency, so the blur can run at an eighth of the size and be sampled back up, which should cost a millisecond or two, unmeasured. They sit before the look, so they need their own passes and a texture the encode kernels and the viewfinder both read, unlike the LUT grade. Order of work: export and viewfinder first, then a frame-cost test in long takes, then baked takes. Take 2 showed Maximum quality has no headroom when hot, so baking them may need the Efficient path. Grain is cheap to draw but HEVC at 25 MB/s smears it into blocks and spends bits on it, so it suits export to ProRes rather than baked takes.
 
@@ -428,9 +437,11 @@ Before building stabilized export, find out whether optical stabilization moves 
 
 Run these in order. The owner has limited time, so short tests come first, and the session log and sidecars should come back with the results.
 
-1. **Build `ad509d3`:** stereo AAC should now record, so record a take with **Stereo audio** on and **Uncompressed audio** off, in each landscape hold with a sound on one side, and check which channel it lands in, that sound and sync are right, and that the two meters move apart. With many tools on, the picture shouldn't shift during a take. Check the look panel's fade, the carousel upright and sideways, the BAKE toggle, and Cancel and Select turned. Compare **ACES 2.0** and **ACES 1.3** with REC.709 on the same scene, and read the `Built ACES 2.0 · ... in N s` log line. Check **Bake** under Image greying out Color space, and **Settings > About > Legal**. Over the link, check `draw` time and frame loss with an ACES look baked into a 60-second HEVC take. Once the changes after `4241f0d` are built, play a ProRes 422 HQ take in **Export** with an ACES look, check it runs smoothly with sound, switch looks while paused and while playing, and check the look panel's header without its title in each hold. Turn Bake on in Settings and check **Bake to ProRes** slides out, that it switches the codec to ProRes 422 HQ and back, and record a short baked ProRes take.
-2. **Stabilization check:** a new take for Gyroflow, as under **Stabilization check** above, since the first result didn't stabilize.
-3. **ARRI Wide Gamut 3:** left for later at the owner's choice. Record it and grade it. Does the file read correctly when graded that way?
+1. **Build `15bb26c`:** the owner's checks on each batch's **Phone checks** and notes above, most of all: an HLG bake, which failed with `-12902` before the fix in Batch 9, over the link with `set bakeTarget hlg` and `record 5 --wait`; the gear's target; dragging the scope to each corner and turning the phone; the look panel's page kept after a tap outside; the Haptics switch; export opening ungraded on the camera's look; and FX on a real light.
+2. **Frame cost:** one long take with SCOPE on and one with FX on the viewfinder, against `draw` and GPU time, before FX can be baked.
+3. **Apple's preview:** a matched pair of long takes, connected and not, after the same rest and unplugged.
+4. **Stabilization check:** slow two-second pans and small quick shakes at 1/250 s or shorter, as under **Stabilization check**.
+5. **ARRI Wide Gamut 3:** left for later at the owner's choice.
 
 For vignette correction, also ask for a short RAW clip's `reference.dng` and `reference_metadata.json`. Turn off **Encode video** in Diagnostics to record one.
 
