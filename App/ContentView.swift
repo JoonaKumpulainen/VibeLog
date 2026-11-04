@@ -809,6 +809,16 @@ struct GaugeBar: View {
     private static let width: CGFloat = 42
     private static let height: CGFloat = 14
 
+    private func label(_ color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .bold, design: .monospaced))
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+            .frame(width: Self.width - 4)
+            .frame(width: Self.width, height: Self.height)
+    }
+
     var body: some View {
         let inner = Self.width - 3
         let filled = inner * CGFloat(min(max(share, 0), 1))
@@ -820,14 +830,12 @@ struct GaugeBar: View {
                     .fill(tint.color)
                     .frame(width: filled)
                     .padding(1.5)
-                Text(text)
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    // Dark on the fill once it reaches the middle, where the text sits.
-                    .foregroundStyle(share >= 0.5 ? tint.ink : Tokens.value)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                    .frame(width: Self.width - 4)
-                    .frame(maxWidth: .infinity)
+                // Light over the empty part and dark over the fill, split where the fill ends.
+                label(Tokens.value)
+                label(tint.ink)
+                    .mask(alignment: .leading) {
+                        Rectangle().frame(width: filled + 1.5)
+                    }
             }
             .frame(width: Self.width, height: Self.height)
             if battery {
@@ -1330,7 +1338,7 @@ struct GradePanel: View {
             .accessibilityValue(selected.text(shown[keyPath: selected.keyPath]))
             Spacer(minLength: 0)
             GradeActions(
-                canSave: !shown.isNeutral, resetTitle: "RESET", canReset: shown != cleared,
+                hold: hold, canSave: !shown.isNeutral, canReset: shown != cleared,
                 reset: { model.lookGrade = cleared })
         }
         .disabled(model.isRecording)
@@ -1393,27 +1401,28 @@ struct GradePanel: View {
     }
 }
 
-/// SAVE and a reset, along the bottom of ADJUST and COLOR. SAVE keeps the look and the whole
-/// grade as a style under that look.
+/// SAVE and RESET, a compact pair centred along the bottom of ADJUST and COLOR, so they sit the
+/// same distance from both edges of the phone. SAVE keeps the look and the whole grade as a
+/// style under that look.
 struct GradeActions: View {
     @EnvironmentObject private var model: AppModel
+    let hold: Hold
     let canSave: Bool
-    let resetTitle: String
     let canReset: Bool
     let reset: () -> Void
     @State private var naming = false
     @State private var styleName = ""
 
     var body: some View {
-        HStack(spacing: 8) {
-            action("SAVE STYLE", enabled: canSave) {
+        HStack(spacing: 16) {
+            PanelButton(title: "SAVE", enabled: canSave, hold: hold) {
                 styleName = ""
                 naming = true
             }
             .accessibilityLabel("Save as a style")
-            action(resetTitle, enabled: canReset, action: reset)
+            PanelButton(title: "RESET", enabled: canReset, hold: hold, action: reset)
         }
-        .frame(height: 36)
+        .frame(maxWidth: .infinity)
         .alert("Save Style", isPresented: $naming) {
             TextField("Name", text: $styleName)
             Button("Save") { model.saveStyle(named: styleName) }
@@ -1422,15 +1431,26 @@ struct GradeActions: View {
             Text("Keeps this look's grade, COLOR included, under the look in LOOKS. Long-press it there to delete it.")
         }
     }
+}
 
-    private func action(_ title: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+/// A small filled button along a panel's bottom, its label kept inside it in every hold.
+struct PanelButton: View {
+    let title: String
+    let enabled: Bool
+    let hold: Hold
+    let action: () -> Void
+
+    static let size = CGSize(width: 96, height: 36)
+
+    var body: some View {
         Button(action: action) {
             Text(title)
                 .font(Tokens.labelFont)
                 .foregroundStyle(enabled ? Tokens.value : Tokens.label)
-                .fixedSize()
-                .turnedToHold()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .upright(hold, depth: Self.size.height - 8)
+                .frame(width: Self.size.width, height: Self.size.height)
                 .background(Tokens.surface.opacity(enabled ? 1 : 0.5), in: RoundedRectangle(cornerRadius: Tokens.panelRadius))
                 .contentShape(Rectangle())
         }
@@ -1493,8 +1513,8 @@ extension ColorBand {
 }
 
 /// Each colour's hue, saturation and luminance: tap a ball, then HUE, SAT or LUM, and drag the
-/// slider beside them. A changed colour has an amber ring. Tapping the chosen ball again, or
-/// RESET below, puts that colour back. It works like ADJUST, keeping a draft while a slider moves.
+/// slider beside them. A changed colour has an amber ring. Tapping the chosen ball again, or the
+/// arrow beside the slider, puts that colour back, and RESET below puts every colour back. It works like ADJUST, keeping a draft while a slider moves.
 struct ColorPanel: View {
     @EnvironmentObject private var model: AppModel
     let hold: Hold
@@ -1522,13 +1542,29 @@ struct ColorPanel: View {
                 .tint(band.swatch)
                 .accessibilityLabel("\(band.name) \(control.name)")
                 .accessibilityValue(text(shown.bands[band.rawValue][keyPath: control.keyPath]))
+                Button {
+                    commit()
+                    model.lookGrade.bands[band.rawValue] = BandAdjust()
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(Tokens.statusFont)
+                        .foregroundStyle(shown.bands[band.rawValue].isNeutral ? Tokens.label : Tokens.held)
+                        .turnedToHold()
+                        .frame(width: 36, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(shown.bands[band.rawValue].isNeutral)
+                .accessibilityLabel("Reset \(band.name)")
             }
             .frame(height: 44)
             Spacer(minLength: 0)
             GradeActions(
-                canSave: !shown.isNeutral, resetTitle: "RESET \(band.name.uppercased())",
-                canReset: !shown.bands[band.rawValue].isNeutral,
-                reset: { model.lookGrade.bands[band.rawValue] = BandAdjust() })
+                hold: hold, canSave: !shown.isNeutral, canReset: !shown.bands.allSatisfy(\.isNeutral),
+                reset: {
+                    commit()
+                    model.lookGrade.bands = LookGrade().bands
+                })
         }
         .disabled(model.isRecording)
         .sensoryFeedback(.selection, trigger: band)
@@ -1683,30 +1719,21 @@ struct FXPanel: View {
             .accessibilityLabel(selected.name)
             .accessibilityValue(selected.text(shown[keyPath: selected.keyPath]))
             Spacer(minLength: 0)
-            HStack(spacing: 8) {
-                Text(model.bakeLook ? "NOT IN BAKED TAKES YET" : "VIEWFINDER AND EXPORT")
+            HStack(spacing: 16) {
+                Text(model.bakeLook ? "NOT BAKED" : "NOT IN TAKES")
                     .font(Tokens.markFont)
                     .foregroundStyle(model.bakeLook ? Tokens.warning : Tokens.label)
-                    .fixedSize()
-                    .turnedToHold()
-                    .frame(maxWidth: .infinity)
-                Button {
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .minimumScaleFactor(0.7)
+                    .upright(hold, depth: PanelButton.size.height - 4)
+                    .frame(width: PanelButton.size.width, height: PanelButton.size.height)
+                PanelButton(title: "RESET", enabled: !shown.isNeutral, hold: hold) {
                     commit()
                     model.lookEffects = LookEffects()
-                } label: {
-                    Text("RESET FX")
-                        .font(Tokens.labelFont)
-                        .foregroundStyle(shown.isNeutral ? Tokens.label : Tokens.value)
-                        .fixedSize()
-                        .turnedToHold()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Tokens.surface.opacity(shown.isNeutral ? 0.5 : 1), in: RoundedRectangle(cornerRadius: Tokens.panelRadius))
-                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .disabled(shown.isNeutral)
             }
-            .frame(height: 36)
+            .frame(maxWidth: .infinity)
         }
         .disabled(model.isRecording)
         .sensoryFeedback(.selection, trigger: selected)

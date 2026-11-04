@@ -16,6 +16,8 @@ public final class LookExporter {
         public var sourceRec709: Bool
         /// The FX tab's effects, applied to each frame before the look.
         public var effects: LookEffects
+        /// The LUT gives HDR codes in Rec.2020, written in Rec.2020's matrix.
+        public var hdr = false
 
         public init(
             curve: LogCurve, gamut: Gamut, lut: CubeLUT?, lutExpectsRec709: Bool, sourceRec709: Bool,
@@ -79,6 +81,7 @@ public final class LookExporter {
         settings.restore(curve: look.curve, gamut: look.gamut)
         settings.bakeLook = true
         settings.lutExpectsRec709 = look.lutExpectsRec709
+        settings.bakeHDR = look.hdr
         self.look = LookParams(settings: settings, lut: look.lut)
         lutTexture = look.lut.flatMap { pipeline.lutTexture(for: $0) }
         sourceLuma = look.sourceRec709 ? LookParams.rec709Luma : LookParams.rec2020Luma

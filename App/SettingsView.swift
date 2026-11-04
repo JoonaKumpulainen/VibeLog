@@ -373,6 +373,15 @@ struct SettingsView: View {
                 if model.bakeLook {
                     bakeToProResRow
                         .transition(.move(edge: .top).combined(with: .opacity))
+                    Picker(selection: $model.bakeTarget) {
+                        ForEach(BakeTarget.allCases) { Text($0.label).tag($0) }
+                    } label: {
+                        explained(
+                            "Bake as",
+                            "HDR records ACES 2.0 at 1000 nits in Rec.2020, as PQ for HDR10 with its mastering metadata, or as HLG. Other looks bake SDR. The viewfinder still shows SDR.")
+                    }
+                    .disabled(model.isRecording)
+                    .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
             if matches(Self.gamutTerms) {
@@ -391,7 +400,8 @@ struct SettingsView: View {
             }
             if matches(Self.tagTerms) {
                 Picker(selection: $model.fileTag) {
-                    ForEach(FileTag.allCases) { Text($0.label).tag($0) }
+                    // PQ only describes an HDR bake, never log.
+                    ForEach(FileTag.allCases.filter { $0 != .pq }) { Text($0.label).tag($0) }
                 } label: {
                     explained("File tag", "What the file tells an editor. The picture doesn't change.")
                 }

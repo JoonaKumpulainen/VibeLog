@@ -149,7 +149,9 @@ public struct ProcessingSettings: Equatable, Sendable {
     public var exposureStops = -0.5
     /// Records the look instead of log: the Rec.709 view, then the chosen LUT, in Rec.709's matrix.
     public var bakeLook = false
-    /// The file is tagged Rec.709, so its YCbCr uses Rec.709's matrix. A baked look always does.
+    /// A baked look in HDR, PQ or HLG, which is Rec.2020 and keeps Rec.2020's matrix.
+    public var bakeHDR = false
+    /// The file is tagged Rec.709, so its YCbCr uses Rec.709's matrix. A baked SDR look always does.
     public var rec709Matrix = false
 
     public var curve: LogCurve {
@@ -304,7 +306,7 @@ struct LookParams {
         toRec709Row0 = row(0)
         toRec709Row1 = row(1)
         toRec709Row2 = row(2)
-        luma = settings.bakeLook || settings.rec709Matrix ? Self.rec709Luma : Self.rec2020Luma
+        luma = (settings.bakeLook && !settings.bakeHDR) || settings.rec709Matrix ? Self.rec709Luma : Self.rec2020Luma
     }
 }
 
@@ -393,6 +395,8 @@ public final class ProcessingPipeline: NSObject {
     /// Bound in place of a custom LUT, which the shader then never reads.
     private var emptyLUT: MTLTexture?
     private var takeLook: (look: LookParams, lut: MTLTexture?)?
+    /// A look only takes record, such as HDR, while the viewfinder shows the SDR one.
+    private var bakeLUT: CustomLUT?
     private var customLUT: CustomLUT?
     private var stats = PipelineStats()
     private var gpuTotalMs = 0.0
@@ -515,12 +519,25 @@ public final class ProcessingPipeline: NSObject {
         lock.unlock()
     }
 
+    /// The LUT baked takes record when it differs from the viewfinder's, as an HDR look does, or
+    /// nil to record what the viewfinder shows.
+    public func setBakeLUT(_ lut: CubeLUT?) {
+        var custom: CustomLUT?
+        if let lut, let texture = lutTexture(for: lut) {
+            custom = CustomLUT(texture: texture, lut: lut, expectsRec709: false)
+        }
+        lock.lock()
+        bakeLUT = custom
+        lock.unlock()
+    }
+
     /// Sends finished frames to an encoder until set back to nil. A baked look is fixed for the
     /// take as it starts, so a LUT chosen mid-take only changes the viewfinder.
     public func setSink(_ newSink: VideoFrameSink?) {
         lock.lock()
         sink = newSink
-        takeLook = newSink == nil ? nil : (LookParams(settings: settings, lut: customLUT?.lut, expectsRec709: customLUT?.expectsRec709), customLUT?.texture)
+        let recorded = bakeLUT ?? customLUT
+        takeLook = newSink == nil ? nil : (LookParams(settings: settings, lut: recorded?.lut, expectsRec709: recorded?.expectsRec709), recorded?.texture)
         lock.unlock()
     }
 

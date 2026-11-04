@@ -75,6 +75,7 @@ struct ACES2OutputTransform {
     static let ap0 = Primaries(red: (0.7347, 0.2653), green: (0, 1), blue: (0.0001, -0.077), white: (0.32168, 0.33767))
     static let ap1 = Primaries(red: (0.713, 0.293), green: (0.165, 0.83), blue: (0.128, 0.044), white: (0.32168, 0.33767))
     static let rec709 = Primaries(red: (0.64, 0.33), green: (0.3, 0.6), blue: (0.15, 0.06), white: (0.3127, 0.329))
+    static let p3d65 = Primaries(red: (0.68, 0.32), green: (0.265, 0.69), blue: (0.15, 0.06), white: (0.3127, 0.329))
     static let cam16 = Primaries(red: (0.8336, 0.1735), green: (2.3854, -1.4659), blue: (0.087, -0.125), white: (0.333, 0.333))
 
     /// RGB to XYZ, as rgb2xyz_from_xy, row-major.

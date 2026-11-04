@@ -107,9 +107,16 @@ public final class VideoEncoder: VideoFrameSink {
         // Long recordings stay playable up to the last fragment if the app is killed.
         writer.movieFragmentInterval = CMTime(seconds: 10, preferredTimescale: 600)
 
-        let settings = config.preset.outputSettings(
+        var settings = config.preset.outputSettings(
             width: config.size.width, height: config.size.height, frameRate: config.frameRate,
             tag: config.fileTag)
+        if !writer.canApply(outputSettings: settings, forMediaType: .video), config.fileTag == .pq {
+            // Without the mastering display, if this encoder won't take it: PQ still plays as HDR.
+            Log.shared.warn("HDR10 mastering metadata refused, writing PQ without it")
+            settings = config.preset.outputSettings(
+                width: config.size.width, height: config.size.height, frameRate: config.frameRate,
+                tag: config.fileTag, hdrMetadata: false)
+        }
         guard writer.canApply(outputSettings: settings, forMediaType: .video) else {
             throw Failure.unsupportedSettings
         }

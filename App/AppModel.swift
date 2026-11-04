@@ -92,6 +92,8 @@ final class AppModel: ObservableObject {
     @Published var bakeLook = false {
         didSet {
             processing.bakeLook = bakeLook
+            syncBakeHDR()
+            if bakeLook != oldValue { buildLook() }
             guard !adopting, bakeLook != oldValue else { return }
             // A baked take is a finished picture, which HEVC 4:2:0 keeps at about a sixth of
             // ProRes 422 HQ. Turning it off goes back, unless the codec was changed since.
@@ -121,10 +123,33 @@ final class AppModel: ObservableObject {
         return EncoderPreset.all.first { $0.id == id }
     }
     /// A baked look is display Rec.709, so the file says so whatever the tag setting is.
-    var takeFileTag: FileTag { bakeLook ? .rec709 : fileTag }
+    var takeFileTag: FileTag {
+        guard bakeLook else { return fileTag }
+        guard bakesHDR else { return .rec709 }
+        return bakeTarget == .hlg ? .hlg : .pq
+    }
+
+    /// HDR for baked takes, which only ACES 2.0 has. The viewfinder stays SDR either way.
+    @Published var bakeTarget = BakeTarget.sdr {
+        didSet {
+            guard bakeTarget != oldValue else { return }
+            syncBakeHDR()
+            buildLook()
+        }
+    }
+    var bakesHDR: Bool { bakeLook && bakeTarget.isHDR && selectedLUT == BuiltInLook.aces20.name }
+
+    /// An HDR bake keeps Rec.2020's matrix, where an SDR one uses Rec.709's.
+    private func syncBakeHDR() {
+        if processing.bakeHDR != bakesHDR { processing.bakeHDR = bakesHDR }
+    }
     /// What the sidecar says the file holds.
     var bakedLookLabel: String {
         guard bakeLook else { return "log, as recorded" }
+        if bakesHDR {
+            let graded = lookGrade.isNeutral ? "" : ", graded (\(lookGrade.label))"
+            return "ACES 2.0 HDR 1000 nits, \(bakeTarget == .hlg ? "HLG" : "PQ")\(graded), baked in"
+        }
         let graded = gradeApplies && !lookGrade.isNeutral ? ", graded (\(lookGrade.label))" : ""
         guard !selectedLUT.isEmpty else { return "Rec.709 view\(graded), baked in" }
         if BuiltInLook.named(selectedLUT) != nil { return "\(selectedLUT) Rec.709\(graded), baked in" }
@@ -621,6 +646,7 @@ final class AppModel: ObservableObject {
         config.fileTag = fileTag.rawValue
         config.bakeLook = bakeLook
         config.bakeToProRes = bakeToProRes
+        config.bakeTarget = bakeTarget.rawValue
         config.lookGrade = lookGrade
         config.lookEffects = lookEffects
         config.testServer = testServer
@@ -700,6 +726,7 @@ final class AppModel: ObservableObject {
         fileTag = FileTag(rawValue: saved.fileTag) ?? fileTag
         bakeLook = saved.bakeLook
         bakeToProRes = saved.bakeToProRes
+        bakeTarget = BakeTarget(rawValue: saved.bakeTarget) ?? .sdr
         lookGrade = saved.lookGrade
         lookEffects = saved.lookEffects
     }
@@ -1019,7 +1046,10 @@ final class AppModel: ObservableObject {
         processing.restore(curve: pair.0, gamut: pair.1)
     }
 
-    private func loadSelectedLUT() { buildLook() }
+    private func loadSelectedLUT() {
+        syncBakeHDR()
+        buildLook()
+    }
 
     /// Every look reaches the pipeline through this one queue, newest request only: a request
     /// that's been overtaken by the time its turn comes is skipped, so a fast drag builds only
@@ -1072,6 +1102,15 @@ final class AppModel: ObservableObject {
         let curve = processing.curve
         let gamut = processing.gamut
         let madeForRec709 = processing.lutExpectsRec709
+        // Takes record the HDR look only from a finished build, never a drag's preview.
+        let hdrTarget: BakeTarget? = bakesHDR ? bakeTarget : nil
+        if size == 65 {
+            lookQueue.async { [weak self] in
+                guard let self, self.isCurrentLook(request) else { return }
+                let hdr = hdrTarget.map { BuiltInLook.hdrLUT(curve: curve, gamut: gamut, grade: grade, target: $0) }
+                if self.isCurrentLook(request) { pipeline?.setBakeLUT(hdr) }
+            }
+        }
         if look == nil, !name.isEmpty {
             lookQueue.async { [weak self] in
                 guard let self, self.isCurrentLook(request) else { return }

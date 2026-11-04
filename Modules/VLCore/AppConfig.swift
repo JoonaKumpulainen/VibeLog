@@ -102,6 +102,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var bakeLook = false
     /// Baked takes record ProRes 422 HQ instead of HEVC 4:2:0.
     public var bakeToProRes = false
+    /// What a baked ACES 2.0 look records: sdr, pq or hlg.
+    public var bakeTarget = "sdr"
     /// The grade under the built-in looks and the Rec.709 view.
     public var lookGrade = LookGrade()
     /// The FX tab's effects on the viewfinder and in export.
@@ -169,6 +171,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         twelveBitProRes = read(.twelveBitProRes, defaults.twelveBitProRes)
         bakeLook = read(.bakeLook, defaults.bakeLook)
         bakeToProRes = read(.bakeToProRes, defaults.bakeToProRes)
+        bakeTarget = read(.bakeTarget, defaults.bakeTarget)
         lookGrade = read(.lookGrade, defaults.lookGrade)
         lookEffects = read(.lookEffects, defaults.lookEffects)
         styles = read(.styles, defaults.styles)

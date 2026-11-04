@@ -2295,3 +2295,52 @@ final class EffectsTests: XCTestCase {
         XCTAssertTrue(config.lookEffects.isNeutral)
     }
 }
+
+/// HDR: the PQ and HLG curves at known points, ACES 2.0's 1000-nit look landing middle gray and
+/// highlights where an HDR grade puts them, and HDR bakes keeping Rec.2020's matrix.
+final class HDRTests: XCTestCase {
+    func testPQAtKnownPoints() {
+        XCTAssertEqual(HDREncoding.pq(SIMD3(repeating: 0)).x, 0, accuracy: 1e-6)
+        XCTAssertEqual(HDREncoding.pq(SIMD3(repeating: 100)).x, 0.5081, accuracy: 0.001)
+        XCTAssertEqual(HDREncoding.pq(SIMD3(repeating: 1000)).x, 0.7518, accuracy: 0.001)
+        XCTAssertEqual(HDREncoding.pq(SIMD3(repeating: 10000)).x, 1, accuracy: 1e-6)
+    }
+
+    func testHLGPeakIsOne() {
+        let white = HDREncoding.hlg(SIMD3(repeating: 1000))
+        XCTAssertEqual(white.x, 1, accuracy: 1e-4)
+        XCTAssertEqual(HDREncoding.hlg(SIMD3(repeating: 0)).y, 0, accuracy: 1e-6)
+    }
+
+    func testHDRLookPlacesGrayAndHighlights() {
+        let size = 9
+        let lut = BuiltInLook.hdrLUT(curve: .sLog3, gamut: .sGamut3Cine, target: .pq, size: size)
+        // Middle gray sits near 10 to 20 nits in a 1000-nit grade, PQ about 0.32 to 0.40.
+        let gray = SIMD3(repeating: LogCurve.sLog3.encode(0.18))
+        let index = Int((gray.x * Double(size - 1)).rounded())
+        let near = lut.samples[(index * size + index) * size + index]
+        XCTAssertGreaterThan(near.y, 0.25)
+        XCTAssertLessThan(near.y, 0.5)
+        // Never past the 1000-nit peak, and brighter input is never darker.
+        let top = lut.samples.last!
+        XCTAssertLessThanOrEqual(top.y, Float(HDREncoding.pq(SIMD3(repeating: 1000)).y) + 1e-4)
+        var previous: Float = -1
+        for step in 0..<size {
+            let value = lut.samples[(step * size + step) * size + step].y
+            XCTAssertGreaterThanOrEqual(value, previous - 1e-4)
+            previous = value
+        }
+    }
+
+    func testHDRBakeKeepsRec2020Matrix() {
+        var settings = ProcessingSettings()
+        settings.bakeLook = true
+        XCTAssertEqual(LookParams(settings: settings, lut: nil).luma, LookParams.rec709Luma)
+        settings.bakeHDR = true
+        XCTAssertEqual(LookParams(settings: settings, lut: nil).luma, LookParams.rec2020Luma)
+    }
+
+    func testMasteringDisplayIsTwentyFourBytes() {
+        XCTAssertEqual(EncoderPreset.hdr10MasteringDisplay.count, 24)
+    }
+}

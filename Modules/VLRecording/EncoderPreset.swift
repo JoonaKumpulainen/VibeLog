@@ -4,7 +4,7 @@ import VideoToolbox
 /// What a file's color tags say. None changes the pixels, because the real curve and gamut are in
 /// the sidecar. Editors read these tags to decide how to show the clip.
 public enum FileTag: String, CaseIterable, Identifiable, Sendable {
-    case rec2020, rec709, hlg
+    case rec2020, rec709, hlg, pq
 
     public var id: String { rawValue }
 
@@ -13,6 +13,7 @@ public enum FileTag: String, CaseIterable, Identifiable, Sendable {
         case .rec2020: return "Rec.2020"
         case .rec709: return "Rec.709"
         case .hlg: return "Rec.2020 HLG"
+        case .pq: return "Rec.2020 PQ"
         }
     }
 
@@ -34,6 +35,12 @@ public enum FileTag: String, CaseIterable, Identifiable, Sendable {
             return [
                 AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_2020,
                 AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_2100_HLG,
+                AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_2020,
+            ]
+        case .pq:
+            return [
+                AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_2020,
+                AVVideoTransferFunctionKey: AVVideoTransferFunction_SMPTE_ST_2084_PQ,
                 AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_2020,
             ]
         }
@@ -92,8 +99,24 @@ public struct EncoderPreset: Identifiable, Hashable, Sendable {
             pixelFormat: kCVPixelFormatType_444YpCbCr10BiPlanarVideoRange, profile: nil, bitrate: nil),
     ]
 
+    /// HDR10's mastering display: P3-D65 primaries and a 1000-nit peak, as SEI's
+    /// mastering_display_colour_volume, big-endian, green, blue then red, in 0.00002 steps, then
+    /// white, then the peak and floor in 0.0001-nit steps.
+    static let hdr10MasteringDisplay: Data = {
+        var bytes = Data()
+        func short(_ value: Double) { var v = UInt16((value / 0.00002).rounded()).bigEndian; withUnsafeBytes(of: &v) { bytes.append(contentsOf: $0) } }
+        func long(_ value: UInt32) { var v = value.bigEndian; withUnsafeBytes(of: &v) { bytes.append(contentsOf: $0) } }
+        for (x, y) in [(0.265, 0.69), (0.15, 0.06), (0.68, 0.32), (0.3127, 0.329)] {
+            short(x)
+            short(y)
+        }
+        long(10_000_000)
+        long(1)
+        return bytes
+    }()
+
     func outputSettings(
-        width: Int, height: Int, frameRate: Double = 30, tag: FileTag = .rec2020
+        width: Int, height: Int, frameRate: Double = 30, tag: FileTag = .rec2020, hdrMetadata: Bool = true
     ) -> [String: Any] {
         var settings: [String: Any] = [
             AVVideoCodecKey: codec,
@@ -109,6 +132,9 @@ public struct EncoderPreset: Identifiable, Hashable, Sendable {
                 AVVideoAllowFrameReorderingKey: false,
             ]
             if let profile { compression[AVVideoProfileLevelKey] = profile }
+            if tag == .pq, codec == .hevc, hdrMetadata {
+                compression[kVTCompressionPropertyKey_MasteringDisplayColorVolume as String] = Self.hdr10MasteringDisplay
+            }
             settings[AVVideoCompressionPropertiesKey] = compression
         }
         return settings

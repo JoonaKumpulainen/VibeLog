@@ -234,20 +234,104 @@ public struct GradeTransform: Sendable {
 public final class ACES2Renderer: @unchecked Sendable {
     /// Its tables take a moment to build, and never change.
     public static let shared = ACES2Renderer()
+    /// 1000 nits with P3-D65 limiting, as OpenColorIO's "ACES 2.0 - HDR 1000 nits (P3 D65)".
+    public static let hdr = ACES2Renderer(peak: 1000, limiting: ACES2OutputTransform.p3d65)
 
-    let transform = ACES2OutputTransform()
+    let transform: ACES2OutputTransform
     private static let ap0ToAP1 = ACES13Output.ap0ToAP1
     private static let ap1ToAP0 = ACES13Output.ap1ToAP0
     /// 8 x (128 + 768 x log(peak / 100) / log(100)), which is 1024 at 100 nits.
-    private static let ap1UpperBound = 1024.0
+    private let ap1UpperBound: Double
 
-    func display(ap0 input: (Double, Double, Double)) -> SIMD3<Double> {
+    init(peak: Float = 100, limiting: ACES2OutputTransform.Primaries = ACES2OutputTransform.rec709) {
+        transform = ACES2OutputTransform(peakLuminance: peak, limiting: limiting)
+        ap1UpperBound = 8 * (128 + 768 * log10(Double(peak) / 100) / 2)
+    }
+
+    /// The transform's output, linear in its limiting primaries, where 1 is 100 nits.
+    func displayLinear(ap0 input: (Double, Double, Double)) -> SIMD3<Double> {
         var ap1 = ACES13Output.mult(Self.ap0ToAP1, input)
-        let bound = Self.ap1UpperBound
+        let bound = ap1UpperBound
         ap1 = (min(max(ap1.0, 0), bound), min(max(ap1.1, 0), bound), min(max(ap1.2, 0), bound))
         let ap0 = ACES13Output.mult(Self.ap1ToAP0, ap1)
         let out = transform.forward((Float(ap0.0), Float(ap0.1), Float(ap0.2)))
-        func encode(_ v: Float) -> Double { pow(Double(min(max(v, 0), 1)), 1 / 2.4) }
-        return SIMD3(encode(out.0), encode(out.1), encode(out.2))
+        return SIMD3(Double(out.0), Double(out.1), Double(out.2))
+    }
+
+    func display(ap0 input: (Double, Double, Double)) -> SIMD3<Double> {
+        let out = displayLinear(ap0: input)
+        func encode(_ v: Double) -> Double { pow(min(max(v, 0), 1), 1 / 2.4) }
+        return SIMD3(encode(out.x), encode(out.y), encode(out.z))
+    }
+}
+
+/// What a baked look records: the Rec.709 picture, or HDR as PQ for HDR10 or as HLG.
+public enum BakeTarget: String, CaseIterable, Identifiable, Sendable {
+    case sdr, pq, hlg
+
+    public var id: String { rawValue }
+    public var isHDR: Bool { self != .sdr }
+
+    public var label: String {
+        switch self {
+        case .sdr: return "SDR Rec.709"
+        case .pq: return "HDR PQ (HDR10)"
+        case .hlg: return "HDR HLG"
+        }
+    }
+}
+
+/// PQ and HLG, from BT.2100, for ACES 2.0's 1000-nit picture in Rec.2020.
+enum HDREncoding {
+    static let peak = 1000.0
+
+    static let p3ToRec2020: simd_double3x3 = {
+        let m = ACES2OutputTransform.rgbToXYZ(ACES2OutputTransform.p3d65)
+        let toXYZ = simd_double3x3(rows: [SIMD3(m[0], m[1], m[2]), SIMD3(m[3], m[4], m[5]), SIMD3(m[6], m[7], m[8])])
+        return ColorMath.xyzToRec2020 * toXYZ
+    }()
+
+    /// SMPTE ST 2084, from display light in nits.
+    static func pq(_ nits: SIMD3<Double>) -> SIMD3<Double> {
+        func encode(_ value: Double) -> Double {
+            let m1 = 2610.0 / 16384, m2 = 2523.0 / 4096 * 128
+            let c1 = 3424.0 / 4096, c2 = 2413.0 / 4096 * 32, c3 = 2392.0 / 4096 * 32
+            let y = pow(min(max(value, 0), 10000) / 10000, m1)
+            return pow((c1 + c2 * y) / (1 + c3 * y), m2)
+        }
+        return SIMD3(encode(nits.x), encode(nits.y), encode(nits.z))
+    }
+
+    /// HLG, from display light in nits on a 1000-nit display: back to scene light through the
+    /// inverse of BT.2100's system gamma of 1.2, then the HLG curve.
+    static func hlg(_ nits: SIMD3<Double>) -> SIMD3<Double> {
+        let display = simd_clamp(nits / peak, SIMD3(repeating: 0), SIMD3(repeating: 1))
+        let y = simd_dot(display, GradeTransform.luma)
+        let scene = y > 0 ? display * pow(y, (1 - 1.2) / 1.2) : display
+        func encode(_ e: Double) -> Double {
+            let a = 0.17883277, b = 0.28466892, c = 0.55991073
+            let value = min(max(e, 0), 1)
+            return value <= 1.0 / 12 ? (3 * value).squareRoot() : a * log(12 * value - b) + c
+        }
+        return SIMD3(encode(scene.x), encode(scene.y), encode(scene.z))
+    }
+}
+
+extension BuiltInLook {
+    /// ACES 2.0's HDR look as a LUT on log, graded as the SDR one is, encoded as PQ or HLG in
+    /// Rec.2020. Only ACES 2.0 has it: ACES 1.3's HDR outputs and imported LUTs stay SDR.
+    public static func hdrLUT(
+        curve: LogCurve, gamut: Gamut, grade: LookGrade = LookGrade(), target: BakeTarget, size: Int = 65
+    ) -> CubeLUT {
+        let renderer = ACES2Renderer.hdr
+        return makeLUT(curve: curve, gamut: gamut, grade: grade, size: size) { linear in
+            let m = rec2020ToAP0
+            let ap0 = (m[0] * linear.x + m[1] * linear.y + m[2] * linear.z,
+                       m[3] * linear.x + m[4] * linear.y + m[5] * linear.z,
+                       m[6] * linear.x + m[7] * linear.y + m[8] * linear.z)
+            let rec2020 = HDREncoding.p3ToRec2020 * renderer.displayLinear(ap0: ap0)
+            let nits = simd_clamp(rec2020 * 100, SIMD3(repeating: 0), SIMD3(repeating: HDREncoding.peak))
+            return target == .hlg ? HDREncoding.hlg(nits) : HDREncoding.pq(nits)
+        }
     }
 }

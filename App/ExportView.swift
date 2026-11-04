@@ -24,6 +24,7 @@ struct ExportView: View {
     /// camera's alone.
     @State private var grade = LookGrade()
     @State private var effects = LookEffects()
+    @State private var target = BakeTarget.sdr
     @State private var editingGrade = false
     @State private var beforeEditing: (lut: String, grade: LookGrade, effects: LookEffects)?
 
@@ -137,6 +138,11 @@ struct ExportView: View {
                         LabeledContent("Grade", value: grade.isNeutral && effects.isNeutral ? "None" : "Changed")
                     }
                     .disabled(job.progress != nil)
+                    if lutName == BuiltInLook.aces20.name {
+                        Picker("Output", selection: $target) {
+                            ForEach(BakeTarget.allCases) { Text($0.label).tag($0) }
+                        }
+                    }
                     Picker("Codec", selection: $codec) {
                         Text("HEVC 4:2:0, small").tag("hevc420")
                         Text("ProRes 422 HQ").tag("prores422hq")
@@ -159,7 +165,7 @@ struct ExportView: View {
                     }
                 } footer: {
                     Text(isLog
-                        ? "Writes a new take tagged Rec.709 beside this one. Keep VibeLog open until it's done."
+                        ? "Writes a new take beside this one, tagged Rec.709, or Rec.2020 PQ or HLG for HDR. Keep VibeLog open until it's done."
                         : "This take already has its look baked in.")
                 }
     }
@@ -252,6 +258,7 @@ struct ExportView: View {
     private func startExport() {
         let preset = EncoderPreset.all.first { $0.id == codec } ?? EncoderPreset.all[0]
         let (name, curve, gamut, madeFor, sourceRec709, grade, effects) = lookInputs
+        let hdr: BakeTarget? = name == BuiltInLook.aces20.name && target.isHDR ? target : nil
         let graded = (grade.isNeutral ? "" : ", graded (\(grade.label))")
             + (effects.isNeutral ? "" : ", effects (\(effects.label))")
         let lutLabel = lutName.isEmpty
@@ -260,10 +267,17 @@ struct ExportView: View {
             : "\(lutName)\(graded), baked in" + (lutMadeForRec709 ? " after the Rec.709 view" : " on log")
         let take = take
         Task.detached(priority: .userInitiated) {
-            let look = Self.makeLook(
+            var look = Self.makeLook(
                 name: name, curve: curve, gamut: gamut, madeForRec709: madeFor, sourceRec709: sourceRec709,
                 grade: grade, effects: effects)
-            await MainActor.run { job.start(take: take, look: look, preset: preset, lookLabel: lutLabel) }
+            if let hdr {
+                look.lut = BuiltInLook.hdrLUT(curve: curve, gamut: gamut, grade: grade, target: hdr)
+                look.lutExpectsRec709 = false
+                look.hdr = true
+            }
+            let label = hdr.map { "ACES 2.0 HDR 1000 nits, \($0 == .hlg ? "HLG" : "PQ")" + lutLabel.dropFirst("ACES 2.0 Rec.709".count) } ?? lutLabel
+            let tag: FileTag = hdr == .hlg ? .hlg : hdr == .pq ? .pq : .rec709
+            await MainActor.run { job.start(take: take, look: look, preset: preset, lookLabel: label, fileTag: tag) }
         }
     }
 }
@@ -294,7 +308,7 @@ final class LookExportJob: ObservableObject {
 
     func cancel() { stop.set(true) }
 
-    func start(take: Take, look: LookExporter.Look, preset: EncoderPreset, lookLabel: String) {
+    func start(take: Take, look: LookExporter.Look, preset: EncoderPreset, lookLabel: String, fileTag: FileTag = .rec709) {
         guard progress == nil else { return }
         stop.set(false)
         progress = 0
@@ -304,7 +318,7 @@ final class LookExportJob: ObservableObject {
             let outcome: String
             do {
                 let saved = try await Self.export(
-                    take: take, look: look, preset: preset, lookLabel: lookLabel, stop: stop
+                    take: take, look: look, preset: preset, lookLabel: lookLabel, fileTag: fileTag, stop: stop
                 ) { share in
                     Task { @MainActor in self?.progress = share }
                 }
@@ -324,7 +338,7 @@ final class LookExportJob: ObservableObject {
     /// Writes the video with the look to a scratch file, then joins it with the take's audio
     /// into the videos folder, with a sidecar and a copy of the gyro log.
     nonisolated private static func export(
-        take: Take, look: LookExporter.Look, preset: EncoderPreset, lookLabel: String, stop: StopFlag,
+        take: Take, look: LookExporter.Look, preset: EncoderPreset, lookLabel: String, fileTag: FileTag, stop: StopFlag,
         progress: @escaping (Double) -> Void
     ) async throws -> URL {
         guard let exporter = LookExporter(look: look) else { throw LookExporter.Failure.gpu }
@@ -336,12 +350,12 @@ final class LookExportJob: ObservableObject {
 
         var metadata = take.info?.metadata ?? [:]
         metadata["look"] = lookLabel
-        metadata["fileTag"] = FileTag.rec709.label
+        metadata["fileTag"] = fileTag.label
         metadata["exportedFrom"] = take.url.lastPathComponent
         let rate = take.info?.metadata["frameRate"].flatMap(Double.init) ?? 30
         let encoder = try VideoEncoder(config: .init(
             url: scratch, preset: preset, size: EncoderSize(width: source.width, height: source.height),
-            frameRate: rate, audio: false, realTime: false, metadata: metadata, fileTag: .rec709))
+            frameRate: rate, audio: false, realTime: false, metadata: metadata, fileTag: fileTag))
         try await exporter.export(
             from: take.url, into: encoder, seconds: source.seconds, progress: progress, cancelled: { stop.isSet })
         var result = await withCheckedContinuation { continuation in
