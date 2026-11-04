@@ -437,6 +437,8 @@ Before building stabilized export, find out whether optical stabilization moves 
 
 ### Waiting on the phone
 
+**Start of the next session:** the owner installs `4e39165` if not done yet. Start the server with `python3 tools/test_server.py serve` (this session's was stopped at its end; address `192.168.1.148:8765`, token in the results folder's `token` file), have the owner turn on **Connect**, then run `suite tools/suites/hdr_bakes.json` first, since HLG is the one open bug, and read the `Encoding` and `VIDEO RESULT` lines and the sidecars' `fileTag`.
+
 Run these in order. The owner has limited time, so short tests come first, and the session log and sidecars should come back with the results.
 
 1. **Build `4e39165`:** the owner's checks on each batch's **Phone checks** and notes above, most of all: an HLG bake, which failed with `-12902` before the fix in Batch 9, over the link with `suite tools/suites/hdr_bakes.json`, three 10-second baked takes, PQ, HLG and SDR; the gear's target; dragging the scope to each corner and turning the phone; the look panel's page kept after a tap outside; the Haptics switch; export opening ungraded on the camera's look; and FX on a real light.
