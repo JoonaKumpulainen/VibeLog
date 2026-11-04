@@ -140,3 +140,34 @@ public struct LookStyle: Codable, Equatable, Sendable {
         return LookStyle(name: name, look: "ACES 2.0", grade: grade)
     }
 }
+
+/// The FX tab: glows from highlights, a soft mist, corners and grain, applied in linear light
+/// before the look. Each is 0 to 1, and vignette -1 to 1, where below 0 lightens the corners.
+public struct LookEffects: Codable, Equatable, Sendable {
+    public var halation = 0.0
+    public var bloom = 0.0
+    public var diffusion = 0.0
+    public var vignette = 0.0
+    public var grain = 0.0
+
+    public init() {}
+
+    public var isNeutral: Bool { self == LookEffects() }
+
+    public var label: String {
+        let parts = [("halation", halation), ("bloom", bloom), ("diffusion", diffusion), ("vignette", vignette), ("grain", grain)]
+            .filter { $0.1 != 0 }
+            .map { "\($0.0) " + String(format: "%+.0f", $0.1 * 100) }
+        return parts.isEmpty ? "none" : parts.joined(separator: ", ")
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        func read(_ key: CodingKeys) -> Double { ((try? values.decodeIfPresent(Double.self, forKey: key)) ?? nil) ?? 0 }
+        halation = read(.halation)
+        bloom = read(.bloom)
+        diffusion = read(.diffusion)
+        vignette = read(.vignette)
+        grain = read(.grain)
+    }
+}

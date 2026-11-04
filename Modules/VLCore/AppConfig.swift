@@ -104,6 +104,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var bakeToProRes = false
     /// The grade under the built-in looks and the Rec.709 view.
     public var lookGrade = LookGrade()
+    /// The FX tab's effects on the viewfinder and in export.
+    public var lookEffects = LookEffects()
     /// Styles the owner saved, kept on the device apart from presets, as the presets are.
     public var styles: [LookStyle] = []
     /// Moves to the Efficient path while the phone is hot.
@@ -168,6 +170,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         bakeLook = read(.bakeLook, defaults.bakeLook)
         bakeToProRes = read(.bakeToProRes, defaults.bakeToProRes)
         lookGrade = read(.lookGrade, defaults.lookGrade)
+        lookEffects = read(.lookEffects, defaults.lookEffects)
         styles = read(.styles, defaults.styles)
         efficientWhenHot = read(.efficientWhenHot, defaults.efficientWhenHot)
         frameGuide = read(.frameGuide, defaults.frameGuide)

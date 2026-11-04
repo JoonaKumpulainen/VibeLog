@@ -728,25 +728,32 @@ struct StatusBlocks: View {
                 .accessibilityElement(children: .combine)
             }
             Spacer(minLength: 0)
-            block(.right) { _ in
-                // The gear keeps to the phone's outer edge, as the format lines do on the left.
-                HStack(spacing: 6) {
-                    StatGauges()
-                        .allowsHitTesting(false)
-                    settingsButton
-                }
+            // The gauges turn as their own small square, and the gear on its own, centred in
+            // what's left between them and the screen's edge.
+            HStack(spacing: 0) {
+                StatGauges()
+                    .allowsHitTesting(false)
+                    .frame(width: Self.gaugeSide, height: Self.gaugeSide)
+                    .turnedToHold()
+                settingsButton
+                    .frame(maxWidth: .infinity)
             }
+            .frame(width: CameraGeometry.statusSide + 24, height: CameraGeometry.statusSide)
         }
-        .padding(.horizontal, 24)
+        .padding(.leading, 24)
         .padding(.top, (CameraGeometry.statusDepth - CameraGeometry.statusSide) / 2)
     }
+
+    /// Room for the three gauges, square so they can turn in place.
+    private static let gaugeSide: CGFloat = 56
 
     private var settingsButton: some View {
         Button(action: openSettings) {
             Image(systemName: "gearshape")
-                .font(.system(size: 20))
+                .font(.system(size: 26))
                 .foregroundStyle(Tokens.value)
-                .frame(width: 34, height: 44)
+                .turnedToHold()
+                .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1060,19 +1067,28 @@ struct LookPanel: View {
                 GradePanel(hold: hold)
             } else if page == .color {
                 ColorPanel(hold: hold)
+            } else if page == .fx {
+                FXPanel(hold: hold)
             } else if ready {
                 // The look's styles flow up from below it, and the looks make room above.
                 VStack(spacing: 0) {
-                    LookCarousel(options: lookOptions, selection: $choice, hold: hold, label: Self.label)
+                    LookCarousel(
+                        options: lookOptions, selection: $choice, hold: hold, label: Self.label, showsBand: false)
                     if !stylesHere.isEmpty {
                         LookCarousel(
                             options: [Self.noStyle] + stylesHere.map(\.name), selection: $styleChoice, hold: hold,
                             label: { $0 == Self.noStyle ? "NO STYLE" : $0.uppercased() },
                             deletable: { name in model.savedStyles.contains { $0.name == name } },
-                            delete: deleteStyle)
+                            delete: deleteStyle, showsBand: false)
                             .id(stylesHere.map(\.name))
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
+                }
+                // One band through the look and its style, growing as the style row flows up.
+                .background {
+                    RoundedRectangle(cornerRadius: Tokens.panelRadius)
+                        .fill(Tokens.surface)
+                        .frame(width: LookCarousel.itemWidth)
                 }
                 .clipped()
                 .animation(reduceMotion ? nil : .spring(duration: 0.4, bounce: 0.15), value: stylesHere.isEmpty)
@@ -1114,7 +1130,7 @@ struct LookPanel: View {
         .onChange(of: bake) { _, on in if !model.isRecording { model.bakeLook = on } }
     }
 
-    enum Page { case looks, adjust, color }
+    enum Page { case looks, adjust, color, fx }
 
     /// LOOKS, ADJUST and COLOR. The grade is fixed during a take, as the bake is.
     /// LOG is for judging exposure and takes no grade, so there ADJUST and COLOR merge into LOOKS,
@@ -1128,6 +1144,7 @@ struct LookPanel: View {
                 Group {
                     pageTab("ADJUST", on: page == .adjust) { page = .adjust }
                     pageTab("COLOR", on: page == .color) { page = .color }
+                    pageTab("FX", on: page == .fx) { page = .fx }
                 }
                 .disabled(model.isRecording)
                 .opacity(model.isRecording ? 0.4 : 1)
@@ -1596,6 +1613,159 @@ struct ColorPanel: View {
     }
 }
 
+/// One of the FX tab's effects.
+enum FXControl: CaseIterable, Identifiable {
+    case halation, bloom, diffusion, vignette, grain
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .halation: return "HAL"
+        case .bloom: return "BLOOM"
+        case .diffusion: return "DIFF"
+        case .vignette: return "VIG"
+        case .grain: return "GRAIN"
+        }
+    }
+
+    var name: String {
+        switch self {
+        case .halation: return "Halation"
+        case .bloom: return "Bloom"
+        case .diffusion: return "Diffusion"
+        case .vignette: return "Vignette"
+        case .grain: return "Grain"
+        }
+    }
+
+    var range: ClosedRange<Double> { self == .vignette ? -1...1 : 0...1 }
+
+    var keyPath: WritableKeyPath<LookEffects, Double> {
+        switch self {
+        case .halation: return \.halation
+        case .bloom: return \.bloom
+        case .diffusion: return \.diffusion
+        case .vignette: return \.vignette
+        case .grain: return \.grain
+        }
+    }
+
+    func text(_ value: Double) -> String {
+        self == .vignette ? String(format: "%+.0f", value * 100) : String(format: "%.0f", value * 100)
+    }
+}
+
+/// The effects, one slider at a time, as ADJUST works. Effects change a value the GPU reads each
+/// draw, so a drag shows at once with nothing to build. They show in the viewfinder and export;
+/// takes are recorded without them for now, which the bottom row says while BAKE is on.
+struct FXPanel: View {
+    @EnvironmentObject private var model: AppModel
+    let hold: Hold
+    @State private var selected = FXControl.halation
+    @State private var draft: LookEffects?
+    @State private var haptics = DetentHaptics()
+
+    private var shown: LookEffects { draft ?? model.lookEffects }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 0) {
+                ForEach(FXControl.allCases) { cell($0) }
+            }
+            .frame(height: 44)
+            Slider(value: binding(selected), in: selected.range) { editing in
+                if editing { haptics.prepare() } else { commit() }
+            }
+            .id(selected)
+            .tint(Tokens.held)
+            .padding(.horizontal, 8)
+            .accessibilityLabel(selected.name)
+            .accessibilityValue(selected.text(shown[keyPath: selected.keyPath]))
+            Spacer(minLength: 0)
+            HStack(spacing: 8) {
+                Text(model.bakeLook ? "NOT IN BAKED TAKES YET" : "VIEWFINDER AND EXPORT")
+                    .font(Tokens.markFont)
+                    .foregroundStyle(model.bakeLook ? Tokens.warning : Tokens.label)
+                    .fixedSize()
+                    .turnedToHold()
+                    .frame(maxWidth: .infinity)
+                Button {
+                    commit()
+                    model.lookEffects = LookEffects()
+                } label: {
+                    Text("RESET FX")
+                        .font(Tokens.labelFont)
+                        .foregroundStyle(shown.isNeutral ? Tokens.label : Tokens.value)
+                        .fixedSize()
+                        .turnedToHold()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Tokens.surface.opacity(shown.isNeutral ? 0.5 : 1), in: RoundedRectangle(cornerRadius: Tokens.panelRadius))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(shown.isNeutral)
+            }
+            .frame(height: 36)
+        }
+        .disabled(model.isRecording)
+        .sensoryFeedback(.selection, trigger: selected)
+        .onChange(of: selected) { _, _ in commit() }
+    }
+
+    private func commit() {
+        guard let draft else { return }
+        model.lookEffects = draft
+        self.draft = nil
+    }
+
+    private func binding(_ control: FXControl) -> Binding<Double> {
+        Binding(
+            get: { shown[keyPath: control.keyPath] },
+            set: { value in
+                var effects = shown
+                let old = effects[keyPath: control.keyPath]
+                let new = (value * 100).rounded() / 100
+                guard new != old else { return }
+                effects[keyPath: control.keyPath] = new
+                haptics.moved(from: Int((old * 100).rounded()), to: Int((new * 100).rounded()), neutral: 0)
+                draft = effects
+                model.previewEffects(effects)
+            })
+    }
+
+    private func cell(_ control: FXControl) -> some View {
+        let value = shown[keyPath: control.keyPath]
+        let isOn = control == selected
+        return Button {
+            if isOn {
+                commit()
+                model.lookEffects[keyPath: control.keyPath] = 0
+            } else {
+                selected = control
+            }
+        } label: {
+            VStack(spacing: 2) {
+                Text(control.title)
+                    .font(Tokens.labelFont)
+                    .foregroundStyle(isOn ? Tokens.held : Tokens.label)
+                Text(control.text(value))
+                    .font(Tokens.statusFont)
+                    .foregroundStyle(value != 0 ? Tokens.held : Tokens.value)
+            }
+            .fixedSize()
+            .turnedToHold()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(isOn ? Tokens.surface : .clear, in: RoundedRectangle(cornerRadius: Tokens.panelRadius))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(control.name)
+        .accessibilityValue(control.text(value))
+        .accessibilityHint(isOn ? "Tap again to reset" : "")
+    }
+}
+
 /// A tick for each number a slider passes, at most one every 35 ms, so a slow drag ticks on
 /// every step and a fast one feels like a ratchet rather than a buzz, which is what the Taptic
 /// Engine makes of taps closer together. Neutral always gets its firmer tick.
@@ -1634,20 +1804,24 @@ struct LookCarousel: View {
     let label: (String) -> String
     var deletable: (String) -> Bool = { _ in false }
     var delete: (String) -> Void = { _ in }
+    /// Off when rows stack, so one band runs through both.
+    var showsBand = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var centered: String?
 
     /// Room for a name.
-    private static let itemWidth: CGFloat = 128
+    static let itemWidth: CGFloat = 128
 
     var body: some View {
         GeometryReader { geometry in
             let margin = max((geometry.size.width - Self.itemWidth) / 2, 0)
             ZStack {
                 // The band the chosen name sits in.
-                RoundedRectangle(cornerRadius: Tokens.panelRadius)
-                    .fill(Tokens.surface)
-                    .frame(width: Self.itemWidth)
+                if showsBand {
+                    RoundedRectangle(cornerRadius: Tokens.panelRadius)
+                        .fill(Tokens.surface)
+                        .frame(width: Self.itemWidth)
+                }
                 ScrollViewReader { reader in
                     ScrollView(.horizontal, showsIndicators: false) {
                         // A plain stack, marked as the scroll targets itself, so the row snaps to a

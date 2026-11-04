@@ -14,13 +14,19 @@ public final class LookExporter {
         public var lutExpectsRec709: Bool
         /// The source was encoded in Rec.709's matrix, as takes tagged Rec.709 are.
         public var sourceRec709: Bool
+        /// The FX tab's effects, applied to each frame before the look.
+        public var effects: LookEffects
 
-        public init(curve: LogCurve, gamut: Gamut, lut: CubeLUT?, lutExpectsRec709: Bool, sourceRec709: Bool) {
+        public init(
+            curve: LogCurve, gamut: Gamut, lut: CubeLUT?, lutExpectsRec709: Bool, sourceRec709: Bool,
+            effects: LookEffects = LookEffects()
+        ) {
             self.curve = curve
             self.gamut = gamut
             self.lut = lut
             self.lutExpectsRec709 = lutExpectsRec709
             self.sourceRec709 = sourceRec709
+            self.effects = effects
         }
     }
 
@@ -51,6 +57,11 @@ public final class LookExporter {
     private let lutTexture: MTLTexture?
     private var sourceLuma: SIMD4<Float>
     private var logImage: MTLTexture?
+    private let effects: LookEffects
+    private let curve: LogCurve
+    private let effectsKit: EffectsKit?
+    private var effectsImage: MTLTexture?
+    private var effectsFrame = 0
 
     public init?(look: Look) {
         guard let pipeline = ProcessingPipeline(), let queue = pipeline.device.makeCommandQueue(),
@@ -71,7 +82,26 @@ public final class LookExporter {
         self.look = LookParams(settings: settings, lut: look.lut)
         lutTexture = look.lut.flatMap { pipeline.lutTexture(for: $0) }
         sourceLuma = look.sourceRec709 ? LookParams.rec709Luma : LookParams.rec2020Luma
+        effects = look.effects
+        curve = look.curve
+        effectsKit = look.effects.isNeutral ? nil : EffectsKit(device: pipeline.device)
         CVMetalTextureCacheCreate(nil, nil, pipeline.device, nil, &cache)
+    }
+
+    /// The frame's log image with the effects on it, or as it is without any. Grain moves from
+    /// frame to frame, as it would on film.
+    private func withEffects(_ image: MTLTexture, commands: MTLCommandBuffer) -> MTLTexture? {
+        guard let effectsKit else { return image }
+        effectsFrame += 1
+        let params = EffectsParams(effects, curve: curve, frame: effectsFrame)
+        if effectsImage?.width != image.width || effectsImage?.height != image.height {
+            effectsImage = pipeline.device.makeTexture(
+                descriptor: ProcessingPipeline.outputDescriptor(width: image.width, height: image.height))
+        }
+        guard let effectsImage, let glow = effectsKit.glow(for: image, params: params, commands: commands),
+            effectsKit.apply(image, into: effectsImage, glow: glow, params: params, commands: commands)
+        else { return nil }
+        return effectsImage
     }
 
     /// Frames come out as 16-bit AYCbCr, which `decodeVideo` reads, with chroma at full size.
@@ -103,13 +133,14 @@ public final class LookExporter {
             let wrappedOutput, let target = CVMetalTextureGetTexture(wrappedOutput),
             let commands = queue.makeCommandBuffer(),
             let decoded = decode(frame, commands: commands),
+            let source = withEffects(decoded.image, commands: commands),
             let encoder = commands.makeComputeCommandEncoder(),
             let lut = lutTexture ?? pipeline.placeholderTexture
         else { throw Failure.gpu }
         var parameters = look
         var turns = UInt32(((quarterTurns % 4) + 4) % 4)
         encoder.setComputePipelineState(previewState)
-        encoder.setTexture(decoded.image, index: 0)
+        encoder.setTexture(source, index: 0)
         encoder.setTexture(target, index: 1)
         encoder.setTexture(lut, index: 2)
         encoder.setBytes(&parameters, length: MemoryLayout<LookParams>.stride, index: 0)
@@ -149,8 +180,9 @@ public final class LookExporter {
             }
             guard let buffer = next else { throw Failure.encoderFull }
             guard let commands = queue.makeCommandBuffer(), let decoded = decode(frame, commands: commands),
+                let source = withEffects(decoded.image, commands: commands),
                 let planes = pipeline.encodeImage(
-                    decoded.image, into: buffer, commands: commands, look: look, lut: lutTexture)
+                    source, into: buffer, commands: commands, look: look, lut: lutTexture)
             else { throw Failure.gpu }
             commands.commit()
             commands.waitUntilCompleted()

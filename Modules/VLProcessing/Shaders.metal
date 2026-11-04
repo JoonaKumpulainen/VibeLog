@@ -423,6 +423,102 @@ vertex VertexOut monitorVertex(uint vertexID [[vertex_id]]) {
     return out;
 }
 
+// Must match EffectsParams in LookEffects.swift.
+struct EffectsParams {
+    float halation;
+    float bloom;
+    float diffusion;
+    float vignette;
+    float grain;
+    float frame;  // Moves the grain from frame to frame.
+    uint curve;
+    uint enabled;
+};
+
+static inline float3 decodeLog3(float3 v, uint curve) {
+    return float3(decodeLog(v.r, curve), decodeLog(v.g, curve), decodeLog(v.b, curve));
+}
+
+static inline float3 encodeLog3(float3 v, uint curve) {
+    return float3(encodeLog(v.r, curve), encodeLog(v.g, curve), encodeLog(v.b, curve));
+}
+
+static inline float grainNoise(float2 p) {
+    return fract(sin(dot(p, float2(12.9898, 78.233))) * 43758.5453);
+}
+
+// An eighth-size copy of the picture in linear light, each texel the average of sixteen taps
+// across the block under it, which the glows come from.
+kernel void effectsDownsample(texture2d<float, access::sample> image [[texture(0)]],
+                              texture2d<float, access::write> small [[texture(1)]],
+                              constant EffectsParams &e [[buffer(0)]],
+                              uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= small.get_width() || gid.y >= small.get_height()) return;
+    float2 size = float2(small.get_width(), small.get_height());
+    float3 sum = 0.0;
+    for (uint i = 0; i < 4; i++) {
+        for (uint j = 0; j < 4; j++) {
+            float2 uv = (float2(gid) + (float2(i, j) + 0.5) / 4.0) / size;
+            sum += decodeLog3(saturate(logSample(image, uv)), e.curve);
+        }
+    }
+    small.write(float4(sum / 16.0, 1.0), gid);
+}
+
+// One direction of a wide Gaussian blur on the small copy, sigma six texels, about 50 sensor
+// pixels at full size.
+kernel void effectsBlur(texture2d<float, access::read> input [[texture(0)]],
+                        texture2d<float, access::write> output [[texture(1)]],
+                        constant int2 &direction [[buffer(0)]],
+                        uint2 gid [[thread_position_in_grid]]) {
+    int2 size = int2(input.get_width(), input.get_height());
+    if (int(gid.x) >= size.x || int(gid.y) >= size.y) return;
+    float3 sum = 0.0;
+    float total = 0.0;
+    for (int step = -12; step <= 12; step++) {
+        float weight = exp(-float(step * step) / 72.0);
+        int2 at = clamp(int2(gid) + direction * step, int2(0), size - 1);
+        sum += input.read(uint2(at)).rgb * weight;
+        total += weight;
+    }
+    output.write(float4(sum / total, 1.0), gid);
+}
+
+// The effects on one pixel, in linear light in the recorded gamut, and back to the curve.
+// Halation is the red-orange glow film's backing reflects around highlights, bloom a neutral
+// glow, and diffusion a soft mist like a filter on the lens. Vignette darkens or lightens the
+// corners, and grain is noise that follows brightness.
+static inline float3 applyEffects(float3 logColor, float2 uv, float2 pixel, texture2d<float, access::sample> glow,
+                                  constant EffectsParams &e) {
+    constexpr sampler linearSampler(filter::linear, address::clamp_to_edge);
+    float3 linear = decodeLog3(saturate(logColor), e.curve);
+    float3 soft = glow.sample(linearSampler, uv).rgb;
+    float3 highlights = max(soft - 0.6, 0.0);
+    linear = mix(linear, soft, e.diffusion * 0.5) + highlights * e.diffusion * 0.5;
+    linear += highlights * e.bloom;
+    linear += highlights * e.halation * float3(1.0, 0.32, 0.12);
+    float2 centered = uv - 0.5;
+    float corner = dot(centered, centered) * 2.0;
+    linear *= max(1.0 - e.vignette * corner, 0.0);
+    if (e.grain > 0.0) {
+        float noise = grainNoise(pixel + e.frame * 17.0) + grainNoise(pixel * 1.7 - e.frame * 5.0) - 1.0;
+        float y = max(rec2020Luma(linear), 0.0);
+        linear += noise * e.grain * 0.06 * sqrt(y + 0.002);
+    }
+    return saturate(encodeLog3(max(linear, 0.0), e.curve));
+}
+
+// The effects on the whole log image, for export, which then encodes as usual.
+kernel void effectsApply(texture2d<float, access::sample> image [[texture(0)]],
+                         texture2d<float, access::write> output [[texture(1)]],
+                         texture2d<float, access::sample> glow [[texture(2)]],
+                         constant EffectsParams &e [[buffer(0)]],
+                         uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= output.get_width() || gid.y >= output.get_height()) return;
+    float2 uv = (float2(gid) + 0.5) / float2(output.get_width(), output.get_height());
+    output.write(float4(applyEffects(logSample(image, uv), uv, float2(gid), glow, e), 1.0), gid);
+}
+
 // The look the viewfinder shows, before its tools: log, the Rec.709 view, a LUT on log, or the
 // view then a LUT. The scopes measure the same.
 static inline float3 monitorLook(float3 logColor, constant MonitorParams &m, texture3d<float> custom) {
@@ -493,7 +589,9 @@ kernel void scopeBins(texture2d<float, access::sample> image [[texture(0)]],
 fragment float4 monitorFragment(VertexOut in [[stage_in]],
                                 texture2d<float> image [[texture(0)]],
                                 texture3d<float> custom [[texture(2)]],
-                                constant MonitorParams &m [[buffer(0)]]) {
+                                texture2d<float> glow [[texture(3)]],
+                                constant MonitorParams &m [[buffer(0)]],
+                                constant EffectsParams &e [[buffer(1)]]) {
     constexpr sampler linearSampler(filter::linear, address::clamp_to_edge);
     float across = 0.5 + (in.uv.x - 0.5) * m.desqueeze;
     if (across < 0.0 || across > 1.0) {
@@ -502,7 +600,9 @@ fragment float4 monitorFragment(VertexOut in [[stage_in]],
     float2 shown = m.viewOrigin + float2(across, in.uv.y) * m.viewScale;
     float2 rotated = float2(shown.y, 1.0 - shown.x);
     float3 logColor = image.sample(linearSampler, rotated).rgb;
-    float3 color = monitorLook(logColor, m, custom);
+    // Zebras and false color judge the picture as recorded, before the effects.
+    float3 shownLog = e.enabled != 0 ? applyEffects(logColor, rotated, rotated * float2(4032.0, 3024.0), glow, e) : logColor;
+    float3 color = monitorLook(shownLog, m, custom);
 
     float clip = m.bandsHigh.z;
     if (m.overlay == 1) {

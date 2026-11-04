@@ -23,8 +23,9 @@ struct ExportView: View {
     /// The export's own grade, starting from the LOOK panel's, so changing it here leaves the
     /// camera's alone.
     @State private var grade = LookGrade()
+    @State private var effects = LookEffects()
     @State private var editingGrade = false
-    @State private var beforeEditing: (lut: String, grade: LookGrade)?
+    @State private var beforeEditing: (lut: String, grade: LookGrade, effects: LookEffects)?
 
     private static let codecs = ["hevc420", "prores422hq"]
 
@@ -63,7 +64,8 @@ struct ExportView: View {
                         + (grade.isNeutral ? "." : ", graded: \(grade.label)."))
                 }
                 if editingGrade {
-                    ExportGradeEditor(lutName: $lutName, lutMadeForRec709: $lutMadeForRec709, grade: $grade)
+                    ExportGradeEditor(
+                        lutName: $lutName, lutMadeForRec709: $lutMadeForRec709, grade: $grade, effects: $effects)
                 } else {
                     settingsSections
                 }
@@ -77,6 +79,7 @@ struct ExportView: View {
                             if let before = beforeEditing {
                                 lutName = before.lut
                                 grade = before.grade
+                                effects = before.effects
                             }
                             editingGrade = false
                         }
@@ -102,6 +105,7 @@ struct ExportView: View {
             if !model.isAvailableLook(lutName) { lutName = "" }
             lutMadeForRec709 = model.processing.lutExpectsRec709
             grade = model.lookGrade
+            effects = model.lookEffects
             player.replaceCurrentItem(with: AVPlayerItem(url: take.url))
             refreshPreview()
         }
@@ -109,6 +113,7 @@ struct ExportView: View {
         .onChange(of: lutName) { _, _ in refreshPreview() }
         .onChange(of: lutMadeForRec709) { _, _ in refreshPreview() }
         .onChange(of: grade) { _, _ in refreshSoon() }
+        .onChange(of: effects) { _, _ in refreshSoon() }
         .interactiveDismissDisabled(job.progress != nil || editingGrade)
     }
 
@@ -126,10 +131,10 @@ struct ExportView: View {
                         }
                     }
                     Button {
-                        beforeEditing = (lutName, grade)
+                        beforeEditing = (lutName, grade, effects)
                         editingGrade = true
                     } label: {
-                        LabeledContent("Grade", value: grade.isNeutral ? "None" : "Changed")
+                        LabeledContent("Grade", value: grade.isNeutral && effects.isNeutral ? "None" : "Changed")
                     }
                     .disabled(job.progress != nil)
                     Picker("Codec", selection: $codec) {
@@ -161,6 +166,16 @@ struct ExportView: View {
 
     /// Reading a .cube or building an ACES look takes a moment, so this runs off the main thread.
     nonisolated private static func makeLook(
+        name: String, curve: LogCurve, gamut: Gamut, madeForRec709: Bool, sourceRec709: Bool, grade: LookGrade,
+        effects: LookEffects
+    ) -> LookExporter.Look {
+        var look = makeGradedLook(
+            name: name, curve: curve, gamut: gamut, madeForRec709: madeForRec709, sourceRec709: sourceRec709, grade: grade)
+        look.effects = effects
+        return look
+    }
+
+    nonisolated private static func makeGradedLook(
         name: String, curve: LogCurve, gamut: Gamut, madeForRec709: Bool, sourceRec709: Bool, grade: LookGrade
     ) -> LookExporter.Look {
         if let builtIn = BuiltInLook.named(name) {
@@ -198,13 +213,13 @@ struct ExportView: View {
         }
     }
 
-    private var lookInputs: (String, LogCurve, Gamut, Bool, Bool, LookGrade) {
-        (lutName, curve, gamut, lutMadeForRec709, take.info?.metadata["fileTag"] == FileTag.rec709.label, grade)
+    private var lookInputs: (String, LogCurve, Gamut, Bool, Bool, LookGrade, LookEffects) {
+        (lutName, curve, gamut, lutMadeForRec709, take.info?.metadata["fileTag"] == FileTag.rec709.label, grade, effects)
     }
 
     /// Gives the player the chosen look. The item keeps its place, and a paused one redraws.
     private func refreshPreview() {
-        let (name, curve, gamut, madeFor, sourceRec709, grade) = lookInputs
+        let (name, curve, gamut, madeFor, sourceRec709, grade, effects) = lookInputs
         let url = take.url
         previewGeneration += 1
         let generation = previewGeneration
@@ -212,7 +227,7 @@ struct ExportView: View {
             do {
                 let look = Self.makeLook(
                     name: name, curve: curve, gamut: gamut, madeForRec709: madeFor, sourceRec709: sourceRec709,
-                    grade: grade)
+                    grade: grade, effects: effects)
                 guard let exporter = LookExporter(look: look) else { throw LookExporter.Failure.gpu }
                 let composition = try await LookPlayback.composition(for: AVURLAsset(url: url), exporter: exporter)
                 await MainActor.run {
@@ -236,8 +251,9 @@ struct ExportView: View {
 
     private func startExport() {
         let preset = EncoderPreset.all.first { $0.id == codec } ?? EncoderPreset.all[0]
-        let (name, curve, gamut, madeFor, sourceRec709, grade) = lookInputs
-        let graded = grade.isNeutral ? "" : ", graded (\(grade.label))"
+        let (name, curve, gamut, madeFor, sourceRec709, grade, effects) = lookInputs
+        let graded = (grade.isNeutral ? "" : ", graded (\(grade.label))")
+            + (effects.isNeutral ? "" : ", effects (\(effects.label))")
         let lutLabel = lutName.isEmpty
             ? "Rec.709 view\(graded), baked in"
             : BuiltInLook.named(lutName) != nil ? "\(lutName) Rec.709\(graded), baked in"
@@ -246,7 +262,7 @@ struct ExportView: View {
         Task.detached(priority: .userInitiated) {
             let look = Self.makeLook(
                 name: name, curve: curve, gamut: gamut, madeForRec709: madeFor, sourceRec709: sourceRec709,
-                grade: grade)
+                grade: grade, effects: effects)
             await MainActor.run { job.start(take: take, look: look, preset: preset, lookLabel: lutLabel) }
         }
     }
@@ -388,11 +404,12 @@ struct ExportGradeEditor: View {
     @Binding var lutName: String
     @Binding var lutMadeForRec709: Bool
     @Binding var grade: LookGrade
+    @Binding var effects: LookEffects
     @State private var tab = Tab.adjust
     @State private var naming = false
     @State private var styleName = ""
 
-    enum Tab: String, CaseIterable { case looks = "Looks", adjust = "Adjust", color = "Color" }
+    enum Tab: String, CaseIterable { case looks = "Looks", adjust = "Adjust", color = "Color", fx = "FX" }
 
     var body: some View {
         Section {
@@ -407,6 +424,7 @@ struct ExportGradeEditor: View {
         case .looks: looks
         case .adjust: adjust
         case .color: colors
+        case .fx: fx
         }
         Section {
             Button("Save as Style…") {
@@ -480,6 +498,23 @@ struct ExportGradeEditor: View {
                 grade = LookGrade()
                 grade.bands = bands
             }
+        }
+    }
+
+    @ViewBuilder private var fx: some View {
+        Section {
+            ForEach(FXControl.allCases) { control in
+                sliderRow(
+                    control.name, text: control.text(effects[keyPath: control.keyPath]),
+                    value: Binding(
+                        get: { effects[keyPath: control.keyPath] },
+                        set: { effects[keyPath: control.keyPath] = ($0 * 100).rounded() / 100 }),
+                    range: control.range)
+            }
+            Button("Reset Effects", role: .destructive) { effects = LookEffects() }
+                .disabled(effects.isNeutral)
+        } footer: {
+            Text("Halation and bloom glow from highlights, diffusion softens like a mist filter, and grain follows brightness. Grain suits ProRes better than HEVC, which smears it.")
         }
     }
 

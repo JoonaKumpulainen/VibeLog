@@ -178,6 +178,17 @@ final class AppModel: ObservableObject {
         savedStyles.removeAll { $0.name == name }
     }
 
+    /// The FX tab's effects. The viewfinder and export apply them; takes don't yet, baked or not.
+    @Published var lookEffects = LookEffects() {
+        didSet { pipeline?.setEffects(lookEffects) }
+    }
+
+    /// Shows effects on the viewfinder while a slider moves, without publishing anything.
+    func previewEffects(_ effects: LookEffects) {
+        guard !isRecording else { return }
+        pipeline?.setEffects(effects)
+    }
+
     /// Whether the viewfinder shows a look that takes the grade. LOG is for judging exposure.
     var gradeApplies: Bool { processing.monitor == .rec709 }
 
@@ -611,6 +622,7 @@ final class AppModel: ObservableObject {
         config.bakeLook = bakeLook
         config.bakeToProRes = bakeToProRes
         config.lookGrade = lookGrade
+        config.lookEffects = lookEffects
         config.testServer = testServer
         config.testToken = testToken
         return config
@@ -689,6 +701,7 @@ final class AppModel: ObservableObject {
         bakeLook = saved.bakeLook
         bakeToProRes = saved.bakeToProRes
         lookGrade = saved.lookGrade
+        lookEffects = saved.lookEffects
     }
 
     /// What a preset keeps. Zebras and false color only ever reach the file through here.
@@ -774,11 +787,11 @@ final class AppModel: ObservableObject {
     }
 
     /// What the look panel started from, so Cancel can put it back.
-    private var lookBeforePanel: (lut: String, bake: Bool, monitor: MonitorMode, grade: LookGrade)?
+    private var lookBeforePanel: (lut: String, bake: Bool, monitor: MonitorMode, grade: LookGrade, effects: LookEffects)?
 
     /// The look panel changes the viewfinder as it slides, and Cancel puts this back.
     func openLookPanel() {
-        lookBeforePanel = (selectedLUT, bakeLook, processing.monitor, lookGrade)
+        lookBeforePanel = (selectedLUT, bakeLook, processing.monitor, lookGrade, lookEffects)
     }
 
     /// Shows a LUT on the viewfinder without choosing its curve, which only Select does.
@@ -797,6 +810,7 @@ final class AppModel: ObservableObject {
                 if !isRecording {
                     bakeLook = before.bake
                     lookGrade = before.grade
+                    lookEffects = before.effects
                 }
                 processing.monitor = before.monitor
             }

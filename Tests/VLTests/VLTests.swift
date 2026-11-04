@@ -2237,3 +2237,61 @@ final class ScopeTests: XCTestCase {
         XCTAssertEqual(Set(seen.map(\.rawValue)).count, ScopeKind.allCases.count)
     }
 }
+
+/// The FX kernels: a flat gray has no highlights to glow and nothing for diffusion to soften, so
+/// bloom, halation and diffusion leave it as it is, and a vignette darkens only the corners.
+final class EffectsTests: XCTestCase {
+    private func run(_ effects: LookEffects) throws -> (center: Float, corner: Float, expected: Float) {
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        let kit = try XCTUnwrap(EffectsKit(device: device))
+        let queue = try XCTUnwrap(device.makeCommandQueue())
+        let size = 64
+        // Readable from the CPU, unlike the pipeline's private ones.
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .rgba16Unorm, width: size, height: size, mipmapped: false)
+        descriptor.usage = [.shaderRead, .shaderWrite]
+        let image = try XCTUnwrap(device.makeTexture(descriptor: descriptor))
+        let output = try XCTUnwrap(device.makeTexture(descriptor: descriptor))
+        let gray = Float(LogCurve.sLog3.encode(0.18))
+        let code = UInt16((gray * 65535).rounded())
+        let pixels = [UInt16](repeating: code, count: size * size * 4)
+        pixels.withUnsafeBytes { bytes in
+            image.replace(region: MTLRegionMake2D(0, 0, size, size), mipmapLevel: 0, withBytes: bytes.baseAddress!, bytesPerRow: size * 8)
+        }
+        let params = EffectsParams(effects, curve: .sLog3, frame: 1)
+        let commands = try XCTUnwrap(queue.makeCommandBuffer())
+        let glow = try XCTUnwrap(kit.glow(for: image, params: params, commands: commands))
+        XCTAssertTrue(kit.apply(image, into: output, glow: glow, params: params, commands: commands))
+        commands.commit()
+        commands.waitUntilCompleted()
+        var read = [UInt16](repeating: 0, count: size * size * 4)
+        read.withUnsafeMutableBytes { bytes in
+            output.getBytes(bytes.baseAddress!, bytesPerRow: size * 8, from: MTLRegionMake2D(0, 0, size, size), mipmapLevel: 0)
+        }
+        func at(_ x: Int, _ y: Int) -> Float { Float(read[(y * size + x) * 4 + 1]) / 65535 }
+        return (at(32, 32), at(0, 0), gray)
+    }
+
+    func testGlowsLeaveFlatGrayAlone() throws {
+        var effects = LookEffects()
+        effects.bloom = 1
+        effects.halation = 1
+        effects.diffusion = 1
+        let result = try run(effects)
+        XCTAssertEqual(result.center, result.expected, accuracy: 2 / 1023)
+        XCTAssertEqual(result.corner, result.expected, accuracy: 2 / 1023)
+    }
+
+    func testVignetteDarkensCorners() throws {
+        var effects = LookEffects()
+        effects.vignette = 0.5
+        let result = try run(effects)
+        XCTAssertEqual(result.center, result.expected, accuracy: 2 / 1023)
+        XCTAssertLessThan(result.corner, result.expected - 0.02)
+    }
+
+    func testOlderSettingsReadWithoutEffects() throws {
+        let config = try JSONDecoder().decode(AppConfig.self, from: Data("{}".utf8))
+        XCTAssertTrue(config.lookEffects.isNeutral)
+    }
+}

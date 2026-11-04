@@ -405,6 +405,9 @@ public final class ProcessingPipeline: NSObject {
     private var pacer = MonitorPacer()
     private var scopes: ScopeMeter?
     private var scopeOn = false
+    private var effects = LookEffects()
+    private var effectsKit: EffectsKit?
+    private var effectsFrame = 0
     private var loggedFailure = false
 
     public init?(pixelFormat: MTLPixelFormat = .bgra8Unorm) {
@@ -501,6 +504,15 @@ public final class ProcessingPipeline: NSObject {
         if scopes == nil { scopes = ScopeMeter(device: device) }
         scopes?.configure(kind: kind, turns: turns, deliver: deliver)
         scopeOn = scopes != nil
+    }
+
+    /// The FX tab's effects on the viewfinder. Only the viewfinder and export apply them for now;
+    /// takes are recorded without them.
+    public func setEffects(_ value: LookEffects) {
+        lock.lock()
+        if !value.isNeutral, effectsKit == nil { effectsKit = EffectsKit(device: device) }
+        effects = value
+        lock.unlock()
     }
 
     /// Sends finished frames to an encoder until set back to nil. A baked look is fixed for the
@@ -1092,6 +1104,13 @@ public final class ProcessingPipeline: NSObject {
 
     private func placeholderLUT() -> MTLTexture? { emptyLUT }
 
+    /// The viewfinder's shader always takes a glow texture, even with the effects off.
+    private lazy var placeholder2D: MTLTexture? = {
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: 1, height: 1, mipmapped: false)
+        descriptor.usage = .shaderRead
+        return device.makeTexture(descriptor: descriptor)
+    }()
+
     /// Bound in place of a LUT the shader won't read.
     var placeholderTexture: MTLTexture? { emptyLUT }
 
@@ -1148,10 +1167,23 @@ extension ProcessingPipeline: MTKViewDelegate {
         let viewScale = monitorScale
         let peaking = monitorPeaking
         let scopeMeter = scopeOn ? scopes : nil
+        let shownEffects = effects
+        let kit = effectsKit
+        effectsFrame += 1
+        let frame = effectsFrame
         lock.unlock()
         guard current.monitor != .isp, let image, let placeholder = placeholderLUT(),
             let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
-            let commands = queue.makeCommandBuffer(),
+            let commands = queue.makeCommandBuffer()
+        else { return }
+        // The glow comes first, in the same command buffer, so the draw can sample it.
+        var effectParams = EffectsParams(shownEffects, curve: current.curve, frame: frame)
+        var glow = kit?.placeholder
+        if effectParams.enabled != 0, let kit {
+            glow = kit.glow(for: image, params: effectParams, commands: commands)
+            if glow == nil { effectParams.enabled = 0 }
+        }
+        guard let glowTexture = glow ?? kit?.placeholder ?? placeholder2D,
             let encoder = commands.makeRenderCommandEncoder(descriptor: pass)
         else { return }
 
@@ -1181,6 +1213,8 @@ extension ProcessingPipeline: MTKViewDelegate {
         encoder.setFragmentTexture(image, index: 0)
         encoder.setFragmentTexture(custom?.texture ?? placeholder, index: 2)
         encoder.setFragmentBytes(&parameters, length: MemoryLayout<MonitorParams>.stride, index: 0)
+        encoder.setFragmentTexture(glowTexture, index: 3)
+        encoder.setFragmentBytes(&effectParams, length: MemoryLayout<EffectsParams>.stride, index: 1)
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         encoder.endEncoding()
         if let scopeMeter, scopeMeter.wantsFrame() {
