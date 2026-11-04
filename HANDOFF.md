@@ -1,6 +1,6 @@
 # VibeLog handoff
 
-For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of mid Phase 7. The latest build is `15bb26c`, **Batch 10**, building in CI when this was written; `596b90b`, **Batch 9**, passed CI with 150 tests and one skip, the simulator having no ProRes encoder. Batches 1 to 10 below are this stretch's work in order: grading, COLOR, styles, the camera screen, scopes, FX, HDR and the owner's fixes. The owner tested up to `f53121e` on the phone and gave notes on it. Phone results for older builds are under **What's proven on the phone** and the **Session on** entries.
+For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of mid Phase 7. The latest build is `4e39165`, **Batch 10** plus the link's `set effects`, which passed CI with 150 tests and one skip and hasn't been on the phone; `596b90b`, **Batch 9**, passed CI with 150 tests and one skip, the simulator having no ProRes encoder. Batches 1 to 10 below are this stretch's work in order: grading, COLOR, styles, the camera screen, scopes, FX, HDR and the owner's fixes. The owner tested up to `f53121e` on the phone and gave notes on it. Phone results for older builds are under **What's proven on the phone** and the **Session on** entries.
 
 ## What this is
 
@@ -439,8 +439,8 @@ Before building stabilized export, find out whether optical stabilization moves 
 
 Run these in order. The owner has limited time, so short tests come first, and the session log and sidecars should come back with the results.
 
-1. **Build `15bb26c`:** the owner's checks on each batch's **Phone checks** and notes above, most of all: an HLG bake, which failed with `-12902` before the fix in Batch 9, over the link with `suite tools/suites/hdr_bakes.json`, three 10-second baked takes, PQ, HLG and SDR; the gear's target; dragging the scope to each corner and turning the phone; the look panel's page kept after a tap outside; the Haptics switch; export opening ungraded on the camera's look; and FX on a real light.
-2. **Frame cost:** `tools/suites/scope_cost.json` and `tools/suites/fx_cost.json`, each a 30-minute rest and a 10-minute take set up as long take 1, with SCOPE on, or with halation and bloom at 50, diffusion and grain at 30 on ACES 2.0. Compare `draw`, GPU time and losses with long take 1, `231150`. The FX suite needs the next build, which adds `set effects`; each needs about 110 GB free.
+1. **Build `4e39165`:** the owner's checks on each batch's **Phone checks** and notes above, most of all: an HLG bake, which failed with `-12902` before the fix in Batch 9, over the link with `suite tools/suites/hdr_bakes.json`, three 10-second baked takes, PQ, HLG and SDR; the gear's target; dragging the scope to each corner and turning the phone; the look panel's page kept after a tap outside; the Haptics switch; export opening ungraded on the camera's look; and FX on a real light.
+2. **Frame cost:** `tools/suites/scope_cost.json` and `tools/suites/fx_cost.json`, each a 30-minute rest and a 10-minute take set up as long take 1, with SCOPE on, or with halation and bloom at 50, diffusion and grain at 30 on ACES 2.0. Compare `draw`, GPU time and losses with long take 1, `231150`. The FX suite needs `4e39165` or later, which adds `set effects`; each needs about 110 GB free.
 3. **Apple's preview:** a matched pair of long takes, connected and not, after the same rest and unplugged.
 4. **Stabilization check:** slow two-second pans and small quick shakes at 1/250 s or shorter, as under **Stabilization check**.
 5. **ARRI Wide Gamut 3:** left for later at the owner's choice.
