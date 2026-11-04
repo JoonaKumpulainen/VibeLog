@@ -35,9 +35,8 @@ During a recording you can change ISO, shutter, white balance and the monitor to
 | **Debug overlay** | Shows frame rate, GPU, drops, memory, heat and storage on the viewfinder. |
 | **Show log** | Shows the log. **Copy** puts it on the clipboard, **Previous** opens the last session's log, which holds crash details. |
 | **Run control test** | Records 56 seconds and changes focus and exposure on a schedule. Each change is logged with frame and failure counts. |
-| **Run probe** | Logs every camera, format and RAW type, checks RAW availability for each session setup, tries Bayer formats on the video output, and scans AVCapture for RAW-related selectors. Saves `probes/probe_*.txt`. Takes up to a few minutes. |
+| **Run probe** | Logs every camera, format and RAW type, checks RAW availability for each session setup, tries Bayer formats on the video output, asks each rear camera for Apple's lens calibration, and scans AVCapture for RAW-related selectors. Saves `probes/probe_*.txt`. Takes up to a few minutes. |
 | **Test link** | Connects to `tools/test_server.py` on your computer, which can change settings, start takes and collect logs. It can't delete takes, and it's off at every launch. Use it on your own network only. [TEST_LINK.md](TEST_LINK.md) covers privacy, the server and removing it. |
-| **Disconnect Apple's preview** | Takes the hidden ISP preview off the camera while VibeLog's own viewfinder shows, to measure its heat. Off at every launch. |
 | **Fixed frame time at 30 fps** | Holds the sensor at 1/30 s. Off lets it stretch to 1/15 s, as older builds did. |
 | **Start stream** / **Stop stream** | Starts or stops the selected method without saving. |
 | **Encode video** | Off records a RAW dump to `clips/clip_*/`. Turn off **Write frames to disk** to measure capture speed alone. |

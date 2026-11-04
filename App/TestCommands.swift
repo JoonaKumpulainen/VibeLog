@@ -203,7 +203,7 @@ extension AppModel {
             "queueMs": String(format: "%.1f", pipelineStats.queueMs),
             "drawMs": String(format: "%.1f", pipelineStats.drawMs),
             "saveGyro": String(saveGyroLog), "captureTiming": String(logCaptureTiming),
-            "disconnectAppPreview": String(disconnectAppPreview), "appPreview": appPreviewConnected ? "connected" : "disconnected",
+            "appPreview": appPreviewConnected ? "connected" : "disconnected",
             "fps": String(format: "%.2f", stats.rollingFPS), "drops": String(takeDrops),
             "gpuMs": String(format: "%.1f", pipelineStats.gpuRecentMs),
             "thermal": status.thermal, "battery": status.battery, "freeGB": String(status.freeDiskGB),
@@ -279,7 +279,6 @@ extension AppModel {
             return nil
         case "method": return pick(CaptureMethod.allCases, \.rawValue) { method = $0 }
         case "encodeVideo": return flag { recordEncoded = $0 }
-        case "disconnectAppPreview": return flag { disconnectAppPreview = $0 }
         case "writeFrames": return flag { writeFrames = $0 }
         case "look": return pick(MonitorMode.allCases, \.rawValue) { processing.monitor = $0 }
         case "lut":

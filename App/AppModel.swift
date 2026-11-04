@@ -147,8 +147,6 @@ final class AppModel: ObservableObject {
     @Published var pipelineStats = PipelineStats()
 
     @Published var recordEncoded = true
-    /// Measures what Apple's preview costs while hidden. It resets at launch, like the other tests.
-    @Published var disconnectAppPreview = false
     /// Saves when each photo was requested and arrived, beside each encoded take.
     @Published var logCaptureTiming = false
     /// The best preset proven at full size on an iPhone 14 Pro at 30 fps.
@@ -397,8 +395,9 @@ final class AppModel: ObservableObject {
 
     var showsFullView: Bool { fullView && widescreen }
 
-    /// Apple's preview leaves the session while the Metal monitor replaces it, if Diagnostics asks.
-    var appPreviewConnected: Bool { !disconnectAppPreview || !monitorIsProcessed }
+    /// Apple's preview is only on the session for the ISP preview look. Hidden behind the Metal
+    /// monitor it costs heat: take `180159` ran 10 minutes with nothing lost without it.
+    var appPreviewConnected: Bool { !monitorIsProcessed }
 
     /// The Metal monitor is on screen, rather than the ISP preview.
     var monitorIsProcessed: Bool {
