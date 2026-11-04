@@ -1,5 +1,4 @@
 import AVFoundation
-import CoreGraphics
 import Metal
 import VLCore
 
@@ -91,18 +90,16 @@ public final class LookExporter {
         return (Int(size.width), Int(size.height), duration.seconds)
     }
 
-    /// The frame at about `seconds`, with the look, `width` pixels wide.
-    public func preview(of url: URL, at seconds: Double, width: Int) async throws -> CGImage {
-        let (reader, output) = try await makeReader(url, from: seconds)
-        defer { reader.cancelReading() }
-        guard let sample = output.copyNextSampleBuffer(), let frame = CMSampleBufferGetImageBuffer(sample) else {
-            throw Failure.cannotRead(reader.error?.localizedDescription ?? "no frame there")
-        }
-        let height = max(1, width * CVPixelBufferGetHeight(frame) / max(CVPixelBufferGetWidth(frame), 1))
-        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .rgba8Unorm, width: width, height: height, mipmapped: false)
-        descriptor.usage = [.shaderWrite, .shaderRead]
-        guard let small = pipeline.device.makeTexture(descriptor: descriptor),
+    /// One frame with the look into `output`, a 32BGRA buffer, scaled to its size. For playback,
+    /// which calls it from one queue at a time.
+    public func render(_ frame: CVPixelBuffer, into output: CVPixelBuffer) throws {
+        let width = CVPixelBufferGetWidth(output)
+        let height = CVPixelBufferGetHeight(output)
+        var wrappedOutput: CVMetalTexture?
+        guard let cache,
+            CVMetalTextureCacheCreateTextureFromImage(
+                nil, cache, output, nil, .bgra8Unorm, width, height, 0, &wrappedOutput) == kCVReturnSuccess,
+            let wrappedOutput, let target = CVMetalTextureGetTexture(wrappedOutput),
             let commands = queue.makeCommandBuffer(),
             let decoded = decode(frame, commands: commands),
             let encoder = commands.makeComputeCommandEncoder(),
@@ -111,26 +108,19 @@ public final class LookExporter {
         var parameters = look
         encoder.setComputePipelineState(previewState)
         encoder.setTexture(decoded.image, index: 0)
-        encoder.setTexture(small, index: 1)
+        encoder.setTexture(target, index: 1)
         encoder.setTexture(lut, index: 2)
         encoder.setBytes(&parameters, length: MemoryLayout<LookParams>.stride, index: 0)
         dispatch(encoder, previewState, width: width, height: height)
         encoder.endEncoding()
         commands.commit()
         commands.waitUntilCompleted()
-        withExtendedLifetime(decoded.wrapped) {}
+        withExtendedLifetime((decoded.wrapped, wrappedOutput)) {}
         guard commands.status == .completed else { throw Failure.gpu }
-
-        var bytes = [UInt8](repeating: 0, count: width * height * 4)
-        small.getBytes(&bytes, bytesPerRow: width * 4, from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
-        guard let provider = CGDataProvider(data: Data(bytes) as CFData),
-            let picture = CGImage(
-                width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
-                space: CGColorSpace(name: CGColorSpace.itur_709) ?? CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue), provider: provider,
-                decode: nil, shouldInterpolate: true, intent: .defaultIntent)
-        else { throw Failure.gpu }
-        return picture
+        // lookPreview writes display codes for Rec.709.
+        CVBufferSetAttachment(output, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
+        CVBufferSetAttachment(output, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_ITU_R_709_2, .shouldPropagate)
+        CVBufferSetAttachment(output, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2, .shouldPropagate)
     }
 
     /// Writes every frame into `sink`, at each frame's own time. `progress` gets the share done.

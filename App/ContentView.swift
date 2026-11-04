@@ -887,21 +887,14 @@ struct LookPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ZStack {
-                Text("LOOK")
-                    .font(Tokens.labelFont)
-                    .foregroundStyle(Tokens.label)
-                    .fixedSize()
-                    .turnedToHold()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .opacity(hold.isLandscape ? 0 : 1)
-                HStack(spacing: 0) {
-                    headerButton("Cancel", weight: .regular) { close(false) }
-                    Spacer(minLength: 0)
-                    bakeToggle
-                    Spacer(minLength: 0)
-                    headerButton("Select", weight: .semibold) { close(true) }
-                }
+            // No title: the LOOK cell that opened the panel already names it, and a turned title
+            // had no room beside the toggle.
+            HStack(spacing: 0) {
+                headerButton("Cancel", weight: .regular) { close(false) }
+                Spacer(minLength: 0)
+                bakeToggle
+                Spacer(minLength: 0)
+                headerButton("Select", weight: .semibold) { close(true) }
             }
             .frame(height: Self.headerDepth)
             if ready {

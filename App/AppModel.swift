@@ -95,17 +95,31 @@ final class AppModel: ObservableObject {
             guard !adopting, bakeLook != oldValue else { return }
             // A baked take is a finished picture, which HEVC 4:2:0 keeps at about a sixth of
             // ProRes 422 HQ. Turning it off goes back, unless the codec was changed since.
-            let hevc = EncoderPreset.all.first { $0.id == "hevc420" } ?? encoderPreset
+            let baked = Self.bakeCodec(proRes: bakeToProRes) ?? encoderPreset
             if bakeLook {
                 codecBeforeBake = encoderPreset
-                encoderPreset = hevc
+                encoderPreset = baked
             } else if let before = codecBeforeBake {
-                if encoderPreset == hevc { encoderPreset = before }
+                if encoderPreset == baked { encoderPreset = before }
                 codecBeforeBake = nil
             }
         }
     }
+    /// Baked takes in ProRes 422 HQ, for finishing in an editor, instead of small HEVC files.
+    @Published var bakeToProRes = false {
+        didSet {
+            guard !adopting, bakeLook, bakeToProRes != oldValue,
+                encoderPreset == Self.bakeCodec(proRes: oldValue),
+                let baked = Self.bakeCodec(proRes: bakeToProRes)
+            else { return }
+            encoderPreset = baked
+        }
+    }
     private var codecBeforeBake: EncoderPreset?
+    private static func bakeCodec(proRes: Bool) -> EncoderPreset? {
+        let id = proRes ? "prores422hq" : "hevc420"
+        return EncoderPreset.all.first { $0.id == id }
+    }
     /// A baked look is display Rec.709, so the file says so whatever the tag setting is.
     var takeFileTag: FileTag { bakeLook ? .rec709 : fileTag }
     /// What the sidecar says the file holds.
@@ -507,6 +521,7 @@ final class AppModel: ObservableObject {
         config.desqueeze = processing.desqueeze
         config.fileTag = fileTag.rawValue
         config.bakeLook = bakeLook
+        config.bakeToProRes = bakeToProRes
         config.testServer = testServer
         config.testToken = testToken
         return config
@@ -581,6 +596,7 @@ final class AppModel: ObservableObject {
         processing.desqueeze = saved.desqueeze
         fileTag = FileTag(rawValue: saved.fileTag) ?? fileTag
         bakeLook = saved.bakeLook
+        bakeToProRes = saved.bakeToProRes
     }
 
     /// What a preset keeps. Zebras and false color only ever reach the file through here.

@@ -84,7 +84,7 @@ struct SettingsView: View {
     private static let recordingTerms = [stopTerms, autoTerms, audioTerms, gyroTerms, heatTerms, mainsTerms].joined(separator: " ")
     private static let lookTerms = "look monitor rec.709 log preview isp viewfinder"
     private static let lutTerms = "lut cube import look monitor input"
-    private static let bakeTerms = "bake baked look lut rec.709 file record"
+    private static let bakeTerms = "bake baked look lut rec.709 file record prores hevc"
     private static let pauseTerms = "pause viewfinder monitor off gpu recording idle heat sleep"
     private static let peakingTerms = "focus peaking sensitivity low high detail"
     private static let guideTerms = "frame guide aspect scope 2.39 1.85 framing"
@@ -370,6 +370,10 @@ struct SettingsView: View {
             }
             if matches(Self.bakeTerms) {
                 bakeRow
+                if model.bakeLook {
+                    bakeToProResRow
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
             }
             if matches(Self.gamutTerms) {
                 Picker(selection: $model.processing.gamut) {
@@ -448,10 +452,20 @@ struct SettingsView: View {
     }
 
     private var bakeRow: some View {
-        Toggle(isOn: $model.bakeLook) {
+        // Animated, so the ProRes row slides out from under it.
+        Toggle(isOn: $model.bakeLook.animation(.easeInOut(duration: 0.25))) {
             explained(
                 "Bake",
-                "Records the viewfinder's look, Rec.709 or its LUT, into takes instead of log, tagged Rec.709. It can't be graded back. Switches to HEVC 4:2:0 for small files, and the look is fixed as a take starts. Also in the LOOK panel under MON.")
+                "Records the viewfinder's look, Rec.709 or its LUT, into takes instead of log, tagged Rec.709. It can't be graded back. Switches to HEVC 4:2:0 for small files, or ProRes, and the look is fixed as a take starts. Also in the LOOK panel under MON.")
+        }
+        .disabled(model.isRecording)
+    }
+
+    private var bakeToProResRow: some View {
+        Toggle(isOn: $model.bakeToProRes) {
+            explained(
+                "Bake to ProRes",
+                "Baked takes record ProRes 422 HQ instead of HEVC 4:2:0: about 160 MB/s instead of 25 to 30, with 4:2:2 color and no compression smear, for finishing in an editor.")
         }
         .disabled(model.isRecording)
     }

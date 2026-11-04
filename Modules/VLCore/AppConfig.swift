@@ -99,6 +99,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var twelveBitProRes = false
     /// Records the viewfinder's look instead of log.
     public var bakeLook = false
+    /// Baked takes record ProRes 422 HQ instead of HEVC 4:2:0.
+    public var bakeToProRes = false
     /// Moves to the Efficient path while the phone is hot.
     public var efficientWhenHot = true
     public var frameGuide = "2.39"
@@ -159,6 +161,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         distortionCorrection = read(.distortionCorrection, defaults.distortionCorrection)
         twelveBitProRes = read(.twelveBitProRes, defaults.twelveBitProRes)
         bakeLook = read(.bakeLook, defaults.bakeLook)
+        bakeToProRes = read(.bakeToProRes, defaults.bakeToProRes)
         efficientWhenHot = read(.efficientWhenHot, defaults.efficientWhenHot)
         frameGuide = read(.frameGuide, defaults.frameGuide)
         desqueeze = read(.desqueeze, defaults.desqueeze)

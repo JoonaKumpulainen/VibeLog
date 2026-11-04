@@ -111,6 +111,8 @@ The rule for this phase: anything that adds to real-time GPU load must prove it 
 - Horizon indicator: the Level tool does this.
 - Frame guides, a 3x3 grid and anamorphic desqueeze: added, with frame guides and desqueeze untested.
 - Look adjustments: sliders that grade the built-in ACES looks live in the viewfinder before a take and bake in with it. Planned, with the design in HANDOFF.md.
+- Baked HDR: ACES 2.0 at 1000 nits recorded as PQ or HLG, as Bake does for SDR. Planned, with the design in HANDOFF.md.
+- Halation, bloom and diffusion: export and viewfinder first, baked takes if the GPU allows. Planned.
 - LUTs baked into recordings, as an option: built, untested. It records the Rec.709 view and its LUT, tagged Rec.709, and needs a long take to prove its GPU cost.
 - Timecode and Apple Watch control, if they prove useful.
 

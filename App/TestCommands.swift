@@ -194,7 +194,7 @@ extension AppModel {
             "fixedFrameTime": String(fixedFrameTime), "uncompressedAudio": String(pcmAudio),
             "stereoAudio": String(stereoAudio),
             "distortionCorrection": String(distortionCorrection), "twelveBitProRes": String(twelveBitProRes),
-            "bakeLook": String(bakeLook),
+            "bakeLook": String(bakeLook), "bakeToProRes": String(bakeToProRes),
             "efficientWhenHot": String(processing.efficientWhenHot), "isoAuto": String(isoAuto),
             "bilinearWhenHot": String(processing.bilinearWhenHot),
             "yields": String(pipelineStats.monitorYields),
@@ -251,6 +251,7 @@ extension AppModel {
         case "distortionCorrection": return flag { distortionCorrection = $0 }
         case "twelveBitProRes": return flag { twelveBitProRes = $0 }
         case "bakeLook": return flag { bakeLook = $0 }
+        case "bakeToProRes": return flag { bakeToProRes = $0 }
         case "efficientWhenHot": return flag { processing.efficientWhenHot = $0 }
         case "isoAuto":
             guard exposureLocked else { return "isoAuto needs a set shutter first" }

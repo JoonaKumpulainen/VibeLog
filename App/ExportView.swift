@@ -1,10 +1,11 @@
 import AVFoundation
+import AVKit
 import SwiftUI
 import VLCore
 import VLProcessing
 import VLRecording
 
-/// Bakes a look into a copy of a take: the Rec.709 view, or a LUT, previewed first. The copy is
+/// Bakes a look into a copy of a take: the Rec.709 view, or a LUT, played through first. The copy is
 /// tagged Rec.709 and saved beside the take, with its audio, and the take itself is left as it is.
 struct ExportView: View {
     @EnvironmentObject private var model: AppModel
@@ -14,10 +15,11 @@ struct ExportView: View {
     @State private var lutName = ""
     @State private var lutMadeForRec709 = false
     @State private var codec = "hevc420"
-    @State private var seconds = 0.0
-    @State private var length = 0.0
-    @State private var preview: CGImage?
+    @State private var player = AVPlayer()
+    @State private var previewReady = false
     @State private var previewFailure: String?
+    /// Only the newest look reaches the player, however the builds finish.
+    @State private var previewGeneration = 0
 
     private static let codecs = ["hevc420", "prores422hq"]
 
@@ -41,11 +43,9 @@ struct ExportView: View {
                 Section {
                     ZStack {
                         Color.black
-                        if let preview {
-                            Image(decorative: preview, scale: 1)
-                                .resizable()
-                                .scaledToFit()
-                        } else {
+                        VideoPlayer(player: player)
+                            .opacity(previewReady ? 1 : 0)
+                        if !previewReady {
                             Text(previewFailure ?? "Loading preview")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -53,14 +53,8 @@ struct ExportView: View {
                     }
                     .aspectRatio(4 / 3, contentMode: .fit)
                     .listRowInsets(EdgeInsets())
-                    if length > 0 {
-                        Slider(value: $seconds, in: 0...length) { editing in
-                            if !editing { refreshPreview() }
-                        }
-                        .accessibilityLabel("Preview time")
-                    }
                 } footer: {
-                    Text("\(curve.label) in \(gamut.label), from the take's details.")
+                    Text("\(curve.label) in \(gamut.label), from the take's details. Plays with the look, as the export will write it.")
                 }
                 Section("Look") {
                     Picker("LUT", selection: $lutName) {
@@ -105,6 +99,7 @@ struct ExportView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") {
                         job.cancel()
+                        player.pause()
                         dismiss()
                     }
                 }
@@ -115,12 +110,10 @@ struct ExportView: View {
             lutName = model.linkedLUT(curve, gamut) ?? model.selectedLUT
             if !model.isAvailableLook(lutName) { lutName = "" }
             lutMadeForRec709 = model.processing.lutExpectsRec709
-            Task {
-                length = (try? await LookExporter.describe(take.url).seconds) ?? 0
-                seconds = length / 2
-                refreshPreview()
-            }
+            player.replaceCurrentItem(with: AVPlayerItem(url: take.url))
+            refreshPreview()
         }
+        .onDisappear { player.pause() }
         .onChange(of: lutName) { _, _ in refreshPreview() }
         .onChange(of: lutMadeForRec709) { _, _ in refreshPreview() }
         .interactiveDismissDisabled(job.progress != nil)
@@ -148,22 +141,33 @@ struct ExportView: View {
         (lutName, curve, gamut, lutMadeForRec709, take.info?.metadata["fileTag"] == FileTag.rec709.label)
     }
 
+    /// Gives the player the chosen look. The item keeps its place, and a paused one redraws.
     private func refreshPreview() {
         let (name, curve, gamut, madeFor, sourceRec709) = lookInputs
         let url = take.url
-        let time = seconds
+        previewGeneration += 1
+        let generation = previewGeneration
         Task.detached(priority: .userInitiated) {
             do {
                 let look = Self.makeLook(
                     name: name, curve: curve, gamut: gamut, madeForRec709: madeFor, sourceRec709: sourceRec709)
                 guard let exporter = LookExporter(look: look) else { throw LookExporter.Failure.gpu }
-                let image = try await exporter.preview(of: url, at: time, width: 960)
+                let composition = try await LookPlayback.composition(for: AVURLAsset(url: url), exporter: exporter)
                 await MainActor.run {
-                    preview = image
+                    guard generation == previewGeneration, let item = player.currentItem else { return }
+                    item.videoComposition = composition
+                    if player.rate == 0 {
+                        player.seek(to: player.currentTime(), toleranceBefore: .zero, toleranceAfter: .zero)
+                    }
+                    previewReady = true
                     previewFailure = nil
                 }
             } catch {
-                await MainActor.run { previewFailure = "\(error)" }
+                await MainActor.run {
+                    guard generation == previewGeneration else { return }
+                    previewReady = false
+                    previewFailure = "\(error)"
+                }
             }
         }
     }

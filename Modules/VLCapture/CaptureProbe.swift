@@ -1,4 +1,5 @@
 import AVFoundation
+import ImageIO
 import ObjCGuard
 import VLCore
 
@@ -50,6 +51,13 @@ public enum CaptureProbe {
                     add("--- per-format output capabilities")
                     probeOutputs(device: device, add: add)
                 }
+            }
+
+            progress("Probing lens calibration")
+            add("")
+            add("=== lens calibration: what each rear camera hands over per photo")
+            for device in devices where device.position == .back {
+                for raw in [true, false] { probeCalibration(device: device, raw: raw).forEach(add) }
             }
 
             progress("Scanning AVCapture runtime")
@@ -223,6 +231,107 @@ public enum CaptureProbe {
                 + "privSensor=\(privateValue(format, "sensorDimensions"))")
         }
         Log.shared.info("\(device.localizedName): Bayer photo types \(seenBayer.sorted())")
+    }
+
+    /// Whether a photo comes with Apple's factory calibration: the focal length in pixels, the
+    /// optical centre and the lens distortion table, which a per-phone lens profile needs. It's
+    /// documented for virtual cameras and depth, so each camera tries it with and without RAW.
+    private static func probeCalibration(device: AVCaptureDevice, raw: Bool) -> [String] {
+        let session = AVCaptureSession()
+        let photo = AVCapturePhotoOutput()
+        guard let input = try? AVCaptureDeviceInput(device: device), session.canAddInput(input) else {
+            return ["\(device.localizedName) raw=\(raw): cannot open"]
+        }
+        session.beginConfiguration()
+        session.addInput(input)
+        if session.canAddOutput(photo) { session.addOutput(photo) }
+        session.sessionPreset = .photo
+        session.commitConfiguration()
+        // The output only offers these once it's in a session, and raises if set unsupported.
+        if photo.isVirtualDeviceConstituentPhotoDeliverySupported {
+            _ = VLTryCatch { photo.isVirtualDeviceConstituentPhotoDeliveryEnabled = true }
+        }
+        if !raw, photo.isDepthDataDeliverySupported {
+            _ = VLTryCatch { photo.isDepthDataDeliveryEnabled = true }
+        }
+        session.startRunning()
+        defer {
+            session.stopRunning()
+            session.removeInput(input)
+        }
+
+        let format = device.activeFormat
+        let size = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+        var lines = ["\(device.localizedName) raw=\(raw) active \(size.width)x\(size.height) "
+            + "calibrationSupported=\(photo.isCameraCalibrationDataDeliverySupported) "
+            + "constituents=\(photo.isVirtualDeviceConstituentPhotoDeliveryEnabled) "
+            + "depth=\(photo.isDepthDataDeliveryEnabled) "
+            + "fov=\(format.videoFieldOfView) correctedFov=\(format.geometricDistortionCorrectedVideoFieldOfView)"]
+
+        let settings: AVCapturePhotoSettings
+        if raw {
+            guard let bayer = photo.availableRawPhotoPixelFormatTypes.first(where: AVCapturePhotoOutput.isBayerRAWPixelFormat)
+            else { return lines + ["    no Bayer RAW here"] }
+            settings = AVCapturePhotoSettings(rawPixelFormatType: bayer)
+        } else {
+            settings = AVCapturePhotoSettings()
+        }
+        if photo.isVirtualDeviceConstituentPhotoDeliveryEnabled {
+            settings.virtualDeviceConstituentPhotoDeliveryEnabledDevices = device.constituentDevices
+        }
+        settings.isDepthDataDeliveryEnabled = photo.isDepthDataDeliveryEnabled
+        settings.isCameraCalibrationDataDeliveryEnabled = photo.isCameraCalibrationDataDeliverySupported
+
+        let catcher = CalibrationCatcher()
+        if let raised = VLTryCatch({ photo.capturePhoto(with: settings, delegate: catcher) }) {
+            return lines + ["    capture raised: \(raised.reason ?? "")"]
+        }
+        if catcher.done.wait(timeout: .now() + 10) == .timedOut { lines.append("    timed out") }
+        return lines + catcher.lines
+    }
+
+    /// Collects what each delivered photo carries, which for a virtual camera may be several.
+    private final class CalibrationCatcher: NSObject, AVCapturePhotoCaptureDelegate {
+        let done = DispatchSemaphore(value: 0)
+        private let lock = NSLock()
+        private var collected: [String] = []
+        var lines: [String] {
+            lock.lock()
+            defer { lock.unlock() }
+            return collected
+        }
+
+        private func append(_ line: String) {
+            lock.lock()
+            collected.append(line)
+            lock.unlock()
+        }
+
+        func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+            let exif = photo.metadata[kCGImagePropertyExifDictionary as String] as? [String: Any]
+            var line = "    photo from \(photo.sourceDeviceType?.rawValue ?? "?") raw=\(photo.isRawPhoto) "
+                + "focal=\(exif?[kCGImagePropertyExifFocalLength as String] ?? "-") mm "
+                + "35mm=\(exif?[kCGImagePropertyExifFocalLenIn35mmFilm as String] ?? "-")"
+            if let error { line += " error \((error as NSError).code)" }
+            guard let calibration = photo.cameraCalibrationData ?? photo.depthData?.cameraCalibrationData else {
+                append(line + " calibration none")
+                return
+            }
+            let k = calibration.intrinsicMatrix
+            let table = calibration.lensDistortionLookupTable.map { data in
+                data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+            } ?? []
+            append(line + " calibration yes")
+            append("      intrinsics fx \(k.columns.0.x) fy \(k.columns.1.y) cx \(k.columns.2.x) cy \(k.columns.2.y) "
+                + "for \(calibration.intrinsicMatrixReferenceDimensions), pixel \(calibration.pixelSize) mm, "
+                + "distortion centre \(calibration.lensDistortionCenter)")
+            append("      distortion table \(table.count) values: \(table.map { String(format: "%.5f", $0) }.joined(separator: " "))")
+        }
+
+        func photoOutput(_ output: AVCapturePhotoOutput, didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?) {
+            if let error { append("    capture ended with error \((error as NSError).code)") }
+            done.signal()
+        }
     }
 
     private static func names(_ types: [OSType]) -> String {

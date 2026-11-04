@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreGraphics
 import CoreVideo
 import Metal
 import XCTest
@@ -1156,6 +1157,28 @@ final class VideoEncoderTests: XCTestCase {
             .advanced(by: 240 * CVPixelBufferGetBytesPerRowOfPlane(frame, 0)).assumingMemoryBound(to: UInt16.self)
         let display = MonitorTransform.display(log: SIMD3(repeating: gray), curve: .sLog3, gamut: .sGamut3Cine).y
         XCTAssertEqual(Double(row[320] >> 6), 64 + 876 * display, accuracy: 3)
+
+        // Playback draws the same look as the export.
+        let playing = AVURLAsset(url: source)
+        let generator = AVAssetImageGenerator(asset: playing)
+        generator.videoComposition = try await LookPlayback.composition(for: playing, exporter: exporter)
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+        let image: CGImage
+        do {
+            image = try await generator.image(at: CMTime(value: 1, timescale: 30)).image
+        } catch {
+            throw XCTSkip("The simulator can't play the take back: \(error)")
+        }
+        XCTAssertEqual(image.width, 640)
+        let space = try XCTUnwrap(image.colorSpace)
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4, space: space,
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        context.draw(image, in: CGRect(x: -320, y: -240, width: image.width, height: image.height))
+        XCTAssertEqual(Double(pixel[0]), 255 * display, accuracy: 3)
+        XCTAssertEqual(Double(pixel[1]), 255 * display, accuracy: 3)
     }
 
     /// Editors read the rate from the track, which must keep whole ticks per frame.
