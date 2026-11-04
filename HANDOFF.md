@@ -1,6 +1,6 @@
 # VibeLog handoff
 
-For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of early Phase 6. Phase 5 is built, and only a few phone checks remain. The latest build is `4241f0d`, which is `ad509d3` plus the look carousel fix and passed CI with 120 tests, one skipped because the simulator has no ProRes encoder, and hasn't been tested on the phone. Changes after it, under **After `4241f0d`, not built**, are waiting to be built. It holds everything under **New since `c459497`**; `c1e1041` in between had stereo and baking, and its phone results are below. Results from earlier builds are under **Session on `623c5a9`**. The latest phone results came from `021248e`. The last logged session came from `9f9a456`.
+For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of early Phase 6. Phase 5 is built, and only a few phone checks remain. The latest build is `4241f0d`, which is `ad509d3` plus the look carousel fix and passed CI with 120 tests, one skipped because the simulator has no ProRes encoder, and hasn't been tested on the phone. `6497b5e` adds what's under **After `4241f0d`** and **After `fa15863`**, and passed CI with the same 120 tests and one skip; it hasn't been tested on the phone. It holds everything under **New since `c459497`**; `c1e1041` in between had stereo and baking, and its phone results are below. Results from earlier builds are under **Session on `623c5a9`**. The latest phone results came from `021248e`. The last logged session came from `9f9a456`.
 
 ## What this is
 
@@ -219,7 +219,7 @@ New additions follow the design rules in [ROADMAP.md](ROADMAP.md). `CameraGeomet
 - **The screen shifted left during takes:** the owner's screenshot from `c459497`, with seven tools on, showed the picture, status and tray moved about 36 points left, cut off at the right. During a take the mic meter replaces the lenses in the tray, and the row's even split let the tools take about 41 points each before the meter claimed its 132, so the row ran about 50 points past the screen. The HUD then widened the screen's stack, and centering it moved everything, the picture included. Now the meter is sized first with `layoutPriority`, its minimum is 96 points, and the HUD is fixed to the screen's size, so no row can move the picture again. Not built.
 - **Focus peaking thresholds:** the owner found peaking too strong and raised Low from 0.1 to 0.2 and High from 0.05 to 0.1.
 
-### After `fa15863`, not built
+### After `fa15863`, built as `6497b5e`
 
 - **Apple's preview only for ISP preview:** take `180159` ran 10 minutes with nothing lost with the preview disconnected, and the owner confirmed auto exposure works that way, so `appPreviewConnected` is now simply whether the ISP preview look is chosen. Every other look takes it off the session, and a take holds whichever state it started with, as before. The Diagnostics switch, the link's `set disconnectAppPreview` and `tools/suites/app_preview.json` are gone. The status, sidecar and heat log still report `appPreview`. Untested: switching between ISP preview and another look, outside and during takes.
 
@@ -264,7 +264,7 @@ The owner wants sliders that grade the built-in looks, set while watching the vi
 
 - **Look carousel:** the owner found on `ad509d3` that sliding didn't snap or select, so a look had to be tapped, that the whole carousel turned sideways, and that the BAKE switch turned with the hold and broke. The row's stack sat inside a helper that switched between two stacks, so `scrollTargetLayout` never reached it and `scrollPosition` never moved. It's now a plain `HStack` marked as the scroll targets, which snaps and selects the look that settles in the middle. The carousel keeps its upright layout in every hold, at the owner's choice, and only the names turn. Only the BAKE label turns, and the switch stays as it is.
 
-### After `4241f0d`, not built
+### After `4241f0d`, built as `6497b5e`
 
 - **Owner's checks:** baking a look into a take was tested on the phone and works. On `4241f0d`, the look carousel snaps and selects, the header reads well, **Settings > About > Legal** looks right, and ACES has clearly more contrast than VibeLog's own Rec.709 view, as expected from its tone scale.
 - **Stereo orientation:** the owner listened to takes in every hold, and left and right come from the right sides in each, so iOS follows the hold by itself although the camera screen is locked to portrait. `AudioCapture` only sets `multichannelAudioMode = .stereo`. In take `182503`, 36.7 seconds turned through all four holds, the owner heard the stereo image stay with the picture's orientation at the start. Measured, the channels stayed within about ±3 dB of each other with no jump at any turn, but the scene had no steady source on one side, so this rests on listening. A steady sound on one side through the same turns would measure it: a locked image flips the level difference at each half turn. If it ever follows the device instead, set the audio session's preferred input orientation from the hold as a take starts.
