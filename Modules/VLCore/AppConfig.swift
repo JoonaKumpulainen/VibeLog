@@ -104,6 +104,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var bakeToProRes = false
     /// The grade under the built-in looks and the Rec.709 view.
     public var lookGrade = LookGrade()
+    /// Styles the owner saved, kept on the device apart from presets, as the presets are.
+    public var styles: [LookStyle] = []
     /// Moves to the Efficient path while the phone is hot.
     public var efficientWhenHot = true
     public var frameGuide = "2.39"
@@ -166,6 +168,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         bakeLook = read(.bakeLook, defaults.bakeLook)
         bakeToProRes = read(.bakeToProRes, defaults.bakeToProRes)
         lookGrade = read(.lookGrade, defaults.lookGrade)
+        styles = read(.styles, defaults.styles)
         efficientWhenHot = read(.efficientWhenHot, defaults.efficientWhenHot)
         frameGuide = read(.frameGuide, defaults.frameGuide)
         desqueeze = read(.desqueeze, defaults.desqueeze)
@@ -184,6 +187,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var presetValues: AppConfig {
         var values = self
         values.presets = []
+        values.styles = []
         values.defaultPreset = ""
         values.testServer = ""
         values.testToken = ""
@@ -194,6 +198,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public mutating func use(_ preset: FormatPreset) {
         var next = preset.settings
         next.presets = presets
+        next.styles = styles
         next.defaultPreset = defaultPreset
         next.testServer = testServer
         next.testToken = testToken

@@ -908,8 +908,9 @@ struct LookPanel: View {
                 ColorPanel(hold: hold)
             } else if ready {
                 LookCarousel(
-                    options: [Self.logChoice, ""] + model.lookNames, selection: $choice, hold: hold,
-                    label: Self.label)
+                    options: carouselOptions, selection: $choice, hold: hold, label: Self.label,
+                    deletable: { option in model.savedStyles.contains { AppModel.stylePrefix + $0.name == option } },
+                    delete: deleteStyle)
             }
         }
         .padding(.horizontal, 12)
@@ -918,7 +919,8 @@ struct LookPanel: View {
         .background(Tokens.opaquePanel)
         .onAppear {
             // The carousel opens on the current choice, so it's made once that's known.
-            choice = model.processing.monitor == .log ? Self.logChoice : model.selectedLUT
+            choice = model.processing.monitor == .log
+                ? Self.logChoice : model.currentStyleChoice ?? model.selectedLUT
             bake = model.bakeLook
             ready = true
         }
@@ -926,6 +928,9 @@ struct LookPanel: View {
             if value == Self.logChoice {
                 model.processing.monitor = .log
                 bake = false
+            } else if let style = model.style(forChoice: value) {
+                model.processing.monitor = .rec709
+                model.previewStyle(style)
             } else {
                 model.processing.monitor = .rec709
                 model.previewLUT(value)
@@ -974,8 +979,22 @@ struct LookPanel: View {
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 
+    /// LOG, MONITOR and the ACES looks, then styles, then imported LUTs.
+    private var carouselOptions: [String] {
+        [Self.logChoice, ""] + BuiltInLook.allCases.map(\.name)
+            + model.styles.map { AppModel.stylePrefix + $0.name } + model.lutNames
+    }
+
+    /// Only the owner's own styles can go, from a long press in the carousel.
+    private func deleteStyle(_ option: String) {
+        guard let style = model.style(forChoice: option) else { return }
+        if choice == option { choice = BuiltInLook.aces20.name }
+        model.deleteStyle(named: style.name)
+    }
+
     static func label(_ option: String) -> String {
         if option == logChoice { return "LOG" }
+        if option.hasPrefix(AppModel.stylePrefix) { return String(option.dropFirst(AppModel.stylePrefix.count)).uppercased() }
         if option.isEmpty { return "MONITOR" }
         if BuiltInLook.named(option) != nil { return option }
         return (option as NSString).deletingPathExtension
@@ -1093,6 +1112,8 @@ struct GradePanel: View {
     @State private var selected = GradeControl.exposure
     @State private var draft: LookGrade?
     @State private var haptics = DetentHaptics()
+    @State private var naming = false
+    @State private var styleName = ""
 
     private var shown: LookGrade { draft ?? model.lookGrade }
 
@@ -1100,6 +1121,7 @@ struct GradePanel: View {
         VStack(spacing: 4) {
             HStack(spacing: 0) {
                 ForEach(GradeControl.allCases) { cell($0) }
+                saveCell
                 resetCell
             }
             .frame(height: 44)
@@ -1165,6 +1187,32 @@ struct GradePanel: View {
         .accessibilityLabel(control.name)
         .accessibilityValue(control.text(value))
         .accessibilityHint(isOn ? "Tap again to reset" : "")
+    }
+
+    /// Keeps the look and grade as a style in the LOOKS carousel. A bare look needs no style.
+    private var saveCell: some View {
+        Button {
+            styleName = ""
+            naming = true
+        } label: {
+            Text("SAVE")
+                .font(Tokens.labelFont)
+                .foregroundStyle(shown.isNeutral ? Tokens.label : Tokens.value)
+                .fixedSize()
+                .turnedToHold()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(shown.isNeutral)
+        .accessibilityLabel("Save as a style")
+        .alert("Save Style", isPresented: $naming) {
+            TextField("Name", text: $styleName)
+            Button("Save") { model.saveStyle(named: styleName) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Keeps this look and grade, COLOR included, in the LOOKS carousel. Long-press it there to delete it.")
+        }
     }
 
     private var resetCell: some View {
@@ -1390,6 +1438,8 @@ struct LookCarousel: View {
     @Binding var selection: String
     let hold: Hold
     let label: (String) -> String
+    var deletable: (String) -> Bool = { _ in false }
+    var delete: (String) -> Void = { _ in }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var centered: String?
 
@@ -1452,6 +1502,11 @@ struct LookCarousel: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            if deletable(option) {
+                Button("Delete Style", systemImage: "trash", role: .destructive) { delete(option) }
+            }
+        }
         .accessibilityLabel(label(option))
         .accessibilityAddTraits(isOn ? .isSelected : [])
     }

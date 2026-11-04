@@ -90,3 +90,44 @@ public struct BandAdjust: Codable, Equatable, Sendable {
             .joined(separator: " ")
     }
 }
+
+/// A look and a grade under one name, shown in the LOOKS carousel. Choosing one loads its grade
+/// into ADJUST and COLOR, where it can be changed further.
+public struct LookStyle: Codable, Equatable, Sendable {
+    public var name: String
+    /// A built-in look's name, an imported LUT's file name, or empty for the Monitor view.
+    public var look: String
+    public var grade: LookGrade
+
+    public init(name: String, look: String, grade: LookGrade) {
+        self.name = name
+        self.look = look
+        self.grade = grade
+    }
+
+    /// Starting points under ACES 2.0, kept gentle, to be tuned on the phone.
+    public static let builtIn: [LookStyle] = [
+        style("Warm") { $0.temperature = 0.35; $0.saturation = 1.05 },
+        style("Cool") { $0.temperature = -0.35; $0.tint = -0.05 },
+        style("Punchy") { $0.contrast = 0.35; $0.saturation = 1.25 },
+        style("Faded") { $0.contrast = -0.35; $0.saturation = 0.8; $0.exposure = 0.1 },
+        style("Mono") { $0.saturation = 0; $0.contrast = 0.25 },
+        style("Teal & Orange") {
+            $0.contrast = 0.15
+            $0.saturation = 1.05
+            // Greens and blues turn toward teal, and warm colours get richer.
+            $0.bands[ColorBand.green.rawValue].hue = 0.5
+            $0.bands[ColorBand.blue.rawValue].hue = -0.4
+            $0.bands[ColorBand.cyan.rawValue].saturation = 0.2
+            $0.bands[ColorBand.orange.rawValue].saturation = 0.15
+            $0.bands[ColorBand.skin.rawValue].saturation = 0.1
+        },
+        style("Bleach bypass") { $0.saturation = 0.45; $0.contrast = 0.45; $0.exposure = -0.1 },
+    ]
+
+    private static func style(_ name: String, _ change: (inout LookGrade) -> Void) -> LookStyle {
+        var grade = LookGrade()
+        change(&grade)
+        return LookStyle(name: name, look: "ACES 2.0", grade: grade)
+    }
+}

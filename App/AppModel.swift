@@ -135,6 +135,47 @@ final class AppModel: ObservableObject {
     @Published var lookGrade = LookGrade() {
         didSet { if lookGrade != oldValue { buildLook() } }
     }
+    /// Styles the owner saved from ADJUST, after the built-in ones.
+    @Published var savedStyles: [LookStyle] = []
+    var styles: [LookStyle] { LookStyle.builtIn + savedStyles }
+    /// Styles share the carousel with looks, so their choices carry a prefix no file name has.
+    static let stylePrefix = "style:"
+
+    func style(forChoice choice: String) -> LookStyle? {
+        guard choice.hasPrefix(Self.stylePrefix) else { return nil }
+        let name = String(choice.dropFirst(Self.stylePrefix.count))
+        return styles.first { $0.name == name }
+    }
+
+    /// The style whose look and grade are on now, so the panel opens on it.
+    var currentStyleChoice: String? {
+        styles.first { $0.look == selectedLUT && $0.grade == lookGrade }.map { Self.stylePrefix + $0.name }
+    }
+
+    /// Shows a style on the viewfinder, as the carousel does with a look.
+    func previewStyle(_ style: LookStyle) {
+        previewLUT(isAvailableLook(style.look) ? style.look : "")
+        lookGrade = style.grade
+    }
+
+    /// Keeps the current look and grade as a style, numbered if the name is taken.
+    @discardableResult
+    func saveStyle(named wanted: String) -> String {
+        let base = wanted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Style" : wanted
+        var name = base
+        var number = 2
+        while styles.contains(where: { $0.name == name }) {
+            name = "\(base) \(number)"
+            number += 1
+        }
+        savedStyles.append(LookStyle(name: name, look: selectedLUT, grade: lookGrade))
+        return name
+    }
+
+    func deleteStyle(named name: String) {
+        savedStyles.removeAll { $0.name == name }
+    }
+
     /// Whether the viewfinder shows a look that takes the grade. LOG is for judging exposure.
     var gradeApplies: Bool { processing.monitor == .rec709 }
 
@@ -524,6 +565,7 @@ final class AppModel: ObservableObject {
         config.toolbar = toolbar.map(\.rawValue)
         config.activeTools = activeTools.map(\.rawValue).sorted()
         config.presets = presets
+        config.styles = savedStyles
         config.defaultPreset = defaultPreset
         config.peakingSensitivity = processing.peakingSensitivity.rawValue
         config.fixedFrameTime = fixedFrameTime
@@ -559,6 +601,7 @@ final class AppModel: ObservableObject {
         adoptSettings(loaded)
         applyingOptions = false
         presets = loaded.presets
+        savedStyles = loaded.styles
         defaultPreset = loaded.startupPreset?.name ?? ""
         testServer = loaded.testServer
         testToken = loaded.testToken

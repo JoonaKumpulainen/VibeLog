@@ -194,7 +194,7 @@ extension AppModel {
             "fixedFrameTime": String(fixedFrameTime), "uncompressedAudio": String(pcmAudio),
             "stereoAudio": String(stereoAudio),
             "distortionCorrection": String(distortionCorrection), "twelveBitProRes": String(twelveBitProRes),
-            "bakeLook": String(bakeLook), "bakeToProRes": String(bakeToProRes), "grade": lookGrade.label,
+            "bakeLook": String(bakeLook), "bakeToProRes": String(bakeToProRes), "grade": lookGrade.label, "style": currentStyleChoice.map { String($0.dropFirst(Self.stylePrefix.count)) } ?? "",
             "efficientWhenHot": String(processing.efficientWhenHot), "isoAuto": String(isoAuto),
             "bilinearWhenHot": String(processing.bilinearWhenHot),
             "yields": String(pipelineStats.monitorYields),
@@ -252,6 +252,14 @@ extension AppModel {
         case "twelveBitProRes": return flag { twelveBitProRes = $0 }
         case "bakeLook": return flag { bakeLook = $0 }
         case "bakeToProRes": return flag { bakeToProRes = $0 }
+        case "style":
+            guard !isRecording else { return "style can't change during a take" }
+            guard let style = style(forChoice: Self.stylePrefix + value) else {
+                return "style takes: \(styles.map(\.name).joined(separator: ", "))"
+            }
+            processing.monitor = .rec709
+            previewStyle(style)
+            return nil
         case "grade":
             // "none", or names and values such as exposure=0.5,saturation=1.2, from the slider ranges.
             guard !isRecording else { return "grade can't change during a take" }

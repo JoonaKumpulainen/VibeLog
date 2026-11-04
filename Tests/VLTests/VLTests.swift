@@ -2174,3 +2174,34 @@ final class LookGradeTests: XCTestCase {
         }
     }
 }
+
+/// Styles: the built-in ones are distinct and each changes the look, and saved ones live beside
+/// the presets rather than in them, so applying a preset never loses them.
+final class LookStyleTests: XCTestCase {
+    func testBuiltInStylesAreDistinct() {
+        let names = LookStyle.builtIn.map(\.name)
+        XCTAssertEqual(Set(names).count, names.count)
+        for style in LookStyle.builtIn {
+            XCTAssertFalse(style.grade.isNeutral, style.name)
+            XCTAssertNotNil(BuiltInLook.named(style.look), style.name)
+        }
+    }
+
+    func testSavedStylesStayOutOfPresets() {
+        var config = AppConfig()
+        config.styles = [LookStyle(name: "Mine", look: "ACES 2.0", grade: LookStyle.builtIn[0].grade)]
+        XCTAssertTrue(config.presetValues.styles.isEmpty)
+        var other = AppConfig()
+        other.exposureOffset = 0.3
+        config.use(FormatPreset(name: "Test", settings: other))
+        XCTAssertEqual(config.styles.map(\.name), ["Mine"])
+    }
+
+    func testStylesSurviveSaving() throws {
+        var config = AppConfig()
+        config.styles = [LookStyle.builtIn[5]]
+        let data = try JSONEncoder().encode(config)
+        let read = try JSONDecoder().decode(AppConfig.self, from: data)
+        XCTAssertEqual(read.styles, config.styles)
+    }
+}
