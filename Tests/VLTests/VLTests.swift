@@ -1181,6 +1181,68 @@ final class VideoEncoderTests: XCTestCase {
         XCTAssertEqual(Double(pixel[1]), 255 * display, accuracy: 3)
     }
 
+    /// A take stored a quarter turn from upright plays upright: the stored frame's dark left half
+    /// is on top, as the screen shows a portrait take.
+    func testPlaybackTurnsByTheTakesRotation() async throws {
+        let source = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
+        let preset = try XCTUnwrap(EncoderPreset.all.first { $0.id == "hevc420" })
+        let writer: VideoEncoder
+        do {
+            writer = try VideoEncoder(config: .init(
+                url: source, preset: preset, size: EncoderSize(width: 640, height: 480), audio: false,
+                realTime: false, rotationDegrees: 90))
+        } catch {
+            throw XCTSkip("\(preset.label) is not available here: \(error)")
+        }
+        let dark = LogCurve.sLog3.encode(0.01)
+        let bright = LogCurve.sLog3.encode(0.9)
+        for index in 0..<6 {
+            let buffer = try XCTUnwrap(writer.nextPixelBuffer())
+            CVPixelBufferLockBaseAddress(buffer, [])
+            let luma = try XCTUnwrap(CVPixelBufferGetBaseAddressOfPlane(buffer, 0)).assumingMemoryBound(to: UInt16.self)
+            let lumaRow = CVPixelBufferGetBytesPerRowOfPlane(buffer, 0) / 2
+            for row in 0..<480 {
+                for column in 0..<640 {
+                    let code = 64 + 876 * (column < 320 ? dark : bright)
+                    luma[row * lumaRow + column] = UInt16(code.rounded()) << 6
+                }
+            }
+            let chroma = try XCTUnwrap(CVPixelBufferGetBaseAddressOfPlane(buffer, 1)).assumingMemoryBound(to: UInt16.self)
+            let chromaCount = CVPixelBufferGetBytesPerRowOfPlane(buffer, 1) * CVPixelBufferGetHeightOfPlane(buffer, 1) / 2
+            for sample in 0..<chromaCount { chroma[sample] = 512 << 6 }
+            CVPixelBufferUnlockBaseAddress(buffer, [])
+            writer.append(buffer, at: CMTime(value: Int64(index), timescale: 30))
+        }
+        let written = await withCheckedContinuation { continuation in writer.finish { continuation.resume(returning: $0) } }
+        if written.failure != nil { throw XCTSkip("Encoder failed here: \(written.failure ?? "")") }
+
+        let look = LookExporter.Look(
+            curve: .sLog3, gamut: .sGamut3Cine, lut: nil, lutExpectsRec709: false, sourceRec709: false)
+        let exporter = try XCTUnwrap(LookExporter(look: look))
+        let asset = AVURLAsset(url: source)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.videoComposition = try await LookPlayback.composition(for: asset, exporter: exporter)
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+        let image: CGImage
+        do {
+            image = try await generator.image(at: CMTime(value: 1, timescale: 30)).image
+        } catch {
+            throw XCTSkip("The simulator can't play the take back: \(error)")
+        }
+        XCTAssertEqual(image.width, 480)
+        XCTAssertEqual(image.height, 640)
+        var pixels = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &pixels, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
+            space: try XCTUnwrap(image.colorSpace), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        // The context's first row is the image's top.
+        let top = pixels[(160 * image.width + 240) * 4]
+        let bottom = pixels[(480 * image.width + 240) * 4]
+        XCTAssertLessThan(Int(top) + 60, Int(bottom), "top \(top), bottom \(bottom)")
+    }
+
     /// Editors read the rate from the track, which must keep whole ticks per frame.
     func testFileReadsAtItsFrameRate() async throws {
         for fps in [24.0, 25, 24000.0 / 1001] {
@@ -1935,5 +1997,82 @@ final class ACESTests: XCTestCase {
             XCTAssertEqual(BuiltInLook.named(look.name), look)
         }
         XCTAssertNil(BuiltInLook.named("ACES 2.0.cube"))
+    }
+}
+
+/// The grade under the built-in looks: neutral changes nothing, and each slider does what it says.
+final class LookGradeTests: XCTestCase {
+    private let gray = SIMD3<Double>(repeating: 0.18)
+
+    func testNeutralGradeLeavesTheLookAsItIs() {
+        let plain = BuiltInLook.aces20.lut(curve: .appleLog, gamut: .rec2020, size: 9)
+        let graded = BuiltInLook.aces20.lut(curve: .appleLog, gamut: .rec2020, grade: LookGrade(), size: 9)
+        XCTAssertEqual(plain.samples, graded.samples)
+        XCTAssertTrue(LookGrade().isNeutral)
+        XCTAssertEqual(LookGrade().label, "none")
+    }
+
+    func testExposureMovesMiddleGrayByStops() {
+        var grade = LookGrade()
+        grade.exposure = 1
+        let out = GradeTransform(grade).apply(gray)
+        XCTAssertEqual(out.x, 0.36, accuracy: 1e-9)
+        XCTAssertEqual(out.z, 0.36, accuracy: 1e-9)
+        // Through the tone curve, a stop up is brighter but rolls off below double.
+        let before = BuiltInLook.aces20.display(linearRec2020: gray).y
+        let after = BuiltInLook.aces20.display(linearRec2020: out).y
+        XCTAssertGreaterThan(after, before)
+        XCTAssertLessThan(after, before * 2)
+    }
+
+    func testContrastPivotsAtMiddleGray() {
+        var grade = LookGrade()
+        grade.contrast = 0.5
+        let transform = GradeTransform(grade)
+        XCTAssertEqual(transform.apply(gray).y, 0.18, accuracy: 1e-9)
+        XCTAssertGreaterThan(transform.apply(gray * 2).y, 0.36)
+        XCTAssertLessThan(transform.apply(gray / 2).y, 0.09)
+        // Neutrals stay neutral.
+        let bright = transform.apply(gray * 4)
+        XCTAssertEqual(bright.x, bright.z, accuracy: 1e-9)
+    }
+
+    func testNoSaturationGivesNeutralOutput() {
+        var grade = LookGrade()
+        grade.saturation = 0
+        let lut = BuiltInLook.aces20.lut(curve: .sLog3, gamut: .sGamut3Cine, grade: grade, size: 9)
+        for sample in lut.samples {
+            XCTAssertEqual(sample.x, sample.y, accuracy: 2e-3)
+            XCTAssertEqual(sample.y, sample.z, accuracy: 2e-3)
+        }
+    }
+
+    func testWarmerAndMagentaMoveGray() {
+        var warm = LookGrade()
+        warm.temperature = 0.5
+        let warmed = GradeTransform(warm).apply(gray)
+        XCTAssertGreaterThan(warmed.x, warmed.z)
+        var magenta = LookGrade()
+        magenta.tint = 0.5
+        let tinted = GradeTransform(magenta).apply(gray)
+        XCTAssertLessThan(tinted.y, tinted.x)
+        XCTAssertLessThan(tinted.y, tinted.z)
+    }
+
+    /// The Rec.709 view's LUT matches the per-pixel view, since a grade there swaps one for the other.
+    func testGradedRec709MatchesTheView() {
+        var grade = LookGrade()
+        grade.exposure = 0.5
+        let size = 9
+        let lut = BuiltInLook.rec709LUT(curve: .sLog3, gamut: .sGamut3Cine, grade: grade, size: size)
+        let toRec2020 = Gamut.sGamut3Cine.fromRec2020.inverse
+        for (r, g, b) in [(4, 4, 4), (8, 2, 5), (3, 7, 1)] {
+            let log = SIMD3(Double(r), Double(g), Double(b)) / Double(size - 1)
+            let linear = toRec2020 * SIMD3(LogCurve.sLog3.decode(log.x), LogCurve.sLog3.decode(log.y), LogCurve.sLog3.decode(log.z))
+            let expected = MonitorTransform.display(linearRec2020: linear * pow(2, 0.5))
+            let got = lut.samples[(b * size + g) * size + r]
+            XCTAssertEqual(Double(got.x), expected.x, accuracy: 1e-5)
+            XCTAssertEqual(Double(got.y), expected.y, accuracy: 1e-5)
+        }
     }
 }

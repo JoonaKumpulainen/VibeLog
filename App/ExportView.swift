@@ -54,7 +54,8 @@ struct ExportView: View {
                     .aspectRatio(4 / 3, contentMode: .fit)
                     .listRowInsets(EdgeInsets())
                 } footer: {
-                    Text("\(curve.label) in \(gamut.label), from the take's details. Plays with the look, as the export will write it.")
+                    Text("\(curve.label) in \(gamut.label), from the take's details. Plays with the look, as the export will write it"
+                        + (grade.isNeutral ? "." : ", with the grade from the LOOK panel: \(grade.label)."))
                 }
                 Section("Look") {
                     Picker("LUT", selection: $lutName) {
@@ -121,12 +122,17 @@ struct ExportView: View {
 
     /// Reading a .cube or building an ACES look takes a moment, so this runs off the main thread.
     nonisolated private static func makeLook(
-        name: String, curve: LogCurve, gamut: Gamut, madeForRec709: Bool, sourceRec709: Bool
+        name: String, curve: LogCurve, gamut: Gamut, madeForRec709: Bool, sourceRec709: Bool, grade: LookGrade
     ) -> LookExporter.Look {
         if let builtIn = BuiltInLook.named(name) {
             return LookExporter.Look(
-                curve: curve, gamut: gamut, lut: builtIn.lut(curve: curve, gamut: gamut), lutExpectsRec709: false,
-                sourceRec709: sourceRec709)
+                curve: curve, gamut: gamut, lut: builtIn.lut(curve: curve, gamut: gamut, grade: grade),
+                lutExpectsRec709: false, sourceRec709: sourceRec709)
+        }
+        if name.isEmpty, !grade.isNeutral {
+            return LookExporter.Look(
+                curve: curve, gamut: gamut, lut: BuiltInLook.rec709LUT(curve: curve, gamut: gamut, grade: grade),
+                lutExpectsRec709: false, sourceRec709: sourceRec709)
         }
         var lut: CubeLUT?
         if !name.isEmpty {
@@ -137,20 +143,26 @@ struct ExportView: View {
             curve: curve, gamut: gamut, lut: lut, lutExpectsRec709: madeForRec709, sourceRec709: sourceRec709)
     }
 
-    private var lookInputs: (String, LogCurve, Gamut, Bool, Bool) {
-        (lutName, curve, gamut, lutMadeForRec709, take.info?.metadata["fileTag"] == FileTag.rec709.label)
+    /// The grade set in the look panel goes under the built-in looks and the Rec.709 view here too.
+    private var grade: LookGrade {
+        lutName.isEmpty || BuiltInLook.named(lutName) != nil ? model.lookGrade : LookGrade()
+    }
+
+    private var lookInputs: (String, LogCurve, Gamut, Bool, Bool, LookGrade) {
+        (lutName, curve, gamut, lutMadeForRec709, take.info?.metadata["fileTag"] == FileTag.rec709.label, grade)
     }
 
     /// Gives the player the chosen look. The item keeps its place, and a paused one redraws.
     private func refreshPreview() {
-        let (name, curve, gamut, madeFor, sourceRec709) = lookInputs
+        let (name, curve, gamut, madeFor, sourceRec709, grade) = lookInputs
         let url = take.url
         previewGeneration += 1
         let generation = previewGeneration
         Task.detached(priority: .userInitiated) {
             do {
                 let look = Self.makeLook(
-                    name: name, curve: curve, gamut: gamut, madeForRec709: madeFor, sourceRec709: sourceRec709)
+                    name: name, curve: curve, gamut: gamut, madeForRec709: madeFor, sourceRec709: sourceRec709,
+                    grade: grade)
                 guard let exporter = LookExporter(look: look) else { throw LookExporter.Failure.gpu }
                 let composition = try await LookPlayback.composition(for: AVURLAsset(url: url), exporter: exporter)
                 await MainActor.run {
@@ -174,15 +186,17 @@ struct ExportView: View {
 
     private func startExport() {
         let preset = EncoderPreset.all.first { $0.id == codec } ?? EncoderPreset.all[0]
+        let (name, curve, gamut, madeFor, sourceRec709, grade) = lookInputs
+        let graded = grade.isNeutral ? "" : ", graded (\(grade.label))"
         let lutLabel = lutName.isEmpty
-            ? "Rec.709 view, baked in"
-            : BuiltInLook.named(lutName) != nil ? "\(lutName) Rec.709, baked in"
+            ? "Rec.709 view\(graded), baked in"
+            : BuiltInLook.named(lutName) != nil ? "\(lutName) Rec.709\(graded), baked in"
             : "\(lutName), baked in" + (lutMadeForRec709 ? " after the Rec.709 view" : " on log")
-        let (name, curve, gamut, madeFor, sourceRec709) = lookInputs
         let take = take
         Task.detached(priority: .userInitiated) {
             let look = Self.makeLook(
-                name: name, curve: curve, gamut: gamut, madeForRec709: madeFor, sourceRec709: sourceRec709)
+                name: name, curve: curve, gamut: gamut, madeForRec709: madeFor, sourceRec709: sourceRec709,
+                grade: grade)
             await MainActor.run { job.start(take: take, look: look, preset: preset, lookLabel: lutLabel) }
         }
     }

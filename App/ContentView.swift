@@ -866,8 +866,9 @@ struct MonitorPanel: View {
 }
 
 /// The viewfinder's look: LOG, Rec.709 or a LUT, each shown on the picture as it reaches the
-/// middle of the carousel. BAKE in the header records that look into takes. Cancel puts back what
-/// was there, and Select keeps it. Every control keeps its place and turns with the hold.
+/// middle of the carousel, and ADJUST to grade it. BAKE in the header records that look into
+/// takes. Cancel puts back what was there, and Select keeps it. Every control keeps its place and
+/// turns with the hold.
 struct LookPanel: View {
     @EnvironmentObject private var model: AppModel
     let hold: Hold
@@ -878,6 +879,7 @@ struct LookPanel: View {
     @State private var choice = ""
     @State private var bake = false
     @State private var ready = false
+    @State private var adjusting = false
 
     /// Not a file name, since those end in .cube.
     static let logChoice = "log"
@@ -897,7 +899,10 @@ struct LookPanel: View {
                 headerButton("Select", weight: .semibold) { close(true) }
             }
             .frame(height: Self.headerDepth)
-            if ready {
+            pageTabs
+            if adjusting {
+                GradePanel(hold: hold)
+            } else if ready {
                 LookCarousel(
                     options: [Self.logChoice, ""] + model.lookNames, selection: $choice, hold: hold,
                     label: Self.label)
@@ -923,6 +928,32 @@ struct LookPanel: View {
             }
         }
         .onChange(of: bake) { _, on in if !model.isRecording { model.bakeLook = on } }
+    }
+
+    /// LOOKS and ADJUST. The grade is fixed during a take, as the bake is.
+    private var pageTabs: some View {
+        HStack(spacing: 0) {
+            pageTab("LOOKS", on: !adjusting) { adjusting = false }
+            pageTab("ADJUST", on: adjusting) { adjusting = true }
+                .disabled(model.isRecording)
+                .opacity(model.isRecording ? 0.4 : 1)
+        }
+        .frame(height: 34)
+        .sensoryFeedback(.selection, trigger: adjusting)
+    }
+
+    private func pageTab(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(Tokens.labelFont)
+                .foregroundStyle(on ? Tokens.held : Tokens.label)
+                .fixedSize()
+                .turnedToHold()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     static func label(_ option: String) -> String {
@@ -964,6 +995,154 @@ struct LookPanel: View {
         .opacity(bakeAllowed ? 1 : 0.4)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Bake the look into takes")
+    }
+}
+
+/// One of the grade's sliders.
+enum GradeControl: CaseIterable, Identifiable {
+    case exposure, contrast, temperature, tint, saturation
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .exposure: return "EXP"
+        case .contrast: return "CON"
+        case .temperature: return "TEMP"
+        case .tint: return "TINT"
+        case .saturation: return "SAT"
+        }
+    }
+
+    var name: String {
+        switch self {
+        case .exposure: return "Exposure"
+        case .contrast: return "Contrast"
+        case .temperature: return "Temperature"
+        case .tint: return "Tint"
+        case .saturation: return "Saturation"
+        }
+    }
+
+    /// Conservative to start with, to be tuned from the phone.
+    var range: ClosedRange<Double> {
+        switch self {
+        case .exposure: return -2...2
+        case .saturation: return 0...2
+        default: return -1...1
+        }
+    }
+
+    var keyPath: WritableKeyPath<LookGrade, Double> {
+        switch self {
+        case .exposure: return \.exposure
+        case .contrast: return \.contrast
+        case .temperature: return \.temperature
+        case .tint: return \.tint
+        case .saturation: return \.saturation
+        }
+    }
+
+    /// Fine enough to grade with, coarse enough that a drag doesn't rebuild for nothing.
+    func snapped(_ value: Double) -> Double {
+        let step = self == .exposure ? 0.05 : 0.01
+        return (value / step).rounded() * step
+    }
+
+    func text(_ value: Double) -> String {
+        switch self {
+        case .exposure: return String(format: "%+.1f", value)
+        case .saturation: return String(format: "%.0f%%", value * 100)
+        default: return String(format: "%+.0f", value * 100)
+        }
+    }
+}
+
+/// The grade, one slider at a time: tap a value to choose it and drag the slider below, and tap
+/// the chosen value again to put it back. Only the text turns with the hold: a turned slider
+/// would slide the wrong way under a finger.
+struct GradePanel: View {
+    @EnvironmentObject private var model: AppModel
+    let hold: Hold
+    @State private var selected = GradeControl.exposure
+
+    var body: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 0) {
+                ForEach(GradeControl.allCases) { cell($0) }
+                resetCell
+            }
+            .frame(height: 44)
+            if model.gradeApplies {
+                Slider(value: binding(selected), in: selected.range)
+                    .tint(Tokens.held)
+                    .padding(.horizontal, 8)
+                    .accessibilityLabel(selected.name)
+                    .accessibilityValue(selected.text(model.lookGrade[keyPath: selected.keyPath]))
+            } else {
+                Text("LUTS KEEP THEIR LOOK")
+                    .font(Tokens.labelFont)
+                    .foregroundStyle(Tokens.label)
+                    .fixedSize()
+                    .turnedToHold()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            Spacer(minLength: 0)
+        }
+        .disabled(!model.gradeApplies || model.isRecording)
+        .sensoryFeedback(.selection, trigger: selected)
+    }
+
+    private func binding(_ control: GradeControl) -> Binding<Double> {
+        Binding(
+            get: { model.lookGrade[keyPath: control.keyPath] },
+            set: { model.lookGrade[keyPath: control.keyPath] = control.snapped($0) })
+    }
+
+    private func cell(_ control: GradeControl) -> some View {
+        let value = model.lookGrade[keyPath: control.keyPath]
+        let changed = value != LookGrade()[keyPath: control.keyPath]
+        let isOn = control == selected
+        return Button {
+            if isOn {
+                model.lookGrade[keyPath: control.keyPath] = LookGrade()[keyPath: control.keyPath]
+            } else {
+                selected = control
+            }
+        } label: {
+            VStack(spacing: 2) {
+                Text(control.title)
+                    .font(Tokens.labelFont)
+                    .foregroundStyle(isOn ? Tokens.held : Tokens.label)
+                Text(control.text(value))
+                    .font(Tokens.statusFont)
+                    .foregroundStyle(changed ? Tokens.held : Tokens.value)
+            }
+            .fixedSize()
+            .turnedToHold()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(isOn ? Tokens.surface : .clear, in: RoundedRectangle(cornerRadius: Tokens.panelRadius))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(control.name)
+        .accessibilityValue(control.text(value))
+        .accessibilityHint(isOn ? "Tap again to reset" : "")
+    }
+
+    private var resetCell: some View {
+        Button { model.lookGrade = LookGrade() } label: {
+            Text("RESET")
+                .font(Tokens.labelFont)
+                .foregroundStyle(model.lookGrade.isNeutral ? Tokens.label : Tokens.held)
+                .fixedSize()
+                .turnedToHold()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(model.lookGrade.isNeutral)
+        .accessibilityLabel("Reset the grade")
     }
 }
 

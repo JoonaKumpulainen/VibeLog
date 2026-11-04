@@ -101,6 +101,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var bakeLook = false
     /// Baked takes record ProRes 422 HQ instead of HEVC 4:2:0.
     public var bakeToProRes = false
+    /// The grade under the built-in looks and the Rec.709 view.
+    public var lookGrade = LookGrade()
     /// Moves to the Efficient path while the phone is hot.
     public var efficientWhenHot = true
     public var frameGuide = "2.39"
@@ -162,6 +164,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         twelveBitProRes = read(.twelveBitProRes, defaults.twelveBitProRes)
         bakeLook = read(.bakeLook, defaults.bakeLook)
         bakeToProRes = read(.bakeToProRes, defaults.bakeToProRes)
+        lookGrade = read(.lookGrade, defaults.lookGrade)
         efficientWhenHot = read(.efficientWhenHot, defaults.efficientWhenHot)
         frameGuide = read(.frameGuide, defaults.frameGuide)
         desqueeze = read(.desqueeze, defaults.desqueeze)

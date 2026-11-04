@@ -387,13 +387,18 @@ kernel void decodeVideo(texture2d<float, access::read> frame [[texture(0)]],
     image.write(float4(saturate(float3(r, g, b)), 1.0), gid);
 }
 
-// The look on a smaller copy of the log image, for the export preview.
+// The look on a smaller copy of the log image, for the export preview, turned upright by the
+// take's rotation in clockwise quarter turns.
 kernel void lookPreview(texture2d<float, access::sample> image [[texture(0)]],
                         texture2d<float, access::write> output [[texture(1)]],
                         texture3d<float> lut [[texture(2)]],
                         constant LookParams &k [[buffer(0)]],
+                        constant uint &turns [[buffer(1)]],
                         uint2 gid [[thread_position_in_grid]]) {
     float2 uv = (float2(gid) + 0.5) / float2(output.get_width(), output.get_height());
+    if (turns == 1) uv = float2(uv.y, 1.0 - uv.x);
+    else if (turns == 2) uv = 1.0 - uv;
+    else if (turns == 3) uv = float2(1.0 - uv.y, uv.x);
     output.write(float4(lookColor(saturate(logSample(image, uv)), k, lut), 1.0), gid);
 }
 

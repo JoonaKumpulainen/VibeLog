@@ -90,9 +90,10 @@ public final class LookExporter {
         return (Int(size.width), Int(size.height), duration.seconds)
     }
 
-    /// One frame with the look into `output`, a 32BGRA buffer, scaled to its size. For playback,
-    /// which calls it from one queue at a time.
-    public func render(_ frame: CVPixelBuffer, into output: CVPixelBuffer) throws {
+    /// One frame with the look into `output`, a 32BGRA buffer, scaled to its size and turned
+    /// `quarterTurns` clockwise, so a take held upright plays upright. For playback, which calls
+    /// it from one queue at a time.
+    public func render(_ frame: CVPixelBuffer, into output: CVPixelBuffer, quarterTurns: Int = 0) throws {
         let width = CVPixelBufferGetWidth(output)
         let height = CVPixelBufferGetHeight(output)
         var wrappedOutput: CVMetalTexture?
@@ -106,11 +107,13 @@ public final class LookExporter {
             let lut = lutTexture ?? pipeline.placeholderTexture
         else { throw Failure.gpu }
         var parameters = look
+        var turns = UInt32(((quarterTurns % 4) + 4) % 4)
         encoder.setComputePipelineState(previewState)
         encoder.setTexture(decoded.image, index: 0)
         encoder.setTexture(target, index: 1)
         encoder.setTexture(lut, index: 2)
         encoder.setBytes(&parameters, length: MemoryLayout<LookParams>.stride, index: 0)
+        encoder.setBytes(&turns, length: MemoryLayout<UInt32>.stride, index: 1)
         dispatch(encoder, previewState, width: width, height: height)
         encoder.endEncoding()
         commands.commit()

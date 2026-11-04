@@ -36,7 +36,11 @@ public enum MonitorTransform {
 
     public static func display(log: SIMD3<Double>, curve: LogCurve, gamut: Gamut = .rec2020) -> SIMD3<Double> {
         let linear = SIMD3(curve.decode(log.x), curve.decode(log.y), curve.decode(log.z))
-        let linear709 = ColorMath.rec2020ToRec709 * gamut.fromRec2020.inverse * linear
+        return display(linearRec2020: gamut.fromRec2020.inverse * linear)
+    }
+
+    public static func display(linearRec2020 linear: SIMD3<Double>) -> SIMD3<Double> {
+        let linear709 = ColorMath.rec2020ToRec709 * linear
         return SIMD3(tone(linear709.x), tone(linear709.y), tone(linear709.z))
     }
 

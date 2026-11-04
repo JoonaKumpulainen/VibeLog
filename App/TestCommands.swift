@@ -194,7 +194,7 @@ extension AppModel {
             "fixedFrameTime": String(fixedFrameTime), "uncompressedAudio": String(pcmAudio),
             "stereoAudio": String(stereoAudio),
             "distortionCorrection": String(distortionCorrection), "twelveBitProRes": String(twelveBitProRes),
-            "bakeLook": String(bakeLook), "bakeToProRes": String(bakeToProRes),
+            "bakeLook": String(bakeLook), "bakeToProRes": String(bakeToProRes), "grade": lookGrade.label,
             "efficientWhenHot": String(processing.efficientWhenHot), "isoAuto": String(isoAuto),
             "bilinearWhenHot": String(processing.bilinearWhenHot),
             "yields": String(pipelineStats.monitorYields),
@@ -252,6 +252,20 @@ extension AppModel {
         case "twelveBitProRes": return flag { twelveBitProRes = $0 }
         case "bakeLook": return flag { bakeLook = $0 }
         case "bakeToProRes": return flag { bakeToProRes = $0 }
+        case "grade":
+            // "none", or names and values such as exposure=0.5,saturation=1.2, from the slider ranges.
+            guard !isRecording else { return "grade can't change during a take" }
+            var grade = LookGrade()
+            for part in value.split(separator: ",") where value != "none" {
+                let pair = part.split(separator: "=")
+                guard pair.count == 2, let number = Double(pair[1]),
+                    let control = GradeControl.allCases.first(where: { "\($0)" == String(pair[0]) }),
+                    control.range.contains(number)
+                else { return "grade takes none, or exposure, contrast, temperature, tint and saturation as name=value" }
+                grade[keyPath: control.keyPath] = number
+            }
+            lookGrade = grade
+            return nil
         case "efficientWhenHot": return flag { processing.efficientWhenHot = $0 }
         case "isoAuto":
             guard exposureLocked else { return "isoAuto needs a set shutter first" }

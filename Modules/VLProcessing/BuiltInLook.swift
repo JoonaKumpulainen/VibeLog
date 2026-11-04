@@ -1,4 +1,5 @@
 import Foundation
+import VLCore
 import simd
 
 /// Looks VibeLog makes itself rather than reads from a .cube file: the ACES 2.0 and ACES 1.3 Rec.709
@@ -45,10 +46,26 @@ public enum BuiltInLook: String, CaseIterable, Sendable {
     }
 
     /// The look as a LUT on the log image: each grid point is decoded with the curve, taken from
-    /// the gamut to Rec.2020, then through the transform. 65 points keeps interpolation small.
-    public func lut(curve: LogCurve, gamut: Gamut, size: Int = 65) -> CubeLUT {
-        let toRec2020 = gamut.fromRec2020.inverse
+    /// the gamut to Rec.2020, graded, then through the transform. 65 points keeps interpolation small.
+    public func lut(curve: LogCurve, gamut: Gamut, grade: LookGrade = LookGrade(), size: Int = 65) -> CubeLUT {
         let renderer = ACES2Renderer.shared
+        return Self.makeLUT(curve: curve, gamut: gamut, grade: grade, size: size) {
+            display(linearRec2020: $0, aces2: renderer)
+        }
+    }
+
+    /// VibeLog's own Rec.709 view with a grade, as a LUT on log. Without a grade the view needs no
+    /// LUT, since the GPU does its math per pixel.
+    public static func rec709LUT(curve: LogCurve, gamut: Gamut, grade: LookGrade, size: Int = 65) -> CubeLUT {
+        makeLUT(curve: curve, gamut: gamut, grade: grade, size: size, display: MonitorTransform.display(linearRec2020:))
+    }
+
+    private static func makeLUT(
+        curve: LogCurve, gamut: Gamut, grade: LookGrade, size: Int,
+        display: @escaping (SIMD3<Double>) -> SIMD3<Double>
+    ) -> CubeLUT {
+        let toRec2020 = gamut.fromRec2020.inverse
+        let graded = GradeTransform(grade)
         let decoded = (0..<size).map { curve.decode(Double($0) / Double(size - 1)) }
         var samples = [SIMD3<Float>](repeating: .zero, count: size * size * size)
         samples.withUnsafeMutableBufferPointer { buffer in
@@ -57,13 +74,71 @@ public enum BuiltInLook: String, CaseIterable, Sendable {
                 for green in 0..<size {
                     for red in 0..<size {
                         let linear = toRec2020 * SIMD3(decoded[red], decoded[green], decoded[blue])
-                        let out = display(linearRec2020: linear, aces2: renderer)
+                        let out = display(graded.apply(linear))
                         base[(blue * size + green) * size + red] = SIMD3(Float(out.x), Float(out.y), Float(out.z))
                     }
                 }
             }
         }
         return CubeLUT(size: size, samples: samples)
+    }
+}
+
+/// A `LookGrade` on scene-linear Rec.2020, in the order a colourist reaches for them: white
+/// balance, exposure, contrast around middle gray, then saturation.
+public struct GradeTransform: Sendable {
+    public let grade: LookGrade
+    private let whiteBalance: simd_double3x3
+
+    /// Rec.2020's luminance weights.
+    static let luma = SIMD3<Double>(0.2627, 0.6780, 0.0593)
+    static let middleGray = 0.18
+
+    public init(_ grade: LookGrade) {
+        self.grade = grade
+        whiteBalance = Self.whiteBalance(temperature: grade.temperature, tint: grade.tint)
+    }
+
+    public func apply(_ input: SIMD3<Double>) -> SIMD3<Double> {
+        guard !grade.isNeutral else { return input }
+        var rgb = whiteBalance * input * pow(2, grade.exposure)
+        let y = simd_dot(rgb, Self.luma)
+        if grade.contrast != 0, y > 0 {
+            // A power around middle gray in luminance, so contrast doesn't also move saturation.
+            let power = pow(2, grade.contrast * 0.6)
+            rgb *= Self.middleGray * pow(y / Self.middleGray, power) / y
+        }
+        if grade.saturation != 1 {
+            let graded = simd_dot(rgb, Self.luma)
+            rgb = graded + grade.saturation * (rgb - graded)
+        }
+        return rgb
+    }
+
+    /// Bradford adaptation from a daylight white to D65's place, in Rec.2020. A warmer grade
+    /// treats a bluer white as neutral, so the picture moves toward yellow, and tint moves the
+    /// white off the daylight locus toward green, so the picture moves toward magenta.
+    static func whiteBalance(temperature: Double, tint: Double) -> simd_double3x3 {
+        guard temperature != 0 || tint != 0 else { return matrix_identity_double3x3 }
+        let reference = daylightXYZ(mired: 1e6 / 6504, tint: 0)
+        let source = daylightXYZ(mired: 1e6 / 6504 - temperature * 60, tint: tint)
+        let toRec2020 = ColorMath.xyzToRec2020
+        return toRec2020 * ColorMath.bradford(from: source, to: reference) * toRec2020.inverse
+    }
+
+    /// CIE daylight at a temperature, valid from 4000 to 25000 K, moved in CIE 1960 v by the tint.
+    static func daylightXYZ(mired: Double, tint: Double) -> SIMD3<Double> {
+        let t = 1e6 / mired
+        let x = t <= 7000
+            ? -4.6070e9 / (t * t * t) + 2.9678e6 / (t * t) + 0.09911e3 / t + 0.244063
+            : -2.0064e9 / (t * t * t) + 1.9018e6 / (t * t) + 0.24748e3 / t + 0.237040
+        let y = -3 * x * x + 2.870 * x - 0.275
+        let d = -2 * x + 12 * y + 3
+        let u = 4 * x / d
+        let v = 6 * y / d + tint * 0.015
+        let e = 2 * u - 8 * v + 4
+        let (xx, yy) = (3 * u / e, 2 * v / e)
+        return SIMD3(xx / yy, 1, (1 - xx - yy) / yy)
     }
 }
 

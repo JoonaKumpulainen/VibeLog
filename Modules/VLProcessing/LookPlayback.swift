@@ -15,8 +15,11 @@ public enum LookPlayback {
         let size = try await track.load(.naturalSize)
         let rate = try await track.load(.nominalFrameRate)
         let duration = try await asset.load(.duration)
-        let width = min(Int(size.width), maximumWidth)
-        let height = Int((size.height * CGFloat(width) / max(size.width, 1)).rounded())
+        // A custom compositor gets frames as stored, so the take's rotation is drawn here.
+        let turns = quarterTurns(try await track.load(.preferredTransform))
+        let longSide = min(Int(size.width), maximumWidth)
+        let shortSide = Int((size.height * CGFloat(longSide) / max(size.width, 1)).rounded())
+        let (width, height) = turns % 2 == 0 ? (longSide, shortSide) : (shortSide, longSide)
 
         let composition = AVMutableVideoComposition()
         composition.customVideoCompositorClass = LookCompositor.self
@@ -26,8 +29,15 @@ public enum LookPlayback {
         composition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
         composition.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
         composition.instructions = [LookInstruction(
-            timeRange: CMTimeRange(start: .zero, duration: duration), trackID: track.trackID, exporter: exporter)]
+            timeRange: CMTimeRange(start: .zero, duration: duration), trackID: track.trackID, exporter: exporter,
+            quarterTurns: turns)]
         return composition
+    }
+
+    /// The transform's rotation in clockwise quarter turns, as the screen shows it.
+    static func quarterTurns(_ transform: CGAffineTransform) -> Int {
+        let turns = Int((atan2(transform.b, transform.a) / (.pi / 2)).rounded())
+        return ((turns % 4) + 4) % 4
     }
 }
 
@@ -40,11 +50,13 @@ final class LookInstruction: NSObject, AVVideoCompositionInstructionProtocol {
     let passthroughTrackID = kCMPersistentTrackID_Invalid
     let trackID: CMPersistentTrackID
     let exporter: LookExporter
+    let quarterTurns: Int
 
-    init(timeRange: CMTimeRange, trackID: CMPersistentTrackID, exporter: LookExporter) {
+    init(timeRange: CMTimeRange, trackID: CMPersistentTrackID, exporter: LookExporter, quarterTurns: Int) {
         self.timeRange = timeRange
         self.trackID = trackID
         self.exporter = exporter
+        self.quarterTurns = quarterTurns
         requiredSourceTrackIDs = [NSNumber(value: trackID)]
     }
 }
@@ -79,7 +91,7 @@ final class LookCompositor: NSObject, AVVideoCompositing {
                 return
             }
             do {
-                try instruction.exporter.render(frame, into: output)
+                try instruction.exporter.render(frame, into: output, quarterTurns: instruction.quarterTurns)
                 request.finish(withComposedVideoFrame: output)
             } catch {
                 request.finish(with: error)
