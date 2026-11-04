@@ -283,11 +283,8 @@ struct CameraHUD: View {
                 VStack(spacing: 3) {
                     // One tray above the control bar, so nothing else moves.
                     if showMonitor, model.processing.monitor != .isp {
-                        MonitorPanel(hold: hold) {
-                            model.openLookPanel()
-                            withAnimation(lookFade) { showLook = true }
-                        }
-                        .transition(trayTransition)
+                        MonitorPanel(hold: hold)
+                            .transition(trayTransition)
                     } else if selectedDial == nil {
                         toolRow
                             .transition(trayTransition)
@@ -300,7 +297,7 @@ struct CameraHUD: View {
             .padding(.bottom, max(insets.bottom, 10))
             .padding(.leading, max(insets.leading, 12))
             .padding(.trailing, max(insets.trailing, 12))
-            StatusBlocks(hold: hold)
+            StatusBlocks(hold: hold, openSettings: openSettings)
             if showFormat {
                 // Tapping the picture closes the panel.
                 Color.clear
@@ -376,16 +373,19 @@ struct CameraHUD: View {
         .frame(height: CameraGeometry.recordDepth)
     }
 
+    /// FORMAT and LOOK side by side on the left, record in the middle, and the monitoring tools
+    /// and the last take on the right. During a take the clock takes FORMAT and LOOK's place,
+    /// since neither changes then, and the tools stay.
     private var actionRow: some View {
         columns { column in
             HStack(spacing: 0) {
-                lastTakeSlot
+                leadingSlots(column)
+                recordButton
                     .frame(width: column)
                 monitorButton
                     .frame(width: column)
-                recordButton
+                lastTakeSlot
                     .frame(width: column)
-                trailingSlots(column)
             }
         }
     }
@@ -403,7 +403,7 @@ struct CameraHUD: View {
                         .upright(hold, depth: CameraGeometry.recordDepth - 2)
                         .frame(width: column * 2)
                 } else {
-                    RemainingLines(alignment: .leading)
+                    StatGauges()
                         .upright(hold, depth: CameraGeometry.recordDepth - 2)
                         .frame(width: column)
                     fullViewButton
@@ -411,7 +411,13 @@ struct CameraHUD: View {
                 }
                 recordButton
                     .frame(width: column)
-                trailingSlots(column)
+                if model.isRecording {
+                    timecode
+                        .frame(width: column * 2)
+                } else {
+                    Color.clear
+                        .frame(width: column * 2)
+                }
             }
         }
     }
@@ -423,16 +429,35 @@ struct CameraHUD: View {
 
     /// The clock takes both columns, in the same place in every hold.
     @ViewBuilder
-    private func trailingSlots(_ column: CGFloat) -> some View {
+    private func leadingSlots(_ column: CGFloat) -> some View {
         if model.isRecording {
             timecode
                 .frame(width: column * 2)
         } else {
             formatButton
                 .frame(width: column)
-            settingsButton
+            lookButton
                 .frame(width: column)
         }
+    }
+
+    /// Opens the look panel. Amber while the look is baked into takes, since then no log is recorded.
+    private var lookButton: some View {
+        Button {
+            selectedDial = nil
+            showMonitor = false
+            model.fullView = false
+            model.openLookPanel()
+            withAnimation(lookFade) { showLook = true }
+        } label: {
+            ActionCell(
+                title: model.bakeLook ? "BAKED" : "LOOK", value: model.monitorLabel,
+                tint: model.bakeLook ? Tokens.held : Tokens.value, hold: hold)
+        }
+        .buttonStyle(.plain)
+        .disabled(model.isBusy != nil || model.processing.monitor == .isp)
+        .accessibilityLabel("Look")
+        .accessibilityValue(model.bakeLook ? "\(model.monitorName), baked into takes" : model.monitorName)
     }
 
     /// The take's health sits with its clock. Sideways, only the record row's depth is free.
@@ -608,20 +633,6 @@ struct CameraHUD: View {
         .accessibilityValue(model.aspectLabel)
     }
 
-    private var settingsButton: some View {
-        Button(action: openSettings) {
-            Image(systemName: "slider.horizontal.3")
-                .font(.system(size: 20))
-                .foregroundStyle(Tokens.value)
-                .turnedToHold()
-                .frame(width: 52, height: 52)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(model.isBusy != nil)
-        .accessibilityLabel("Settings")
-    }
-
     /// Only changes what the monitor draws, so it stays available while recording. The ISP
     /// monitor removes the Metal view these tools draw on.
     @ViewBuilder
@@ -631,7 +642,7 @@ struct CameraHUD: View {
                 selectedDial = nil
                 withAnimation(motion) { showMonitor.toggle() }
             } label: {
-                ActionCell(title: "MON", value: model.monitorLabel, tint: Tokens.value, hold: hold)
+                ActionCell(title: "MON", value: model.activeToolCount == 0 ? "OFF" : "\(model.activeToolCount) ON", tint: Tokens.value, hold: hold)
                     .background(
                         showMonitor ? Tokens.surface : Color.clear,
                         in: RoundedRectangle(cornerRadius: Tokens.panelRadius))
@@ -685,27 +696,14 @@ struct StatusLine: View {
     }
 }
 
-/// What's left to shoot on.
-struct RemainingLines: View {
-    @EnvironmentObject private var model: AppModel
-    let alignment: HorizontalAlignment
-
-    var body: some View {
-        VStack(alignment: alignment, spacing: CameraGeometry.statusLineGap) {
-            StatusLine(text: "\(model.timeLeftLabel) LEFT", warns: model.isStorageLow)
-            StatusLine(text: "BATT \(model.batteryLabel)", warns: model.isBatteryLow)
-            StatusLine(text: "HEAT \(model.heatLabel)", warns: model.isHot)
-        }
-    }
-}
-
-/// The format and what's left, mirrored either side of the Dynamic Island: three lines each, the
-/// same width, centered in the depth above the picture. Each block turns as a square. Upright, it
-/// keeps to its outer edge. Sideways, its lines center in the square, which keeps them equally far
-/// from the Dynamic Island and clear of the screen's rounded corners.
+/// The format, and what's left beside the settings gear, mirrored either side of the Dynamic
+/// Island: three rows each, the same width, centered in the depth above the picture. Each block
+/// turns as a square. Upright, it keeps to its outer edge. Sideways, it centers in the square,
+/// which keeps it equally far from the Dynamic Island and clear of the screen's rounded corners.
 struct StatusBlocks: View {
     @EnvironmentObject private var model: AppModel
     let hold: Hold
+    let openSettings: () -> Void
 
     private enum Side {
         case left, right
@@ -719,16 +717,34 @@ struct StatusBlocks: View {
                     StatusLine(text: "\(model.curveLabel) \(model.frameRateLabel)P")
                     StatusLine(text: model.outputLabel)
                 }
+                .allowsHitTesting(false)
+                .accessibilityElement(children: .combine)
             }
             Spacer(minLength: 0)
-            block(.right) { alignment in
-                RemainingLines(alignment: alignment)
+            block(.right) { _ in
+                // The gear keeps to the phone's outer edge, as the format lines do on the left.
+                HStack(spacing: 6) {
+                    StatGauges()
+                        .allowsHitTesting(false)
+                    settingsButton
+                }
             }
         }
         .padding(.horizontal, 24)
         .padding(.top, (CameraGeometry.statusDepth - CameraGeometry.statusSide) / 2)
-        .allowsHitTesting(false)
-        .accessibilityElement(children: .combine)
+    }
+
+    private var settingsButton: some View {
+        Button(action: openSettings) {
+            Image(systemName: "gearshape")
+                .font(.system(size: 20))
+                .foregroundStyle(Tokens.value)
+                .frame(width: 34, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(model.isBusy != nil)
+        .accessibilityLabel("Settings")
     }
 
     /// Where the phone's sides end up as held, which turns "outer" into a direction.
@@ -749,6 +765,108 @@ struct StatusBlocks: View {
             .frame(width: CameraGeometry.statusLineWidth, alignment: edge)
             .frame(width: CameraGeometry.statusSide, height: CameraGeometry.statusSide, alignment: edge)
             .turnedToHold()
+    }
+}
+
+/// Green, then orange, then red, each with a darker shade for text on it.
+enum GaugeTint {
+    case good, caution, bad
+
+    private var rgb: (Double, Double, Double) {
+        switch self {
+        case .good: return (0.33, 0.82, 0.4)
+        case .caution: return (1.0, 0.62, 0.18)
+        case .bad: return (0.95, 0.27, 0.22)
+        }
+    }
+
+    var color: Color { Color(red: rgb.0, green: rgb.1, blue: rgb.2) }
+    var ink: Color { Color(red: rgb.0 * 0.3, green: rgb.1 * 0.3, blue: rgb.2 * 0.3) }
+}
+
+/// A small bar that empties as it runs out, in its state's colour, with its reading inside. A
+/// battery gets the nub on its end.
+struct GaugeBar: View {
+    let share: Double
+    let text: String
+    let tint: GaugeTint
+    var battery = false
+
+    private static let width: CGFloat = 42
+    private static let height: CGFloat = 14
+
+    var body: some View {
+        let inner = Self.width - 3
+        let filled = inner * CGFloat(min(max(share, 0), 1))
+        HStack(spacing: 1) {
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 3.5)
+                    .strokeBorder(tint.color.opacity(0.9), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(tint.color)
+                    .frame(width: filled)
+                    .padding(1.5)
+                Text(text)
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    // Dark on the fill once it reaches the middle, where the text sits.
+                    .foregroundStyle(share >= 0.5 ? tint.ink : Tokens.value)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .frame(width: Self.width - 4)
+                    .frame(maxWidth: .infinity)
+            }
+            .frame(width: Self.width, height: Self.height)
+            if battery {
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(tint.color.opacity(0.9))
+                    .frame(width: 2, height: 5)
+            }
+        }
+    }
+}
+
+/// What's left to shoot on: storage, with the GB left or, during a take, the minutes they hold;
+/// battery, with its level and no percent sign; and heat, filled green, orange or red.
+struct StatGauges: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: CameraGeometry.statusLineGap) {
+            GaugeBar(share: model.storageShare, text: model.storageGaugeLabel, tint: storageTint)
+                .accessibilityElement()
+                .accessibilityLabel("Storage")
+                .accessibilityValue("\(model.timeLeftLabel) left")
+            GaugeBar(
+                share: model.batteryShare ?? 0,
+                text: model.batteryShare.map { "\(Int(($0 * 100).rounded()))" } ?? "?",
+                tint: batteryTint, battery: true)
+                .accessibilityElement()
+                .accessibilityLabel("Battery")
+                .accessibilityValue(model.isCharging ? "\(model.batteryLabel), charging" : model.batteryLabel)
+            GaugeBar(share: 1, text: "HEAT", tint: heatTint)
+                .accessibilityElement()
+                .accessibilityLabel("Heat")
+                .accessibilityValue(model.heatLabel)
+        }
+    }
+
+    private var storageTint: GaugeTint {
+        if model.isStorageLow { return .bad }
+        return model.storageShare < 0.2 ? .caution : .good
+    }
+
+    private var batteryTint: GaugeTint {
+        guard let share = model.batteryShare, !model.isCharging else { return .good }
+        if model.isBatteryLow { return .bad }
+        return share < 0.3 ? .caution : .good
+    }
+
+    private var heatTint: GaugeTint {
+        switch model.heatLevel {
+        case 0: return .good
+        case 1: return .caution
+        default: return .bad
+        }
     }
 }
 
@@ -807,40 +925,15 @@ struct NoticeCard: View {
 struct MonitorPanel: View {
     @EnvironmentObject private var model: AppModel
     let hold: Hold
-    let openLook: () -> Void
 
     var body: some View {
         HStack(spacing: 0) {
-            lookButton
             ForEach(Tool.allCases) { tool in
                 toolButton(tool)
             }
         }
         .frame(height: CameraGeometry.trayDepth)
         .contentShape(Rectangle())
-    }
-
-    /// Opens the look panel. Amber while the look is baked into takes, since then no log is recorded.
-    private var lookButton: some View {
-        Button(action: openLook) {
-            VStack(spacing: 3) {
-                Text(model.monitorLabel)
-                    .font(Tokens.lineFont)
-                    .foregroundStyle(model.bakeLook ? Tokens.held : Tokens.value)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                Text(model.bakeLook ? "BAKED" : "LOOK")
-                    .font(Tokens.labelFont)
-                    .foregroundStyle(model.bakeLook ? Tokens.held : Tokens.label)
-            }
-            .upright(hold, depth: 46)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Tokens.surface, in: RoundedRectangle(cornerRadius: Tokens.panelRadius))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Look")
-        .accessibilityValue(model.bakeLook ? "\(model.monitorName), baked into takes" : model.monitorName)
     }
 
     private func toolButton(_ tool: Tool) -> some View {

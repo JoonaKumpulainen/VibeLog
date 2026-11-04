@@ -57,6 +57,12 @@ public enum SystemStatus {
         return result == KERN_SUCCESS ? Int(info.phys_footprint) : 0
     }
 
+    /// The volume's whole size, which doesn't change while the app runs.
+    public static let totalDisk: Int64 = {
+        let values = try? Storage.documents.resourceValues(forKeys: [.volumeTotalCapacityKey])
+        return Int64(values?.volumeTotalCapacity ?? 0)
+    }()
+
     /// Space writable right now. The "important usage" figure also counts purgeable data,
     /// which read 30 GB on a disk that was already full.
     public static var freeDisk: Int64 {

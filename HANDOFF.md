@@ -287,6 +287,13 @@ Step 2 of the plan below, batched with the export player's rotation fix. `b75941
 - **Export grade editor:** export has its own grade, starting from the LOOK panel's, so changes there leave the camera's alone. **Grade** in the Look section replaces everything under the preview with the editor, with Cancel and Done in the bar: a segmented Looks, Adjust and Color, Looks listing every look and the chosen look's styles, Adjust the five sliders as a list, and Color all eight colours with their three sliders each. **Save as Style…** keeps the grade under the chosen look for the camera too. The preview rebuilds 150 ms after a drag pauses.
 - **Tests:** built-in styles belong to both ACES looks and not to MONITOR or a LUT, and a saved one only to its own look.
 
+### Batch 5, camera screen, not built
+
+- **Top:** the left block keeps the three format lines. The right block is the settings gear, on the phone's outer edge, beside three gauges in rows matching the lines opposite: storage, battery and heat, each a 42 by 14 point bar in green, orange or red with its reading inside, dark on the fill once it reaches the middle. Storage empties with free space as a share of the disk, `SystemStatus.totalDisk`, and reads the GB left above the 10 GB floor, or during a take the minutes they hold when the codec's rate is known. Battery has a nub, its level without a percent sign, green while charging, orange under 30 and red under 15. Heat is filled green at nominal, orange at fair and red at serious or critical, with HEAT in a darker shade of the colour. The whole block still turns as a square, so the gear and gauges turn with the hold.
+- **Bottom row:** FORMAT and LOOK side by side on the left, record in the middle, MON and the last take on the right. LOOK reads the look's short name, or BAKED in amber, and opens the look panel; it's off for the ISP preview. MON now holds only the monitoring tools, reading OFF or how many are on. During a take the clock takes FORMAT and LOOK's place, since neither changes then, and MON stays. Full view shows the gauges where it showed the remaining lines.
+- **Removed:** the settings button in the bottom row, the look cell inside the MON tray, and `RemainingLines`.
+- **Phone checks:** that the gauges read at arm's length and fit beside the gear in every hold, and that nothing in the bottom row moves during a take.
+
 ### Plan agreed on 2026-11-04: grading, scopes, effects and HDR
 
 Batches, each built and tested on the phone before the next. Each works the same live in the viewfinder, baked into takes and in export, since all three share the look step.
@@ -389,7 +396,7 @@ For vignette correction, also ask for a short RAW clip's `reference.dng` and `re
 ### How the camera screen works
 
 - **Layout:** monospaced values around the picture. Every control keeps its portrait position in every hold and only its contents turn. The owner's earlier glass panels are gone: only black was ever behind them, so they added cost and no look.
-- **Status:** two mirrored three-line blocks beside the Dynamic Island. Each is square so it can turn. Upright, its lines keep to the outer edge. Sideways, they center in the square, away from the screen's rounded corners. The owner reported text clipping before this change, and the fix hasn't been seen on the phone. Warnings are filled orange chips.
+- **Status:** two mirrored blocks beside the Dynamic Island, the format lines on the left and the gauges and settings gear on the right, since batch 5. Each is square so it can turn. Upright, its lines keep to the outer edge. Sideways, they center in the square, away from the screen's rounded corners. The owner reported text clipping before this change, and the fix hasn't been seen on the phone. Warnings are filled orange chips.
 - **Control bar:** ISO, shutter, white balance and focus. Amber means set by the user, an A badge means auto and a lock means frozen for the take.
 - **Tray:** above the control bar, it shows the tools and lenses, a dial or the **MON** tools, so the control bar always stays. During a take the mic meter replaces the lenses.
 - **Dials:** they have **AUTO** and **FINE**. The white balance dial also sets tint, the shutter dial has **180°**, and the focus dial has **PUNCH** and **PEAK**. Shutter angle shows while the shutter dial is open.

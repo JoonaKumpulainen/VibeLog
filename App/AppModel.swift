@@ -518,6 +518,8 @@ final class AppModel: ObservableObject {
         lensID = ordered[(index + 1) % ordered.count].id
     }
 
+    var activeToolCount: Int { Tool.allCases.filter(isOn).count }
+
     func isOn(_ tool: Tool) -> Bool {
         switch tool {
         case .zebras: return processing.overlay == .zebras
@@ -857,6 +859,32 @@ final class AppModel: ObservableObject {
     }
 
     var batteryLabel: String { String(status.battery.prefix { $0 != " " }) }
+
+    /// The battery's level as a share, nil before iOS reports one.
+    var batteryShare: Double? { Int(status.battery.prefix(while: \.isNumber)).map { Double($0) / 100 } }
+    var isCharging: Bool { status.battery.contains("charging") || status.battery.contains("full") }
+
+    /// Free space as a share of the whole disk, for the storage gauge.
+    var storageShare: Double {
+        let total = Double(SystemStatus.totalDisk) / 1_000_000_000
+        return total > 0 ? min(Double(status.freeDiskGB) / total, 1) : 0
+    }
+
+    /// GB left to record into, or the minutes they hold during a take, when the codec's rate is known.
+    var storageGaugeLabel: String {
+        if isRecording, let minutes = minutesLeft { return "\(minutes)MIN" }
+        return "\(usableGB)GB"
+    }
+
+    /// 0 for nominal, 1 for fair, 2 for serious or worse.
+    var heatLevel: Int {
+        switch status.thermal {
+        case "nominal": return 0
+        case "fair": return 1
+        case "SERIOUS", "CRITICAL": return 2
+        default: return 0
+        }
+    }
 
     func toggleStream() {
         if isStreaming {
