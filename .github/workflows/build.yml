@@ -97,14 +97,25 @@ jobs:
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
+        # SideStore gives a source about 3 s, which a release download's redirect can miss, so the
+        # source is served from the sidestore-source branch through raw.githubusercontent.com.
         run: |
           BASE="https://github.com/${{ github.repository }}/releases/download/sidestore"
+          SOURCE="https://raw.githubusercontent.com/${{ github.repository }}/sidestore-source/source.json"
           cp dist/VibeLog-unsigned.ipa dist/VibeLog.ipa
           python3 tools/sidestore_source.py dist/VibeLog.ipa \
-            --download "$BASE/VibeLog.ipa" --source "$BASE/source.json" \
+            --download "$BASE/VibeLog.ipa" --source "$SOURCE" \
             --notes "Build ${{ github.run_number }}, $(git log -1 --format=%h): $(git log -1 --format=%s)" \
             > dist/source.json
           cat dist/source.json
           gh release view sidestore > /dev/null 2>&1 || gh release create sidestore --prerelease \
-            --title "SideStore" --notes "The newest build of main for SideStore. Add $BASE/source.json as a source."
+            --title "SideStore" --notes "The newest build of main for SideStore. Add $SOURCE as a source."
           gh release upload sidestore dist/VibeLog.ipa dist/source.json --clobber
+          # One commit holding only the source, replaced on each build.
+          mkdir source && cp dist/source.json source/
+          cd source
+          git init -q -b sidestore-source
+          git add source.json
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -qm "Build ${{ github.run_number }}"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" sidestore-source

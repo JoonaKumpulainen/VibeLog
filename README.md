@@ -11,7 +11,7 @@ iPhone 14 Pro camera app that captures 12 MP RAW Bayer frames at up to 30 fps, p
 Each build of `main` that passes CI goes to the `sidestore` release, with a SideStore source beside it.
 
 1. Set up SideStore on the phone, following its own guide.
-2. In SideStore, open **Sources**, tap **+**, and add `https://github.com/JoonaKumpulainen/VibeLog/releases/download/sidestore/source.json`.
+2. In SideStore, open **Sources**, tap **+**, and add `https://raw.githubusercontent.com/JoonaKumpulainen/VibeLog/sidestore-source/source.json`.
 3. Open VibeLog in that source and tap **Free** to install it.
 4. Trust your Apple ID and turn on Developer Mode as in step 4 below, then open VibeLog and allow camera access.
 
