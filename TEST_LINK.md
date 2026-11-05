@@ -123,7 +123,7 @@ Other commands:
 | `saveStill`, `sendStill` | Saves a full still, and sends the newest one |
 | `sendReference` | Sends the newest RAW clip's reference frame and metadata |
 | `sendLog`, `listFiles`, `sendFile <name>` | Fetch logs and files |
-| `export [file] [look=ACES 2.0;target=sdr;codec=hevc420]` | Bakes a take, the newest in log unless named. `look` is `monitor` or a look's name, `target` is `sdr`, `pq` or `hlg`, `codec` is `hevc420` or `prores422hq`. Status reports `exporting`, `exports` and `lastExport` |
+| `export [file] [look=ACES 2.0;target=sdr;codec=hevc420]` | Bakes a take, the newest in log unless named. `look` is `monitor` or a look's name, `target` is `sdr`, `pq` or `hlg`, `codec` is `hevc420` or `prores422hq`, and `effects` is `none` or names and values such as `halation:1,bloom:0.5`. Status reports `exporting`, `exports` and `lastExport` |
 | `cancelExport` | Stops that export |
 
 Every export, from the screen or the link, logs which step it stopped in and adds a row to `logs/exports.csv`, which `sendFile exports.csv` fetches.

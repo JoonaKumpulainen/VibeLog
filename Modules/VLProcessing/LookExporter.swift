@@ -170,6 +170,10 @@ public final class LookExporter {
         defer { reader.cancelReading() }
         var first: CMTime?
         var frames = 0
+        // Where each 30 frames' time went: waiting on the encoder, the GPU, and the whole batch.
+        var batchStart = Date()
+        var waitedSeconds = 0.0
+        var gpuSeconds = 0.0
         Log.shared.info("Export memory at start: \(Self.memoryText)")
         while true {
             if cancelled() { throw Failure.cancelled }
@@ -177,11 +181,13 @@ public final class LookExporter {
             // The wait suspends, so it stays outside the frame's autorelease pool.
             var next = sink.nextPixelBuffer()
             var waits = 0
+            let waitStart = Date()
             while next == nil, waits < 2000 {
                 try await Task.sleep(nanoseconds: 5_000_000)
                 waits += 1
                 next = sink.nextPixelBuffer()
             }
+            if waits > 0 { waitedSeconds += Date().timeIntervalSince(waitStart) }
             guard let buffer = next else { throw Failure.encoderFull }
             // A decoded 12 MP frame is about 100 MB, and nothing drains a loop's autoreleased
             // objects or the texture cache by itself, so each frame lets go of its own before the
@@ -201,13 +207,24 @@ public final class LookExporter {
                 withExtendedLifetime((decoded.wrapped, planes)) {}
                 if let cache { CVMetalTextureCacheFlush(cache, 0) }
                 guard commands.status == .completed else { throw Failure.gpu }
+                gpuSeconds += max(commands.gpuEndTime - commands.gpuStartTime, 0)
                 sink.append(buffer, at: time)
                 if seconds > 0, let first { progress(min((time - first).seconds / seconds, 1)) }
                 return false
             }
             if finished { break }
             frames += 1
-            if frames % 30 == 0 { Log.shared.info("Export memory at frame \(frames): \(Self.memoryText)") }
+            if frames % 30 == 0 {
+                let batch = Date().timeIntervalSince(batchStart)
+                Log.shared.info(
+                    "Export at frame \(frames): "
+                        + String(format: "%.1f fps, gpu %.0f ms a frame, waited %.1f s for the encoder, ",
+                            30 / max(batch, 0.001), gpuSeconds / 30 * 1000, waitedSeconds)
+                        + "\(Self.memoryText), thermal \(SystemStatus.thermalName)")
+                batchStart = Date()
+                waitedSeconds = 0
+                gpuSeconds = 0
+            }
         }
         Log.shared.info("Export memory after \(frames) frames: \(Self.memoryText)")
         if reader.status == .failed { throw Failure.cannotRead(reader.error?.localizedDescription ?? "unknown") }

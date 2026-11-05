@@ -93,8 +93,18 @@ extension AppModel {
             case "codec":
                 guard ["hevc420", "prores422hq"].contains(pair[1]) else { return "codec takes hevc420 or prores422hq" }
                 choice.codec = pair[1]
+            case "effects":
+                // As the effects setting takes them: none, or halation=1,bloom=0.5 and so on.
+                for effect in pair[1].split(separator: ",") where pair[1] != "none" {
+                    let parts = effect.split(separator: ":")
+                    guard parts.count == 2, let number = Double(parts[1]),
+                        let control = FXControl.allCases.first(where: { "\($0)" == String(parts[0]) }),
+                        control.range.contains(number)
+                    else { return "effects takes none, or halation, bloom, diffusion, vignette and grain as name:value" }
+                    choice.effects[keyPath: control.keyPath] = number
+                }
             default:
-                return "export takes look=, lutMadeFor=, target= and codec=, split by ;"
+                return "export takes look=, lutMadeFor=, target=, codec= and effects=, split by ;"
             }
         }
         let wanted = command.name.flatMap(TestLinkAddress.safeName) ?? "newest"
