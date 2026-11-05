@@ -122,7 +122,7 @@ Keep recording clean, and do the heavy work after the shot, when real-time limit
 
 - **One-tap stabilization:** use the saved gyro data and the spare sensor area from open gate, with an optional horizon lock.
 - **One-tap denoise:** use the noise profile from the metadata, with temporal denoise where quality justifies the time.
-- **Export with look:** a copy with any look, its grade, FX and SDR or HDR, played through first, is built. Small proxies are left.
+- **Export with look:** a copy with any look, its grade, FX and SDR or HDR, played through first, is built, with HEVC's rate, a smaller resolution, a centred 16:9 or 9:16 crop and ProRes 422 LT. A movable crop, a crop outline on the preview and a new name for each export are left.
 - **Roll-off and gamut conversions:** convert between log curves and gamuts for different grading workflows.
 
 ## Later ideas

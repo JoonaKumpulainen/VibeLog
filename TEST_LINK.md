@@ -134,7 +134,7 @@ A suite runs a list of takes and cooling breaks from a JSON file, and writes `su
 python3 tools/test_server.py suite tools/suites/ultra_wide.json
 ```
 
-The export matrix records 2 seconds in every curve and gamut the app allows, 43 in all, and exports each take with ACES 2.0 on its own. It comes in two parts, so neither fills the phone or runs too long. A failed export is written to `exports_*.csv` and the suite moves on. At the end the phone sends its session log and `exports.csv`:
+The export matrix records 2 seconds in every curve and gamut the app allows, 43 in all, and exports each take with ACES 2.0 on its own. It comes in two parts, so neither fills the phone or runs too long. Each part first cools the phone to nominal heat, and a failed export is written to `exports_*.csv` and the suite moves on. At the end the phone sends its session log and `exports.csv`:
 
 ```bash
 python3 tools/test_server.py suite tools/suites/export_matrix_1.json

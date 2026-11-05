@@ -1,6 +1,6 @@
 # VibeLog handoff
 
-For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of mid Phase 7. The latest build is `4e39165`, **Batch 10** plus the link's `set effects`, which passed CI with 150 tests and one skip and hasn't been on the phone; `596b90b`, **Batch 9**, passed CI with 150 tests and one skip, the simulator having no ProRes encoder. Batches 1 to 10 below are this stretch's work in order: grading, COLOR, styles, the camera screen, scopes, FX, HDR and the owner's fixes. The owner tested up to `f53121e` on the phone and gave notes on it. Phone results for older builds are under **What's proven on the phone** and the **Session on** entries.
+For the next working session. Read this and [ROADMAP.md](ROADMAP.md) first. As of mid Phase 7. The latest build is `88728c4`, CI run 84, from the **Session on 2026-11-05** below: export logging, the memory fix, export size, resolution and crop, the gear's window-level target and the SideStore source. It passed CI with 150 tests and one skip and is on the phone. Before it, `4e39165`, **Batch 10** plus the link's `set effects`, passed CI with 150 tests and one skip; `596b90b`, **Batch 9**, passed CI with 150 tests and one skip, the simulator having no ProRes encoder. Batches 1 to 10 below are this stretch's work in order: grading, COLOR, styles, the camera screen, scopes, FX, HDR and the owner's fixes. The owner tested up to `f53121e` on the phone and gave notes on it. Phone results for older builds are under **What's proven on the phone** and the **Session on** entries.
 
 ## What this is
 
@@ -15,7 +15,8 @@ An iPhone camera app that records full-sensor RAW frames, processes them on the 
 - **Project file:** XcodeGen generates it from `project.yml`. Never hand-write a `.pbxproj`.
 - **After each code change:** ask the owner before committing, pushing or starting a build. Once they say so, push, wait for CI with `gh run watch`, and read the logs until it's green. Then download the artifact with `gh run download` and send the `.ipa` to the owner. If the owner asks for several changes before a build, batch them.
 - **Reading CI logs:** the test step only keeps its last 60 lines. Use `gh run view <id> --log-failed` and look under `Testing failed:`. The `Executed N tests` line shows totals, including skips.
-- **Install:** the owner sideloads the unsigned `.ipa` with a free Apple ID, using Sideloadly. Don't add anything needing a paid account or special entitlements.
+- **Install:** the owner sideloads the unsigned `.ipa` with a free Apple ID, now through SideStore. Each green build of `main` goes to the `sidestore` release as `VibeLog.ipa`, numbered by CI run, and `source.json` goes to the `sidestore-source` branch, which SideStore reads at `https://raw.githubusercontent.com/JoonaKumpulainen/VibeLog/sidestore-source/source.json`. SideStore gives a source about 3 s, which the release download's redirect missed, hence the branch. Sideloadly still works with the CI artifact. Don't add anything needing a paid account or special entitlements.
+- **Test server:** can also run on the owner's Windows PC, with Python 3 from the Microsoft Store, the phone's hotspot as the network and the PC at `172.20.10.4`. The results folder is `VibeLogTest` in the owner's home folder.
 - **Evidence:** camera behavior is only proven by the phone. Results come back as `logs/session_*.log`, JSON sidecars, screenshots and the owner's observations. Say exactly what to test and what to send. Never claim camera behavior works from CI alone.
 - **Screenshots:** taking one during a recording may disturb it, so long tests should run hands-off.
 - **Public repo:** keep commits and files free of private details.
@@ -34,6 +35,8 @@ An iPhone camera app that records full-sensor RAW frames, processes them on the 
 | `Tests/VLTests` | 150 tests, including real GPU tests on the simulator |
 | `tools/inspect_clip.py` | Summarizes a RAW clip and exports a frame |
 | `tools/test_server.py` | The test link's server, which sends the phone commands and collects its files |
+| `tools/sidestore_source.py`, `tools/sidestore/icon.png` | Writes the SideStore source from the built IPA, in CI |
+| `tools/suites/export_matrix_1.json`, `_2.json` | Record 2 s in every curve and gamut and export each take |
 
 Modules are dynamic frameworks. Swift is in Swift 5 mode.
 
@@ -347,6 +350,17 @@ Step 2 of the plan below, batched with the export player's rotation fix. `b75941
 - **Recording:** starting a take closes the MON tray.
 - **Export:** it opens on the camera's look, or ACES 2.0 when the camera shows LOG or Apple's preview, and on the camera's dynamic range, with no grade or FX: the camera's grade used to come along, which read as a pre-grade. A second tap on the checked style in the grade editor's Looks unchecks it, back to no grade. The form is grouped in every orientation on the same ground as the preview, `systemGroupedBackground`, where sideways it had turned black and the preview's ground didn't match.
 
+### Session on 2026-11-05: export, built as `88728c4`
+
+- **Export logging:** every export logs its start with the take's curve, gamut, tag, size and codec, the size it writes, its frame rate, GPU time, encoder waits, memory and heat every 30 frames, and its end with time and file size. A failure names the step it stopped in (`Trace` in `LookExportJob`), how far it got and any `NSError` detail. Each export, from the screen or the link, adds a row to `logs/exports.csv`. Look building moved into `ExportChoice`, shared by the screen and the link.
+- **Test link:** `export [file] [settings]` bakes a take, the newest in log unless named, and `cancelExport` stops it; status gives `exporting`, `exportProgress`, `exports` and `lastExport`. The camera stops for the export and starts again after. The suites' `export` step, and `exports_*.csv` on the server.
+- **Export matrix, proven:** `export_matrix_1.json` and `_2.json` recorded 2 s in all 43 curve and gamut pairs in ProRes 422 HQ and exported each with ACES 2.0 SDR to HEVC: 43 of 43 saved. Part 1 ran on a cushion, reached critical, and the app stopped its last three S-Log2 takes after 9 to 23 frames; they still exported. Each part now cools to nominal once at its start.
+- **Memory fix, proven:** long ProRes 4444 takes failed with `Can't read the take: Cannot Complete Action`, or iOS ended the app with nothing logged. The export loop never drained its autorelease pool or flushed the texture cache, so decoded 16-bit 12 MP frames, about 97 MB each, piled up. Each frame now runs in its own pool and the cache is flushed after it. `video_20261102_141802.mov`, 544 frames of ProRes 4444, exported in 17.7 s with the footprint flat at 1.6 GB.
+- **Effects speed:** the same take with halation and bloom at +100 exported over the link at 31 fps, 30 ms of GPU a frame. From the export screen it had slowed to about a frame a second, most likely because the preview kept rendering the look on the same GPU, so the preview now pauses and locks during an export. Untested from the screen.
+- **Gear, proven:** taps above the gear's middle, at the screen's top edge, never reached SwiftUI's button. `CornerTap` in `PreviewViews.swift` watches the corner from the window, from the gauges to the screen's top and side, and opens Settings once per tap. The owner confirmed it works.
+- **Export size, resolution and crop, proven over the link:** the export screen's **File** section has **Codec** (HEVC 4:2:0, ProRes 422 LT, 422 and 422 HQ), **Size** for HEVC (Master 200, High 100, Share 40 Mb/s at 12 MP, lowered with the pixels to the 0.75), **Resolution** (full, 2880 or 1920 wide) and **Crop** (16:9 or 9:16 as the take plays, centred). The encode kernels center-crop to the encoder's shape already; `CropParams.smooth`, set for exports only, averages four samples when the picture shrinks. Ten combinations of one 2 s take all wrote the right size and rate: Master 52.5 MB, Share 10.5 MB, Share at 1920x1080 2.3 MB. A vertical take cropped to 16:9 and the looks of each rate are untested. Every export of a take still writes the same `_look.mov`, overwriting the last.
+- **Camera in the library:** opening the last take stops the stream and closing it starts it again, so the library and player add no load. They can't open during a take.
+
 ### Still to build
 
 - **FX baked into takes**, after the frame-cost take: the encode kernels need to sample the glow.
@@ -437,7 +451,9 @@ Before building stabilized export, find out whether optical stabilization moves 
 
 ### Waiting on the phone
 
-**Start of the next session:** the owner installs `4e39165` if not done yet. Start the server with `python3 tools/test_server.py serve` (this session's was stopped at its end; address `192.168.1.148:8765`, token in the results folder's `token` file), have the owner turn on **Connect**, then run `suite tools/suites/hdr_bakes.json` first, since HLG is the one open bug, and read the `Encoding` and `VIDEO RESULT` lines and the sidecars' `fileTag`.
+**Start of the next session:** build `88728c4` is on the phone. Still to check: an export with strong FX from the export screen, which should take about as long as the take; a vertical take exported with a 16:9 crop; and the owner's view of Share and 1920-wide files, in the results folder's `matrix`. Then the list below.
+
+**Before that session:** the owner installs `4e39165` if not done yet. Start the server with `python3 tools/test_server.py serve` (this session's was stopped at its end; address `192.168.1.148:8765`, token in the results folder's `token` file), have the owner turn on **Connect**, then run `suite tools/suites/hdr_bakes.json` first, since HLG is the one open bug, and read the `Encoding` and `VIDEO RESULT` lines and the sidecars' `fileTag`.
 
 Run these in order. The owner has limited time, so short tests come first, and the session log and sidecars should come back with the results.
 
