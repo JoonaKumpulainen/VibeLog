@@ -50,7 +50,65 @@ extension AppModel {
     private var cameraBlocked: String? {
         if let isBusy { return "Busy: \(isBusy)" }
         if playingTake != nil { return "The player or library is open" }
+        if exportValues["exporting"] == "true" { return "Exporting a take" }
         return nil
+    }
+
+    /// The test link's own export, which the screen's export doesn't share.
+    private var exportValues: [String: String] {
+        MainActor.assumeIsolated {
+            let job = testExport
+            return [
+                "exporting": String(job.progress != nil), "exportProgress": String(format: "%.2f", job.progress ?? 0),
+                "exports": String(job.runs), "lastExport": job.message ?? "",
+            ]
+        }
+    }
+
+    /// Bakes a take as the export screen would. `name` is a video's file name, or newest for the
+    /// newest take still in log. `value` takes look, target and codec as name=value, split by
+    /// semicolons, since look names can hold commas. Returns what's wrong, or nil once it starts.
+    private func startTestExport(_ command: TestCommand) -> String? {
+        var choice = ExportChoice()
+        for part in (command.value ?? "").split(separator: ";") {
+            let pair = part.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+            guard pair.count == 2 else { return "export takes look=, target= and codec=, split by ;" }
+            switch pair[0] {
+            case "look":
+                if ["monitor", "none"].contains(pair[1]) {
+                    choice.lutName = ""
+                } else if lookNames.contains(pair[1]) {
+                    choice.lutName = pair[1]
+                } else {
+                    return "look takes monitor or: \(lookNames.joined(separator: ", "))"
+                }
+            case "lutMadeFor":
+                guard ["log", "rec709"].contains(pair[1]) else { return "lutMadeFor takes log or rec709" }
+                choice.lutMadeForRec709 = pair[1] == "rec709"
+            case "target":
+                guard let target = BakeTarget(rawValue: pair[1]) else {
+                    return "target takes: \(BakeTarget.allCases.map(\.rawValue).joined(separator: ", "))"
+                }
+                choice.target = target
+            case "codec":
+                guard ["hevc420", "prores422hq"].contains(pair[1]) else { return "codec takes hevc420 or prores422hq" }
+                choice.codec = pair[1]
+            default:
+                return "export takes look=, lutMadeFor=, target= and codec=, split by ;"
+            }
+        }
+        let wanted = command.name.flatMap(TestLinkAddress.safeName) ?? "newest"
+        let takes = TakeLibrary.takes()
+        let found = wanted == "newest"
+            ? takes.first { ExportChoice.isLog($0) && !$0.url.deletingPathExtension().lastPathComponent.hasSuffix("_look") }
+            : takes.first { $0.url.lastPathComponent == wanted }
+        guard let take = found else { return wanted == "newest" ? "No take in log to export" : "No take named \(wanted)" }
+        guard ExportChoice.isLog(take) else { return "\(take.url.lastPathComponent) already has its look baked in" }
+        return MainActor.assumeIsolated {
+            guard testExport.progress == nil else { return "An export is running" }
+            testExport.start(take: take, choice: choice)
+            return nil
+        }
     }
 
     /// The newest folder of timestamped results.
@@ -146,6 +204,13 @@ extension AppModel {
             guard let folder = newestFolder(in: Storage.clips) else { return refused("No RAW clips") }
             let sent = sendFiles(in: folder, only: ["reference.dng", "reference_metadata.json", "clip.json"])
             return done("Sending \(sent) files from \(folder.lastPathComponent)")
+        case "export":
+            guard !isRecording else { return refused("A take is running") }
+            if let problem = startTestExport(command) { return refused(problem) }
+            return done()
+        case "cancelExport":
+            MainActor.assumeIsolated { testExport.cancel() }
+            return done()
         case "controlTest":
             guard isStreaming, !isRecording else { return refused("Needs a running stream and no take") }
             runControlTest()
@@ -210,7 +275,7 @@ extension AppModel {
             "thermal": status.thermal, "battery": status.battery, "freeGB": String(status.freeDiskGB),
             "shutter": exposureLocked ? shutterLabel : "auto", "iso": exposureLocked ? String(Int(iso)) : "auto",
             "lastResult": lastResult ?? "",
-        ]
+        ].merging(exportValues) { $1 }
     }
 
     /// Returns what's wrong, or nil once it's set.

@@ -31,19 +31,11 @@ struct ExportView: View {
 
     private static let codecs = ["hevc420", "prores422hq"]
 
-    private var curve: LogCurve {
-        LogCurve.allCases.first { $0.label == take.info?.metadata["curve"] } ?? .appleLog
-    }
+    private var curve: LogCurve { ExportChoice.curve(of: take) }
 
-    private var gamut: Gamut {
-        Gamut.allCases.first { $0.label == take.info?.metadata["gamut"] } ?? curve.nativeGamut
-    }
+    private var gamut: Gamut { ExportChoice.gamut(of: take) }
 
-    /// A take recorded with a look baked in has no log left to convert.
-    private var isLog: Bool {
-        guard let look = take.info?.metadata["look"] else { return true }
-        return look == "log, as recorded"
-    }
+    private var isLog: Bool { ExportChoice.isLog(take) }
 
     var body: some View {
         NavigationStack {
@@ -212,45 +204,6 @@ struct ExportView: View {
                 }
     }
 
-    /// Reading a .cube or building an ACES look takes a moment, so this runs off the main thread.
-    nonisolated private static func makeLook(
-        name: String, curve: LogCurve, gamut: Gamut, madeForRec709: Bool, sourceRec709: Bool, grade: LookGrade,
-        effects: LookEffects
-    ) -> LookExporter.Look {
-        var look = makeGradedLook(
-            name: name, curve: curve, gamut: gamut, madeForRec709: madeForRec709, sourceRec709: sourceRec709, grade: grade)
-        look.effects = effects
-        return look
-    }
-
-    nonisolated private static func makeGradedLook(
-        name: String, curve: LogCurve, gamut: Gamut, madeForRec709: Bool, sourceRec709: Bool, grade: LookGrade
-    ) -> LookExporter.Look {
-        if let builtIn = BuiltInLook.named(name) {
-            return LookExporter.Look(
-                curve: curve, gamut: gamut, lut: builtIn.lut(curve: curve, gamut: gamut, grade: grade),
-                lutExpectsRec709: false, sourceRec709: sourceRec709)
-        }
-        if name.isEmpty, !grade.isNeutral {
-            return LookExporter.Look(
-                curve: curve, gamut: gamut, lut: BuiltInLook.rec709LUT(curve: curve, gamut: gamut, grade: grade),
-                lutExpectsRec709: false, sourceRec709: sourceRec709)
-        }
-        var lut: CubeLUT?
-        if !name.isEmpty {
-            let url = Storage.luts.appendingPathComponent(name)
-            lut = (try? String(contentsOf: url, encoding: .utf8)).flatMap { try? CubeLUT(text: $0) }
-        }
-        if let cube = lut, !grade.isNeutral {
-            return LookExporter.Look(
-                curve: curve, gamut: gamut,
-                lut: BuiltInLook.graded(cube, expectsRec709: madeForRec709, curve: curve, gamut: gamut, grade: grade),
-                lutExpectsRec709: false, sourceRec709: sourceRec709)
-        }
-        return LookExporter.Look(
-            curve: curve, gamut: gamut, lut: lut, lutExpectsRec709: madeForRec709, sourceRec709: sourceRec709)
-    }
-
     /// A slider drags faster than a look builds, so the preview waits for a pause in the drag.
     private func refreshSoon() {
         previewGeneration += 1
@@ -261,21 +214,22 @@ struct ExportView: View {
         }
     }
 
-    private var lookInputs: (String, LogCurve, Gamut, Bool, Bool, LookGrade, LookEffects) {
-        (lutName, curve, gamut, lutMadeForRec709, take.info?.metadata["fileTag"] == FileTag.rec709.label, grade, effects)
+    private var choice: ExportChoice {
+        ExportChoice(
+            lutName: lutName, lutMadeForRec709: lutMadeForRec709, grade: grade, effects: effects, target: target,
+            codec: codec)
     }
 
     /// Gives the player the chosen look. The item keeps its place, and a paused one redraws.
     private func refreshPreview() {
-        let (name, curve, gamut, madeFor, sourceRec709, grade, effects) = lookInputs
+        let (chosen, takeCurve, takeGamut) = (choice, curve, gamut)
+        let sourceRec709 = ExportChoice.sourceRec709(take)
         let url = take.url
         previewGeneration += 1
         let generation = previewGeneration
         Task.detached(priority: .userInitiated) {
             do {
-                let look = Self.makeLook(
-                    name: name, curve: curve, gamut: gamut, madeForRec709: madeFor, sourceRec709: sourceRec709,
-                    grade: grade, effects: effects)
+                let look = chosen.previewLook(curve: takeCurve, gamut: takeGamut, sourceRec709: sourceRec709)
                 guard let exporter = LookExporter(look: look) else { throw LookExporter.Failure.gpu }
                 let composition = try await LookPlayback.composition(for: AVURLAsset(url: url), exporter: exporter)
                 await MainActor.run {
@@ -298,37 +252,18 @@ struct ExportView: View {
     }
 
     private func startExport() {
-        let preset = EncoderPreset.all.first { $0.id == codec } ?? EncoderPreset.all[0]
-        let (name, curve, gamut, madeFor, sourceRec709, grade, effects) = lookInputs
-        let hdr: BakeTarget? = name == BuiltInLook.aces20.name && target.isHDR ? target : nil
-        let graded = (grade.isNeutral ? "" : ", graded (\(grade.label))")
-            + (effects.isNeutral ? "" : ", effects (\(effects.label))")
-        let lutLabel = lutName.isEmpty
-            ? "Rec.709 view\(graded), baked in"
-            : BuiltInLook.named(lutName) != nil ? "\(lutName) Rec.709\(graded), baked in"
-            : "\(lutName)\(graded), baked in" + (lutMadeForRec709 ? " after the Rec.709 view" : " on log")
-        let take = take
-        Task.detached(priority: .userInitiated) {
-            var look = Self.makeLook(
-                name: name, curve: curve, gamut: gamut, madeForRec709: madeFor, sourceRec709: sourceRec709,
-                grade: grade, effects: effects)
-            if let hdr {
-                look.lut = BuiltInLook.hdrLUT(curve: curve, gamut: gamut, grade: grade, target: hdr)
-                look.lutExpectsRec709 = false
-                look.hdr = true
-            }
-            let label = hdr.map { "ACES 2.0 HDR 1000 nits, \($0 == .hlg ? "HLG" : "PQ")" + lutLabel.dropFirst("ACES 2.0 Rec.709".count) } ?? lutLabel
-            let tag: FileTag = hdr == .hlg ? .hlg : hdr == .pq ? .pq : .rec709
-            await MainActor.run { job.start(take: take, look: look, preset: preset, lookLabel: label, fileTag: tag) }
-        }
+        job.start(take: take, choice: choice)
     }
 }
 
-/// Runs one export off the main thread and reports on it.
+/// Runs one export off the main thread and reports on it. Every export, finished or not, leaves
+/// its details in the session log and a row in `logs/exports.csv`.
 @MainActor
 final class LookExportJob: ObservableObject {
     @Published var progress: Double?
     @Published var message: String?
+    /// Counts finished exports, so the test link can tell one outcome from the next.
+    @Published private(set) var runs = 0
     private let stop = StopFlag()
 
     /// Read from the export's own thread.
@@ -348,42 +283,155 @@ final class LookExportJob: ObservableObject {
         }
     }
 
+    /// The step an export is on and how far it got, so a failure can say where it stopped.
+    final class Trace: @unchecked Sendable {
+        private let lock = NSLock()
+        private var current = "building the look"
+        private var done = 0.0
+
+        var step: String {
+            lock.lock()
+            defer { lock.unlock() }
+            return current
+        }
+
+        var share: Double {
+            lock.lock()
+            defer { lock.unlock() }
+            return done
+        }
+
+        func begin(_ step: String) {
+            lock.lock()
+            current = step
+            lock.unlock()
+        }
+
+        func reached(_ value: Double) {
+            lock.lock()
+            done = value
+            lock.unlock()
+        }
+    }
+
+    /// A step that failed outside the look exporter, named as it is.
+    struct StepFailure: Error, CustomStringConvertible {
+        let description: String
+    }
+
     func cancel() { stop.set(true) }
 
-    func start(take: Take, look: LookExporter.Look, preset: EncoderPreset, lookLabel: String, fileTag: FileTag = .rec709) {
+    func start(take: Take, choice: ExportChoice) {
         guard progress == nil else { return }
         stop.set(false)
         progress = 0
         message = nil
         let stop = stop
         Task.detached(priority: .userInitiated) { [weak self] in
+            let trace = Trace()
+            let began = Date()
+            let curve = ExportChoice.curve(of: take)
+            let gamut = ExportChoice.gamut(of: take)
+            let label = choice.label
+            let name = take.url.lastPathComponent
+            Log.shared.info(
+                "Export of \(name) started: \(curve.label) in \(gamut.label), tagged \(take.info?.metadata["fileTag"] ?? "?"), "
+                    + "\(take.info.map { "\($0.width)x\($0.height) \($0.preset)" } ?? "no sidecar"), "
+                    + "into \(choice.preset.label) as \(choice.fileTag.label): \(label)")
             let outcome: String
+            var saved: URL?
+            var failure: String?
             do {
-                let saved = try await Self.export(
-                    take: take, look: look, preset: preset, lookLabel: lookLabel, fileTag: fileTag, stop: stop
+                let look = choice.exportLook(curve: curve, gamut: gamut, sourceRec709: ExportChoice.sourceRec709(take))
+                saved = try await Self.export(
+                    take: take, look: look, preset: choice.preset, lookLabel: label, fileTag: choice.fileTag, stop: stop,
+                    trace: trace
                 ) { share in
+                    trace.reached(share)
                     Task { @MainActor in self?.progress = share }
                 }
-                outcome = "Saved as \(saved.lastPathComponent)"
-                Log.shared.info("Exported \(take.url.lastPathComponent) as \(saved.lastPathComponent): \(lookLabel)")
+                outcome = "Saved as \(saved?.lastPathComponent ?? "")"
+                let megabytes = Double((try? saved?.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) / 1_000_000
+                Log.shared.info(
+                    "Exported \(name) as \(saved?.lastPathComponent ?? "") in "
+                        + String(format: "%.1f s, %.1f MB", Date().timeIntervalSince(began), megabytes) + ": \(label)")
             } catch {
                 outcome = "\(error)"
-                Log.shared.warn("Export of \(take.url.lastPathComponent) stopped: \(error)")
+                failure = "\(error)"
+                let at = String(format: "%.0f%%", trace.share * 100)
+                if case LookExporter.Failure.cancelled = error {
+                    Log.shared.info("Export of \(name) cancelled while \(trace.step), at \(at)")
+                } else {
+                    Log.shared.error(
+                        "Export of \(name) failed while \(trace.step), at \(at), after "
+                            + String(format: "%.1f s", Date().timeIntervalSince(began))
+                            + ": \(error) [\(curve.label) in \(gamut.label), \(choice.preset.id), \(choice.fileTag.label), \(label)]"
+                            + Self.details(of: error))
+                }
             }
+            Self.record(
+                take: take, curve: curve, gamut: gamut, choice: choice, label: label, saved: saved, failure: failure,
+                step: trace.step, share: trace.share, seconds: Date().timeIntervalSince(began))
             await MainActor.run {
                 self?.progress = nil
                 self?.message = outcome
+                self?.runs += 1
             }
         }
     }
+
+    /// What an NSError carries beyond its message, which is where AVFoundation names the cause.
+    nonisolated private static func details(of error: Error) -> String {
+        guard !(error is LookExporter.Failure), !(error is StepFailure) else { return "" }
+        let error = error as NSError
+        var text = " (\(error.domain) \(error.code)"
+        if let reason = error.localizedFailureReason { text += ", \(reason)" }
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+            text += ", underlying \(underlying.domain) \(underlying.code) \(underlying.localizedDescription)"
+        }
+        return text + ")"
+    }
+
+    /// One row per export in `logs/exports.csv`, which the test link can fetch by name.
+    nonisolated private static func record(
+        take: Take, curve: LogCurve, gamut: Gamut, choice: ExportChoice, label: String, saved: URL?, failure: String?,
+        step: String, share: Double, seconds: Double
+    ) {
+        let file = Storage.logs.appendingPathComponent("exports.csv")
+        let header = "time,source,curve,gamut,sourceTag,codec,fileTag,look,result,step,progress,seconds,output,error\n"
+        let fields = [
+            Storage.timestamp(), take.url.lastPathComponent, curve.label, gamut.label,
+            take.info?.metadata["fileTag"] ?? "", choice.preset.id, choice.fileTag.label, label,
+            failure == nil ? "saved" : failure == "\(LookExporter.Failure.cancelled)" ? "cancelled" : "failed",
+            failure == nil ? "" : step, String(format: "%.2f", share), String(format: "%.1f", seconds),
+            saved?.lastPathComponent ?? "", failure ?? "",
+        ]
+        let row = fields.map { "\"\($0.replacingOccurrences(of: "\"", with: "\"\""))\"" }.joined(separator: ",") + "\n"
+        exportsLock.lock()
+        defer { exportsLock.unlock() }
+        if !FileManager.default.fileExists(atPath: file.path) {
+            FileManager.default.createFile(atPath: file.path, contents: Data(header.utf8))
+        }
+        guard let handle = try? FileHandle(forWritingTo: file) else {
+            Log.shared.warn("Export: can't write \(file.lastPathComponent)")
+            return
+        }
+        defer { try? handle.close() }
+        _ = try? handle.seekToEnd()
+        try? handle.write(contentsOf: Data(row.utf8))
+    }
+
+    nonisolated private static let exportsLock = NSLock()
 
     /// Writes the video with the look to a scratch file, then joins it with the take's audio
     /// into the videos folder, with a sidecar and a copy of the gyro log.
     nonisolated private static func export(
         take: Take, look: LookExporter.Look, preset: EncoderPreset, lookLabel: String, fileTag: FileTag, stop: StopFlag,
-        progress: @escaping (Double) -> Void
+        trace: Trace, progress: @escaping (Double) -> Void
     ) async throws -> URL {
+        trace.begin("setting up the GPU")
         guard let exporter = LookExporter(look: look) else { throw LookExporter.Failure.gpu }
+        trace.begin("reading the take's size and length")
         let source = try await LookExporter.describe(take.url)
         let scratch = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
         defer { try? FileManager.default.removeItem(at: scratch) }
@@ -395,25 +443,38 @@ final class LookExportJob: ObservableObject {
         metadata["fileTag"] = fileTag.label
         metadata["exportedFrom"] = take.url.lastPathComponent
         let rate = take.info?.metadata["frameRate"].flatMap(Double.init) ?? 30
+        trace.begin("starting the \(preset.id) encoder at \(source.width)x\(source.height), \(rate) fps")
         let encoder = try VideoEncoder(config: .init(
             url: scratch, preset: preset, size: EncoderSize(width: source.width, height: source.height),
             frameRate: rate, audio: false, realTime: false, metadata: metadata, fileTag: fileTag))
+        trace.begin("baking frames")
         try await exporter.export(
             from: take.url, into: encoder, seconds: source.seconds, progress: progress, cancelled: { stop.isSet })
+        trace.begin("finishing the encoder")
         var result = await withCheckedContinuation { continuation in
             encoder.finish { continuation.resume(returning: $0) }
         }
-        if let failure = result.failure { throw LookExporter.Failure.cannotRead(failure) }
+        if let failure = result.failure { throw StepFailure(description: "The encoder failed: \(failure)") }
+        if result.framesWritten == 0 { throw StepFailure(description: "The encoder wrote no frames") }
 
+        trace.begin("joining the take's audio")
         try? FileManager.default.removeItem(at: destination)
         try await joinAudio(video: scratch, from: take.url, into: destination)
+        trace.begin("writing the sidecar")
         result.file = name
-        if let data = try? JSONEncoder().encode(result) {
-            try? data.write(to: TakeLibrary.sidecar(for: destination))
+        do {
+            try JSONEncoder().encode(result).write(to: TakeLibrary.sidecar(for: destination))
+        } catch {
+            Log.shared.warn("Export: can't write the sidecar for \(name): \(error)")
         }
         let gyro = TakeLibrary.gyroLog(for: take.url)
         if FileManager.default.fileExists(atPath: gyro.path) {
-            try? FileManager.default.copyItem(at: gyro, to: TakeLibrary.gyroLog(for: destination))
+            do {
+                try? FileManager.default.removeItem(at: TakeLibrary.gyroLog(for: destination))
+                try FileManager.default.copyItem(at: gyro, to: TakeLibrary.gyroLog(for: destination))
+            } catch {
+                Log.shared.warn("Export: can't copy the gyro log for \(name): \(error)")
+            }
         }
         return destination
     }
@@ -439,7 +500,7 @@ final class LookExportJob: ObservableObject {
             try audioTrack?.insertTimeRange(audioRange, of: takeAudio, at: offset)
         }
         guard let session = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough) else {
-            throw LookExporter.Failure.cannotRead("can't join the audio")
+            throw StepFailure(description: "Can't join the audio: no export session")
         }
         session.outputURL = destination
         session.outputFileType = .mov
@@ -447,7 +508,7 @@ final class LookExportJob: ObservableObject {
             session.exportAsynchronously { continuation.resume() }
         }
         if session.status != .completed {
-            throw LookExporter.Failure.cannotRead(session.error?.localizedDescription ?? "can't join the audio")
+            throw session.error ?? StepFailure(description: "Can't join the audio: export status \(session.status.rawValue)")
         }
     }
 }

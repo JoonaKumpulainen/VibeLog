@@ -330,6 +330,8 @@ final class AppModel: ObservableObject {
     /// What the link reports as open: camera, settings or diagnostics.
     private(set) var openScreen = "camera"
     let testLink = TestLink()
+    /// Bakes the takes the test link asks for, one at a time. Only touched on the main thread.
+    private(set) lazy var testExport: LookExportJob = MainActor.assumeIsolated { LookExportJob() }
     /// The preset the app opens with. Empty keeps the last choices used.
     @Published var defaultPreset = ""
 

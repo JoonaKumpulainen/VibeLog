@@ -248,6 +248,11 @@ def command_from(words):
         return {"action": action, "name": " ".join(rest)}
     if action in ("stream", "focusAt"):
         return {"action": action, "value": rest[0]}
+    if action == "export":
+        # export [file or newest] [look=ACES 2.0;target=sdr;codec=hevc420]
+        name = rest[0] if rest and "=" not in rest[0] else "newest"
+        value = " ".join(rest[1:] if rest and "=" not in rest[0] else rest)
+        return {"action": action, "name": name, "value": value}
     return {"action": action}
 
 
@@ -296,11 +301,16 @@ class Suite:
         {"take": 20, "label": "ultra wide"}
         {"cool": 30}    stops the stream, waits at least that many minutes and for nominal heat
         {"wait": 5}     seconds
+        {"export": {"look": "ACES 2.0", "target": "sdr", "codec": "hevc420"}, "label": "S-Log3"}
+                        bakes the newest take in log, as the export screen would
 
     Results go to suite_*.csv and a reading every 10 seconds to heat_*.csv, in the results folder.
+    Exports go to exports_*.csv, and a failed one doesn't stop the suite. At the end the phone
+    sends its session log and its own exports.csv, which says which step each failure stopped in.
     """
 
     GIVE_UP_SECONDS = 300
+    EXPORT_GIVE_UP_SECONDS = 900
 
     def __init__(self, options):
         self.options = options
@@ -311,6 +321,10 @@ class Suite:
         self.heat_log = csv.DictWriter(self.heat, HEAT_FIELDS, extrasaction="ignore")
         self.result_log.writeheader()
         self.heat_log.writeheader()
+        self.stamp = stamp
+        self.exports = None
+        self.export_log = None
+        self.export_counts = {"saved": 0, "failed": 0}
 
     def ask(self, command):
         """Keeps trying while the phone is away, then stops the suite."""
@@ -361,6 +375,46 @@ class Suite:
         print(f"  {result[:150]}", flush=True)
         time.sleep(3)
 
+    def export(self, choices, label):
+        """Bakes the newest take and waits for it. A failure is written down, not fatal."""
+        if self.export_log is None:
+            self.exports = open(self.options.folder / f"exports_{self.stamp}.csv", "w", newline="", encoding="utf-8")
+            self.export_log = csv.DictWriter(self.exports, ["label", "result", "seconds", "message"])
+            self.export_log.writeheader()
+        print(f"export: {label}", flush=True)
+        started = time.time()
+        before = self.status(label).get("exports", "0")
+        value = ";".join(f"{name}={text}" for name, text in choices.items())
+        reply = self.ask({"action": "export", "name": "newest", "value": value})
+        if reply["ok"]:
+            deadline = started + self.EXPORT_GIVE_UP_SECONDS
+            while True:
+                time.sleep(2)
+                values = self.status(label)
+                if values.get("exports") != before and values.get("exporting") == "false":
+                    message = values.get("lastExport", "")
+                    result = "saved" if message.startswith("Saved") else "failed"
+                    break
+                if time.time() > deadline:
+                    self.ask({"action": "cancelExport"})
+                    message, result = "Gave up waiting, cancelled", "failed"
+                    break
+        else:
+            message, result = reply["message"], "refused"
+        self.export_counts["saved" if result == "saved" else "failed"] += 1
+        self.export_log.writerow(
+            {"label": label, "result": result, "seconds": f"{time.time() - started:.1f}", "message": message})
+        self.exports.flush()
+        print(f"  {result}: {message[:150]}", flush=True)
+
+    def collect(self):
+        """Asks for the phone's own record of the exports, with the reasons for failures."""
+        self.ask({"action": "sendLog"})
+        reply = self.ask({"action": "sendFile", "name": "exports.csv"})
+        if not reply["ok"]:
+            print(f"  exports.csv: {reply['message']}", flush=True)
+        time.sleep(5)
+
     def cool(self, minutes):
         print(f"cooling: at least {minutes} minutes and nominal heat", flush=True)
         self.ask({"action": "stream", "value": "off"})
@@ -395,9 +449,15 @@ class Suite:
                 self.cool(step["cool"])
             elif "wait" in step:
                 time.sleep(step["wait"])
+            elif "export" in step:
+                self.export(step["export"], step.get("label", "export"))
             else:
                 sys.exit(f"Unknown step: {step}")
         print(f"results: {self.results.name}\nheat: {self.heat.name}", flush=True)
+        if self.exports:
+            self.collect()
+            counts = self.export_counts
+            print(f"exports: {self.exports.name}, {counts['saved']} saved, {counts['failed']} failed", flush=True)
 
 
 def suite(options):

@@ -20,6 +20,7 @@ The phone connects out to the server, and the app opens no port of its own. Once
 | Change capture, format, exposure, white balance, focus and viewfinder settings | Change settings during a take, other than tools, look and punch-in |
 | Start and stop takes and the stream, including RAW clips | Turn the link on, or stay connected after the app restarts |
 | Run the control test, the encoder test and both probes, some of which capture test pictures | Reach files outside `videos/`, `logs/`, `probes/`, `clips/` and `stills/` |
+| Export a take with a look, which writes a new `_look.mov` beside it | Export during a take |
 | List files in those folders and fetch them | Watch the viewfinder live |
 | Apply and save presets, and set the default | Delete presets |
 | Take a picture of what the camera sees while no take is running, and fetch it | Fetch a picture during a take |
@@ -122,12 +123,28 @@ Other commands:
 | `saveStill`, `sendStill` | Saves a full still, and sends the newest one |
 | `sendReference` | Sends the newest RAW clip's reference frame and metadata |
 | `sendLog`, `listFiles`, `sendFile <name>` | Fetch logs and files |
+| `export [file] [look=ACES 2.0;target=sdr;codec=hevc420]` | Bakes a take, the newest in log unless named. `look` is `monitor` or a look's name, `target` is `sdr`, `pq` or `hlg`, `codec` is `hevc420` or `prores422hq`. Status reports `exporting`, `exports` and `lastExport` |
+| `cancelExport` | Stops that export |
+
+Every export, from the screen or the link, logs which step it stopped in and adds a row to `logs/exports.csv`, which `sendFile exports.csv` fetches.
 
 A suite runs a list of takes and cooling breaks from a JSON file, and writes `suite_*.csv` and `heat_*.csv` to the results folder. It refuses to start unless the phone is on the camera screen with room for its takes:
 
 ```bash
 python3 tools/test_server.py suite tools/suites/ultra_wide.json
 ```
+
+The export matrix records 2 seconds in every curve and gamut the app allows, 43 in all, and exports each take with ACES 2.0 on its own. It comes in two parts, so neither fills the phone or runs too long. A failed export is written to `exports_*.csv` and the suite moves on. At the end the phone sends its session log and `exports.csv`:
+
+```bash
+python3 tools/test_server.py suite tools/suites/export_matrix_1.json
+```
+
+```bash
+python3 tools/test_server.py suite tools/suites/export_matrix_2.json
+```
+
+Part 1 covers Apple Log, Apple Log 2, S-Log3 and S-Log2, and part 2 covers LogC3, LogC4 and Canon Log 3. Between parts, delete the takes in the library if the phone is short of room.
 
 `send status` also reports which screen is open and why the camera is busy. A wrong setting replies with the values it accepts. `send` and `suite` only work from the computer running the server.
 
@@ -223,6 +240,8 @@ Delete these properties:
 @Published var testSendsResults = true
 @Published var testSendsGyro = true
 let testLink = TestLink()
+/// Bakes the takes the test link asks for, one at a time. Only touched on the main thread.
+private(set) lazy var testExport: LookExportJob = MainActor.assumeIsolated { LookExportJob() }
 ```
 
 ```swift
@@ -317,7 +336,7 @@ Delete this file, and the **Test link** row in `README.md`. In `HANDOFF.md`, del
 This should print nothing:
 
 ```bash
-grep -rnE 'testLink|TestLink|testServer|testToken|testSends|sessionStamp|TestCommand|TestReply|sendTakeFiles|sendTimingFile|sendPreview|updateTestLink|takeSeconds|openScreen|NSLocalNetwork|NSAllowsLocalNetworking' App Modules Tests project.yml
+grep -rnE 'testLink|TestLink|testServer|testToken|testSends|sessionStamp|TestCommand|TestReply|sendTakeFiles|sendTimingFile|sendPreview|updateTestLink|takeSeconds|testExport|openScreen|NSLocalNetwork|NSAllowsLocalNetworking' App Modules Tests project.yml
 ```
 
 This should print nothing too, which confirms the app has no network code left:
