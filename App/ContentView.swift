@@ -765,30 +765,38 @@ struct StatusBlocks: View {
                     .allowsHitTesting(false)
                     .frame(width: Self.gaugeSide, height: Self.gaugeSide)
                     .turnedToHold()
-                settingsButton
+                Image(systemName: "gearshape")
+                    .font(.system(size: 26))
+                    .foregroundStyle(Tokens.value)
+                    .opacity(model.isBusy == nil ? 1 : 0.4)
+                    .frame(width: 30, height: 30)
+                    .turnedToHold()
+                    .frame(width: Self.gearSide, height: Self.gearSide)
+                    .allowsHitTesting(false)
             }
             .frame(height: CameraGeometry.statusSide)
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, Self.edgeGap)
         .padding(.top, (CameraGeometry.statusDepth - CameraGeometry.statusSide) / 2)
+        .overlay(alignment: .topTrailing) { settingsTarget }
     }
 
     /// Room for the three gauges, square so they can turn in place.
     private static let gaugeSide: CGFloat = 56
+    private static let gearSide: CGFloat = 52
+    private static let edgeGap: CGFloat = 24
+    /// How far the target reaches over the gauges, which take no taps.
+    private static let gaugeOverlap: CGFloat = 14
 
-    private var settingsButton: some View {
-        // A square target centred on the gear, the same in every hold.
+    /// The whole corner beside the gauges, out to the screen's top and side, so the gear takes a
+    /// tap anywhere near it, held any way. Only the icon turns; the corner it sits in doesn't.
+    private var settingsTarget: some View {
         Button(action: openSettings) {
-            Image(systemName: "gearshape")
-                .font(.system(size: 26))
-                .foregroundStyle(Tokens.value)
-                .frame(width: 30, height: 30)
-                .turnedToHold()
-                .frame(width: 52, height: 52)
+            Color.clear
+                .frame(width: Self.gearSide + Self.edgeGap + Self.gaugeOverlap, height: CameraGeometry.statusDepth)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .contentShape(Rectangle())
         .disabled(model.isBusy != nil)
         .accessibilityLabel("Settings")
     }
