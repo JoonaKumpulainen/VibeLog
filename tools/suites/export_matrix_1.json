@@ -1,5 +1,6 @@
 [
   {"set": {"lens": "1x", "bakeLook": false, "uncompressedAudio": false, "pairsGamut": false}},
+  {"cool": 2},
   {"set": {"curve": "Apple Log", "gamut": "Rec.2020"}},
   {"take": 2, "label": "Apple Log in Rec.2020"},
   {"export": {"look": "ACES 2.0", "target": "sdr", "codec": "hevc420"}, "label": "Apple Log in Rec.2020"},

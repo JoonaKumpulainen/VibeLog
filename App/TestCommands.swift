@@ -106,6 +106,14 @@ extension AppModel {
         guard ExportChoice.isLog(take) else { return "\(take.url.lastPathComponent) already has its look baked in" }
         return MainActor.assumeIsolated {
             guard testExport.progress == nil else { return "An export is running" }
+            // The camera's stream takes close to a gigabyte, which a long 12 MP export needs, so
+            // it stops for the export, as it does behind the export screen, and starts again after.
+            let wasStreaming = isStreaming
+            if wasStreaming { toggleStream() }
+            testExport.onFinish = { [weak self] in
+                guard let self, wasStreaming, !self.isStreaming, !self.isRecording else { return }
+                self.toggleStream()
+            }
             testExport.start(take: take, choice: choice)
             return nil
         }

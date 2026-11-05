@@ -1,5 +1,6 @@
 [
   {"set": {"lens": "1x", "bakeLook": false, "uncompressedAudio": false, "pairsGamut": false}},
+  {"cool": 2},
   {"set": {"curve": "LogC3 (EI 800)", "gamut": "Rec.2020"}},
   {"take": 2, "label": "LogC3 (EI 800) in Rec.2020"},
   {"export": {"look": "ACES 2.0", "target": "sdr", "codec": "hevc420"}, "label": "LogC3 (EI 800) in Rec.2020"},

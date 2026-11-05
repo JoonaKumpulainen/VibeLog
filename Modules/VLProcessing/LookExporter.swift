@@ -153,6 +153,7 @@ public final class LookExporter {
         commands.commit()
         commands.waitUntilCompleted()
         withExtendedLifetime((decoded.wrapped, wrappedOutput)) {}
+        CVMetalTextureCacheFlush(cache, 0)
         guard commands.status == .completed else { throw Failure.gpu }
         // lookPreview writes display codes for Rec.709.
         CVBufferSetAttachment(output, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
@@ -168,12 +169,12 @@ public final class LookExporter {
         let (reader, output) = try await makeReader(url, from: 0)
         defer { reader.cancelReading() }
         var first: CMTime?
-        while let sample = output.copyNextSampleBuffer() {
+        var frames = 0
+        Log.shared.info("Export memory at start: \(Self.memoryText)")
+        while true {
             if cancelled() { throw Failure.cancelled }
-            guard let frame = CMSampleBufferGetImageBuffer(sample) else { continue }
-            let time = CMSampleBufferGetPresentationTimeStamp(sample)
-            first = first ?? time
             // The encoder's pool runs dry while it catches up, so wait for a buffer, but not forever.
+            // The wait suspends, so it stays outside the frame's autorelease pool.
             var next = sink.nextPixelBuffer()
             var waits = 0
             while next == nil, waits < 2000 {
@@ -182,20 +183,41 @@ public final class LookExporter {
                 next = sink.nextPixelBuffer()
             }
             guard let buffer = next else { throw Failure.encoderFull }
-            guard let commands = queue.makeCommandBuffer(), let decoded = decode(frame, commands: commands),
-                let source = withEffects(decoded.image, commands: commands),
-                let planes = pipeline.encodeImage(
-                    source, into: buffer, commands: commands, look: look, lut: lutTexture)
-            else { throw Failure.gpu }
-            commands.commit()
-            commands.waitUntilCompleted()
-            withExtendedLifetime((decoded.wrapped, planes)) {}
-            guard commands.status == .completed else { throw Failure.gpu }
-            sink.append(buffer, at: time)
-            if seconds > 0, let first { progress(min((time - first).seconds / seconds, 1)) }
+            // A decoded 12 MP frame is about 100 MB, and nothing drains a loop's autoreleased
+            // objects or the texture cache by itself, so each frame lets go of its own before the
+            // next. Without this a long take runs the app out of memory.
+            let finished: Bool = try autoreleasepool {
+                guard let sample = output.copyNextSampleBuffer() else { return true }
+                guard let frame = CMSampleBufferGetImageBuffer(sample) else { return false }
+                let time = CMSampleBufferGetPresentationTimeStamp(sample)
+                first = first ?? time
+                guard let commands = queue.makeCommandBuffer(), let decoded = decode(frame, commands: commands),
+                    let source = withEffects(decoded.image, commands: commands),
+                    let planes = pipeline.encodeImage(
+                        source, into: buffer, commands: commands, look: look, lut: lutTexture)
+                else { throw Failure.gpu }
+                commands.commit()
+                commands.waitUntilCompleted()
+                withExtendedLifetime((decoded.wrapped, planes)) {}
+                if let cache { CVMetalTextureCacheFlush(cache, 0) }
+                guard commands.status == .completed else { throw Failure.gpu }
+                sink.append(buffer, at: time)
+                if seconds > 0, let first { progress(min((time - first).seconds / seconds, 1)) }
+                return false
+            }
+            if finished { break }
+            frames += 1
+            if frames % 30 == 0 { Log.shared.info("Export memory at frame \(frames): \(Self.memoryText)") }
         }
+        Log.shared.info("Export memory after \(frames) frames: \(Self.memoryText)")
         if reader.status == .failed { throw Failure.cannotRead(reader.error?.localizedDescription ?? "unknown") }
         progress(1)
+    }
+
+    /// The app's footprint and what it may still allocate, the two numbers that say how near the
+    /// OS is to ending it.
+    private static var memoryText: String {
+        "footprint \(SystemStatus.footprint / 1_000_000) MB, available \(SystemStatus.availableMemory / 1_000_000) MB"
     }
 
     private func makeReader(_ url: URL, from seconds: Double) async throws -> (AVAssetReader, AVAssetReaderTrackOutput) {

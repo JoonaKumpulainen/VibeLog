@@ -264,6 +264,8 @@ final class LookExportJob: ObservableObject {
     @Published var message: String?
     /// Counts finished exports, so the test link can tell one outcome from the next.
     @Published private(set) var runs = 0
+    /// Runs on the main thread once an export ends, however it ends.
+    var onFinish: (() -> Void)?
     private let stop = StopFlag()
 
     /// Read from the export's own thread.
@@ -375,6 +377,7 @@ final class LookExportJob: ObservableObject {
             await MainActor.run {
                 self?.progress = nil
                 self?.message = outcome
+                self?.onFinish?()
                 self?.runs += 1
             }
         }

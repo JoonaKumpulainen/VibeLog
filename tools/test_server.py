@@ -406,6 +406,8 @@ class Suite:
             {"label": label, "result": result, "seconds": f"{time.time() - started:.1f}", "message": message})
         self.exports.flush()
         print(f"  {result}: {message[:150]}", flush=True)
+        # The camera stops for an export and needs a moment to start again.
+        time.sleep(3)
 
     def collect(self):
         """Asks for the phone's own record of the exports, with the reasons for failures."""
