@@ -3,6 +3,70 @@ import VLCore
 import VLProcessing
 import VLRecording
 
+/// How much HEVC an export spends on a 12 MP picture.
+enum ExportQuality: String, CaseIterable, Identifiable, Sendable {
+    case master, high, share
+
+    var id: String { rawValue }
+
+    var megabits: Double {
+        switch self {
+        case .master: return 200
+        case .high: return 100
+        case .share: return 40
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .master: return "Master"
+        case .high: return "High"
+        case .share: return "Share"
+        }
+    }
+}
+
+/// The long side an export shrinks to, or the take's own.
+enum ExportResolution: String, CaseIterable, Identifiable, Sendable {
+    case full, medium, small
+
+    var id: String { rawValue }
+
+    var longSide: Int? {
+        switch self {
+        case .full: return nil
+        case .medium: return 2880
+        case .small: return 1920
+        }
+    }
+
+    var label: String { longSide.map { "\($0) wide" } ?? "Full" }
+}
+
+/// The shape an export is cropped to, as it plays upright.
+enum ExportCrop: String, CaseIterable, Identifiable, Sendable {
+    case none, wide, tall
+
+    var id: String { rawValue }
+
+    /// Width over height as it plays, or nil to keep the take's.
+    var aspect: Double? {
+        switch self {
+        case .none: return nil
+        case .wide: return 16.0 / 9
+        case .tall: return 9.0 / 16
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .none: return "None"
+        case .wide: return "16:9"
+        case .tall: return "9:16"
+        }
+    }
+}
+
 /// What an export bakes in, shared by the export screen and the test link, so both build the
 /// same look and write the same label.
 struct ExportChoice: Sendable {
@@ -14,8 +78,52 @@ struct ExportChoice: Sendable {
     /// Only ACES 2.0 bakes HDR.
     var target = BakeTarget.sdr
     var codec = "hevc420"
+    /// HEVC's rate. ProRes keeps its own.
+    var quality = ExportQuality.master
+    var resolution = ExportResolution.full
+    var crop = ExportCrop.none
 
-    var preset: EncoderPreset { EncoderPreset.all.first { $0.id == codec } ?? EncoderPreset.all[0] }
+    static let codecs = ["hevc420", "prores422lt", "prores422", "prores422hq"]
+
+    /// The codec at its own rate, before the size of the picture sets HEVC's.
+    private var basePreset: EncoderPreset {
+        if codec == EncoderPreset.proRes422LT.id { return EncoderPreset.proRes422LT }
+        return EncoderPreset.all.first { $0.id == codec } ?? EncoderPreset.all[0]
+    }
+
+    /// The preset for a picture this size. HEVC's rate is the quality's at 12 MP, falling with the
+    /// pixels to the power 0.75, so a smaller picture keeps the same look per pixel, about.
+    func preset(width: Int, height: Int) -> EncoderPreset {
+        let base = basePreset
+        guard base.bitrate != nil else { return base }
+        let share = Double(width * height) / Double(4032 * 3024)
+        return base.withBitrate(Int(quality.megabits * 1_000_000 * pow(share, 0.75)))
+    }
+
+    /// The encoder's size: the stored picture cropped to the shape chosen as it plays, upright, then
+    /// shrunk to the resolution's long side, kept to even numbers.
+    func outputSize(width: Int, height: Int, quarterTurns: Int) -> (width: Int, height: Int) {
+        var w = Double(width)
+        var h = Double(height)
+        if let aspect = crop.aspect {
+            // A take held upright is stored sideways, so its shape turns with it.
+            let stored = quarterTurns % 2 == 0 ? aspect : 1 / aspect
+            if w / h > stored { w = h * stored } else { h = w / stored }
+        }
+        if let long = resolution.longSide, max(w, h) > Double(long) {
+            let scale = Double(long) / max(w, h)
+            w *= scale
+            h *= scale
+        }
+        return (Int((w / 2).rounded()) * 2, Int((h / 2).rounded()) * 2)
+    }
+
+    /// Size, resolution and crop, for the log and the sidecar.
+    func formatLabel(width: Int, height: Int) -> String {
+        let preset = preset(width: width, height: height)
+        let rate = preset.bitrate.map { " at \($0 / 1_000_000) Mb/s" } ?? ""
+        return "\(preset.label)\(rate), \(width)x\(height)" + (crop == .none ? "" : ", cropped \(crop.label)")
+    }
 
     var hdr: BakeTarget? { lutName == BuiltInLook.aces20.name && target.isHDR ? target : nil }
 

@@ -69,6 +69,16 @@ public struct EncoderPreset: Identifiable, Hashable, Sendable {
             profile: profile, bitrate: bitrate)
     }
 
+    /// The same preset at another average rate, for an export that trades size for quality.
+    public func withBitrate(_ value: Int) -> EncoderPreset {
+        EncoderPreset(id: id, label: label, codec: codec, pixelFormat: pixelFormat, profile: profile, bitrate: value)
+    }
+
+    /// About half the size of ProRes 422 HQ. Offered for exports only, not for recording.
+    public static let proRes422LT = EncoderPreset(
+        id: "prores422lt", label: "ProRes 422 LT", codec: .proRes422LT,
+        pixelFormat: kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange, profile: nil, bitrate: nil)
+
     /// Only for the encoder test: whether HEVC writes more than 10 bits when given 16. Apple lists
     /// no 12-bit HEVC profile, so the file may come out 10-bit without any error.
     public static let hevc444From16Bit = EncoderPreset(

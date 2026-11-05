@@ -40,6 +40,7 @@ struct MonitorParams {
 struct CropParams {
     float2 uvOffset;
     float2 uvScale;
+    uint smooth;  // Averages across each output pixel, for an export that shrinks the picture.
 };
 
 // Must match LookParams in ProcessingPipeline.swift. What the encoder writes: the log image as
@@ -295,14 +296,26 @@ static inline float msbAligned(float code) {
     return round(clamp(code, 4.0, 1019.0)) * 64.0 / 65535.0;
 }
 
+// The log color under one output pixel `step` wide in uv. An export that shrinks the picture
+// averages four bilinear samples across the pixel, so fine detail doesn't alias; at full size
+// it's the one sample it always was.
+static inline float3 coveredSample(texture2d<float, access::sample> image, float2 uv, float2 step, uint smooth) {
+    float2 texels = step * float2(image.get_width(), image.get_height());
+    if (smooth == 0 || max(texels.x, texels.y) < 1.25) return logSample(image, uv);
+    float2 q = step * 0.25;
+    return (logSample(image, uv + float2(-q.x, -q.y)) + logSample(image, uv + float2(q.x, -q.y))
+        + logSample(image, uv + float2(-q.x, q.y)) + logSample(image, uv + float2(q.x, q.y))) * 0.25;
+}
+
 kernel void encodeLuma(texture2d<float, access::sample> image [[texture(0)]],
                        texture2d<float, access::write> luma [[texture(1)]],
                        texture3d<float> lut [[texture(2)]],
                        constant CropParams &crop [[buffer(0)]],
                        constant LookParams &k [[buffer(1)]],
                        uint2 gid [[thread_position_in_grid]]) {
-    float2 uv = crop.uvOffset + crop.uvScale * (float2(gid) + 0.5) / float2(luma.get_width(), luma.get_height());
-    float3 codes = videoCodes(lookColor(saturate(logSample(image, uv)), k, lut), k);
+    float2 step = crop.uvScale / float2(luma.get_width(), luma.get_height());
+    float2 uv = crop.uvOffset + step * (float2(gid) + 0.5);
+    float3 codes = videoCodes(lookColor(saturate(coveredSample(image, uv, step, crop.smooth)), k, lut), k);
     luma.write(float4(msbAligned(codes.x)), gid);
 }
 
@@ -312,8 +325,9 @@ kernel void encodeChroma(texture2d<float, access::sample> image [[texture(0)]],
                          constant CropParams &crop [[buffer(0)]],
                          constant LookParams &k [[buffer(1)]],
                          uint2 gid [[thread_position_in_grid]]) {
-    float2 uv = crop.uvOffset + crop.uvScale * (float2(gid) + 0.5) / float2(chroma.get_width(), chroma.get_height());
-    float3 codes = videoCodes(lookColor(saturate(logSample(image, uv)), k, lut), k);
+    float2 step = crop.uvScale / float2(chroma.get_width(), chroma.get_height());
+    float2 uv = crop.uvOffset + step * (float2(gid) + 0.5);
+    float3 codes = videoCodes(lookColor(saturate(coveredSample(image, uv, step, crop.smooth)), k, lut), k);
     chroma.write(float4(msbAligned(codes.y), msbAligned(codes.z), 0.0, 0.0), gid);
 }
 
@@ -355,8 +369,9 @@ kernel void encodePacked(texture2d<float, access::sample> image [[texture(0)]],
                          constant CropParams &crop [[buffer(0)]],
                          constant LookParams &k [[buffer(1)]],
                          uint2 gid [[thread_position_in_grid]]) {
-    float2 uv = crop.uvOffset + crop.uvScale * (float2(gid) + 0.5) / float2(packed.get_width(), packed.get_height());
-    packed.write(packedPixel(saturate(logSample(image, uv)), k, lut), gid);
+    float2 step = crop.uvScale / float2(packed.get_width(), packed.get_height());
+    float2 uv = crop.uvOffset + step * (float2(gid) + 0.5);
+    packed.write(packedPixel(saturate(coveredSample(image, uv, step, crop.smooth)), k, lut), gid);
 }
 
 // The efficient path for packed 4:4:4: one thread per pixel, the same math as processDirect.

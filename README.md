@@ -88,7 +88,7 @@ On an iPhone 14 Pro, ProRes 422 HQ at full size with reduced load held 30 fps fo
 
 **Import .cube LUT** adds a LUT to the viewfinder's looks, and with **Bake** on, to the file. Set **LUT made for** to Log for conversion LUTs, which take the recorded log image in the chosen curve and gamut, or to Rec.709 for look LUTs, which are applied after the built-in Rec.709 view. 3D LUTs up to size 129 work; 1D LUTs do not. The built-in **ACES 2.0** and **ACES 1.3** looks are the Academy's Rec.709 output transforms, built on the phone for the curve and color space recorded, and always work on log.
 
-**Export** in the player writes a copy of a log take with a look baked in, after a preview with a time slider: the Rec.709 view, an ACES look or a LUT, in HEVC 4:2:0 or ProRes 422 HQ, tagged Rec.709, with the take's audio. The copy is `videos/video_*_look.mov`, and the take itself isn't changed.
+**Export** in the player writes a copy of a log take with a look baked in, after a preview with a time slider: the Rec.709 view, an ACES look or a LUT, in HEVC 4:2:0 or ProRes 422 LT, 422 or 422 HQ, tagged Rec.709, with the take's audio. **Size** sets HEVC's rate (Master, High or Share), **Resolution** shrinks it to 2880 or 1920 wide, and **Crop** cuts it to 16:9 or 9:16 as it plays. The copy is `videos/video_*_look.mov`, and the take itself isn't changed.
 
 ## Files (Files app > On My iPhone > VibeLog)
 

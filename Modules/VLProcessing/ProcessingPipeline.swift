@@ -310,9 +310,13 @@ struct LookParams {
     }
 }
 
+/// Must match CropParams in Shaders.metal.
 private struct CropParams {
     var uvOffset: SIMD2<Float>
     var uvScale: SIMD2<Float>
+    /// Averages across each output pixel when the picture shrinks. Exports only, so a take records
+    /// as it always has.
+    var smooth: UInt32 = 0
 }
 
 private struct DirectParams {
@@ -801,20 +805,23 @@ public final class ProcessingPipeline: NSObject {
         return ([wrappedLuma, wrappedChroma], .biplanar(luma: luma, chroma: chroma))
     }
 
-    /// Converts a log image into an encoder buffer with a look, for the export. Returns the wrapped
-    /// textures, which must outlive the command buffer.
+    /// Converts a log image into an encoder buffer with a look, for the export, center cropping to
+    /// the buffer's shape and scaling to its size. Returns the wrapped textures, which must outlive
+    /// the command buffer.
     func encodeImage(
         _ image: MTLTexture, into buffer: CVPixelBuffer, commands: MTLCommandBuffer, look: LookParams,
-        lut: MTLTexture?
+        lut: MTLTexture?, smooth: Bool = false
     ) -> [CVMetalTexture]? {
         guard let wrapping = wrapPlanes(buffer) else { return nil }
         let wrapped = wrapping.0
         switch wrapping.1 {
         case .biplanar(let luma, let chroma):
-            guard encodeYCbCr(into: commands, image: image, luma: luma, chroma: chroma, look: look, lut: lut)
+            guard encodeYCbCr(
+                into: commands, image: image, luma: luma, chroma: chroma, look: look, lut: lut, smooth: smooth)
             else { return nil }
         case .packed(let packed):
-            guard encodePacked(into: commands, image: image, packed: packed, look: look, lut: lut) else { return nil }
+            guard encodePacked(into: commands, image: image, packed: packed, look: look, lut: lut, smooth: smooth)
+            else { return nil }
         }
         return wrapped
     }
@@ -923,13 +930,14 @@ public final class ProcessingPipeline: NSObject {
     @discardableResult
     func encodeYCbCr(
         into commands: MTLCommandBuffer, image: MTLTexture, luma: MTLTexture, chroma: MTLTexture,
-        look: LookParams = .log, lut: MTLTexture? = nil
+        look: LookParams = .log, lut: MTLTexture? = nil, smooth: Bool = false
     ) -> Bool {
         var look = look
         guard let lut = lut ?? placeholderLUT(), let encoder = commands.makeComputeCommandEncoder() else { return false }
         var crop = Self.centerCrop(
             imageAspect: Float(image.width) / Float(image.height),
             targetAspect: Float(luma.width) / Float(luma.height))
+        crop.smooth = smooth ? 1 : 0
         for (state, target) in [(lumaState, luma), (chromaState, chroma)] {
             encoder.setComputePipelineState(state)
             encoder.setTexture(image, index: 0)
@@ -951,13 +959,14 @@ public final class ProcessingPipeline: NSObject {
     @discardableResult
     func encodePacked(
         into commands: MTLCommandBuffer, image: MTLTexture, packed: MTLTexture, look: LookParams = .log,
-        lut: MTLTexture? = nil
+        lut: MTLTexture? = nil, smooth: Bool = false
     ) -> Bool {
         var look = look
         guard let lut = lut ?? placeholderLUT(), let encoder = commands.makeComputeCommandEncoder() else { return false }
         var crop = Self.centerCrop(
             imageAspect: Float(image.width) / Float(image.height),
             targetAspect: Float(packed.width) / Float(packed.height))
+        crop.smooth = smooth ? 1 : 0
         encoder.setComputePipelineState(packedState)
         encoder.setTexture(image, index: 0)
         encoder.setTexture(packed, index: 1)

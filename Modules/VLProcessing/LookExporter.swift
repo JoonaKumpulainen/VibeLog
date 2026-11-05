@@ -114,13 +114,15 @@ public final class LookExporter {
         kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any],
     ]
 
-    /// The take's picture size and length, for sizing the encoder and the progress bar.
-    public static func describe(_ url: URL) async throws -> (width: Int, height: Int, seconds: Double) {
+    /// The take's picture size as stored, length, and how far it turns to play upright, for sizing
+    /// and cropping the encoder and for the progress bar.
+    public static func describe(_ url: URL) async throws -> (width: Int, height: Int, seconds: Double, quarterTurns: Int) {
         let asset = AVURLAsset(url: url)
         guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw Failure.noVideo }
         let size = try await track.load(.naturalSize)
         let duration = try await asset.load(.duration)
-        return (Int(size.width), Int(size.height), duration.seconds)
+        let turns = LookPlayback.quarterTurns(try await track.load(.preferredTransform))
+        return (Int(size.width), Int(size.height), duration.seconds, turns)
     }
 
     /// One frame with the look into `output`, a 32BGRA buffer, scaled to its size and turned
@@ -200,7 +202,7 @@ public final class LookExporter {
                 guard let commands = queue.makeCommandBuffer(), let decoded = decode(frame, commands: commands),
                     let source = withEffects(decoded.image, commands: commands),
                     let planes = pipeline.encodeImage(
-                        source, into: buffer, commands: commands, look: look, lut: lutTexture)
+                        source, into: buffer, commands: commands, look: look, lut: lutTexture, smooth: true)
                 else { throw Failure.gpu }
                 commands.commit()
                 commands.waitUntilCompleted()

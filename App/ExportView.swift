@@ -16,6 +16,9 @@ struct ExportView: View {
     @State private var lutName = ""
     @State private var lutMadeForRec709 = false
     @State private var codec = "hevc420"
+    @State private var quality = ExportQuality.master
+    @State private var resolution = ExportResolution.full
+    @State private var crop = ExportCrop.none
     @State private var player = AVPlayer()
     @State private var previewReady = false
     @State private var previewFailure: String?
@@ -29,7 +32,18 @@ struct ExportView: View {
     @State private var editingGrade = false
     @State private var beforeEditing: (lut: String, grade: LookGrade, effects: LookEffects)?
 
-    private static let codecs = ["hevc420", "prores422hq"]
+    /// How far the take turns to play upright, read from the file once the screen opens.
+    @State private var takeTurns = 0
+
+    /// What the file comes out as, from the take's sidecar size and how it plays.
+    private var fileFooter: String {
+        guard let info = take.info else { return "Crop centers on the picture as it plays." }
+        let turns = takeTurns
+        let size = choice.outputSize(width: info.width, height: info.height, quarterTurns: turns)
+        let shown = turns % 2 == 0 ? "\(size.width)x\(size.height)" : "\(size.height)x\(size.width)"
+        let rate = choice.preset(width: size.width, height: size.height).bitrate.map { ", about \($0 / 1_000_000) Mb/s" } ?? ""
+        return "About \(shown) as it plays\(rate). Crop centers on the picture as it plays."
+    }
 
     private var curve: LogCurve { ExportChoice.curve(of: take) }
 
@@ -103,6 +117,7 @@ struct ExportView: View {
             refreshPreview()
         }
         .onDisappear { player.pause() }
+        .task { takeTurns = (try? await LookExporter.describe(take.url).quarterTurns) ?? 0 }
         .onChange(of: lutName) { _, _ in refreshPreview() }
         .onChange(of: lutMadeForRec709) { _, _ in refreshPreview() }
         .onChange(of: grade) { _, _ in refreshSoon() }
@@ -110,6 +125,9 @@ struct ExportView: View {
         .interactiveDismissDisabled(job.progress != nil || editingGrade)
         .haptic(.selection, trigger: lutName)
         .haptic(.selection, trigger: codec)
+        .haptic(.selection, trigger: quality)
+        .haptic(.selection, trigger: resolution)
+        .haptic(.selection, trigger: crop)
         .haptic(.selection, trigger: target)
         .haptic(.selection, trigger: editingGrade)
         .haptic(.success, trigger: job.message) { _, message in message?.hasPrefix("Saved") == true }
@@ -180,11 +198,31 @@ struct ExportView: View {
                             ForEach(BakeTarget.allCases) { Text($0.label).tag($0) }
                         }
                     }
+                }
+                Section {
                     Picker("Codec", selection: $codec) {
-                        Text("HEVC 4:2:0, small").tag("hevc420")
+                        Text("HEVC 4:2:0").tag("hevc420")
+                        Text("ProRes 422 LT").tag("prores422lt")
+                        Text("ProRes 422").tag("prores422")
                         Text("ProRes 422 HQ").tag("prores422hq")
                     }
+                    if codec == "hevc420" {
+                        Picker("Size", selection: $quality) {
+                            ForEach(ExportQuality.allCases) { Text($0.label).tag($0) }
+                        }
+                    }
+                    Picker("Resolution", selection: $resolution) {
+                        ForEach(ExportResolution.allCases) { Text($0.label).tag($0) }
+                    }
+                    Picker("Crop", selection: $crop) {
+                        ForEach(ExportCrop.allCases) { Text($0.label).tag($0) }
+                    }
+                } header: {
+                    Text("File")
+                } footer: {
+                    Text(fileFooter)
                 }
+                .disabled(job.progress != nil)
                 Section {
                     if let progress = job.progress {
                         ProgressView(value: progress) {
@@ -220,7 +258,7 @@ struct ExportView: View {
     private var choice: ExportChoice {
         ExportChoice(
             lutName: lutName, lutMadeForRec709: lutMadeForRec709, grade: grade, effects: effects, target: target,
-            codec: codec)
+            codec: codec, quality: quality, resolution: resolution, crop: crop)
     }
 
     /// Gives the player the chosen look. The item keeps its place, and a paused one redraws.
@@ -343,14 +381,15 @@ final class LookExportJob: ObservableObject {
             Log.shared.info(
                 "Export of \(name) started: \(curve.label) in \(gamut.label), tagged \(take.info?.metadata["fileTag"] ?? "?"), "
                     + "\(take.info.map { "\($0.width)x\($0.height) \($0.preset)" } ?? "no sidecar"), "
-                    + "into \(choice.preset.label) as \(choice.fileTag.label): \(label)")
+                    + "into \(choice.codec), \(choice.quality.label), \(choice.resolution.label), crop \(choice.crop.label), "
+                    + "as \(choice.fileTag.label): \(label)")
             let outcome: String
             var saved: URL?
             var failure: String?
             do {
                 let look = choice.exportLook(curve: curve, gamut: gamut, sourceRec709: ExportChoice.sourceRec709(take))
                 saved = try await Self.export(
-                    take: take, look: look, preset: choice.preset, lookLabel: label, fileTag: choice.fileTag, stop: stop,
+                    take: take, look: look, choice: choice, lookLabel: label, fileTag: choice.fileTag, stop: stop,
                     trace: trace
                 ) { share in
                     trace.reached(share)
@@ -371,7 +410,7 @@ final class LookExportJob: ObservableObject {
                     Log.shared.error(
                         "Export of \(name) failed while \(trace.step), at \(at), after "
                             + String(format: "%.1f s", Date().timeIntervalSince(began))
-                            + ": \(error) [\(curve.label) in \(gamut.label), \(choice.preset.id), \(choice.fileTag.label), \(label)]"
+                            + ": \(error) [\(curve.label) in \(gamut.label), \(choice.codec), \(choice.fileTag.label), \(label)]"
                             + Self.details(of: error))
                 }
             }
@@ -408,7 +447,7 @@ final class LookExportJob: ObservableObject {
         let header = "time,source,curve,gamut,sourceTag,codec,fileTag,look,result,step,progress,seconds,output,error\n"
         let fields = [
             Storage.timestamp(), take.url.lastPathComponent, curve.label, gamut.label,
-            take.info?.metadata["fileTag"] ?? "", choice.preset.id, choice.fileTag.label, label,
+            take.info?.metadata["fileTag"] ?? "", choice.codec, choice.fileTag.label, label,
             failure == nil ? "saved" : failure == "\(LookExporter.Failure.cancelled)" ? "cancelled" : "failed",
             failure == nil ? "" : step, String(format: "%.2f", share), String(format: "%.1f", seconds),
             saved?.lastPathComponent ?? "", failure ?? "",
@@ -433,13 +472,17 @@ final class LookExportJob: ObservableObject {
     /// Writes the video with the look to a scratch file, then joins it with the take's audio
     /// into the videos folder, with a sidecar and a copy of the gyro log.
     nonisolated private static func export(
-        take: Take, look: LookExporter.Look, preset: EncoderPreset, lookLabel: String, fileTag: FileTag, stop: StopFlag,
+        take: Take, look: LookExporter.Look, choice: ExportChoice, lookLabel: String, fileTag: FileTag, stop: StopFlag,
         trace: Trace, progress: @escaping (Double) -> Void
     ) async throws -> URL {
         trace.begin("setting up the GPU")
         guard let exporter = LookExporter(look: look) else { throw LookExporter.Failure.gpu }
         trace.begin("reading the take's size and length")
         let source = try await LookExporter.describe(take.url)
+        let size = choice.outputSize(width: source.width, height: source.height, quarterTurns: source.quarterTurns)
+        let preset = choice.preset(width: size.width, height: size.height)
+        let format = choice.formatLabel(width: size.width, height: size.height)
+        Log.shared.info("Export of \(take.url.lastPathComponent) writes \(format), from \(source.width)x\(source.height)")
         let scratch = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
         defer { try? FileManager.default.removeItem(at: scratch) }
         let name = take.url.deletingPathExtension().lastPathComponent + "_look.mov"
@@ -449,10 +492,11 @@ final class LookExportJob: ObservableObject {
         metadata["look"] = lookLabel
         metadata["fileTag"] = fileTag.label
         metadata["exportedFrom"] = take.url.lastPathComponent
+        metadata["exportFormat"] = format
         let rate = take.info?.metadata["frameRate"].flatMap(Double.init) ?? 30
-        trace.begin("starting the \(preset.id) encoder at \(source.width)x\(source.height), \(rate) fps")
+        trace.begin("starting the \(preset.id) encoder at \(size.width)x\(size.height), \(rate) fps")
         let encoder = try VideoEncoder(config: .init(
-            url: scratch, preset: preset, size: EncoderSize(width: source.width, height: source.height),
+            url: scratch, preset: preset, size: EncoderSize(width: size.width, height: size.height),
             frameRate: rate, audio: false, realTime: false, metadata: metadata, fileTag: fileTag))
         trace.begin("baking frames")
         try await exporter.export(

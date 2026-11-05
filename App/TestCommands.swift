@@ -72,7 +72,7 @@ extension AppModel {
         var choice = ExportChoice()
         for part in (command.value ?? "").split(separator: ";") {
             let pair = part.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
-            guard pair.count == 2 else { return "export takes look=, target= and codec=, split by ;" }
+            guard pair.count == 2 else { return "export takes name=value settings, split by ;" }
             switch pair[0] {
             case "look":
                 if ["monitor", "none"].contains(pair[1]) {
@@ -91,8 +91,19 @@ extension AppModel {
                 }
                 choice.target = target
             case "codec":
-                guard ["hevc420", "prores422hq"].contains(pair[1]) else { return "codec takes hevc420 or prores422hq" }
+                guard ExportChoice.codecs.contains(pair[1]) else {
+                    return "codec takes \(ExportChoice.codecs.joined(separator: ", "))"
+                }
                 choice.codec = pair[1]
+            case "size":
+                guard let quality = ExportQuality(rawValue: pair[1]) else { return "size takes master, high or share" }
+                choice.quality = quality
+            case "resolution":
+                guard let resolution = ExportResolution(rawValue: pair[1]) else { return "resolution takes full, medium or small" }
+                choice.resolution = resolution
+            case "crop":
+                guard let crop = ExportCrop(rawValue: pair[1]) else { return "crop takes none, wide or tall" }
+                choice.crop = crop
             case "effects":
                 // As the effects setting takes them: none, or halation=1,bloom=0.5 and so on.
                 for effect in pair[1].split(separator: ",") where pair[1] != "none" {
@@ -104,7 +115,7 @@ extension AppModel {
                     choice.effects[keyPath: control.keyPath] = number
                 }
             default:
-                return "export takes look=, lutMadeFor=, target=, codec= and effects=, split by ;"
+                return "export takes look=, lutMadeFor=, target=, codec=, size=, resolution=, crop= and effects=, split by ;"
             }
         }
         let wanted = command.name.flatMap(TestLinkAddress.safeName) ?? "newest"
