@@ -133,6 +133,9 @@ struct ExportView: View {
                 Color.black
                 VideoPlayer(player: player)
                     .opacity(previewReady ? 1 : 0)
+                    // Playing renders the look and effects on every frame, on the GPU the export
+                    // needs, so the preview holds still until the export ends.
+                    .allowsHitTesting(job.progress == nil)
                 if !previewReady {
                     Text(previewFailure ?? "Loading preview")
                         .font(.caption)
@@ -252,6 +255,7 @@ struct ExportView: View {
     }
 
     private func startExport() {
+        player.pause()
         job.start(take: take, choice: choice)
     }
 }
