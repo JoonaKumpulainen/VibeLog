@@ -113,3 +113,55 @@ struct TouchWatcher: UIViewRepresentable {
         view.onTouch = onTouch
     }
 }
+
+/// Takes a tap anywhere in its own frame, seen from the window rather than through SwiftUI's hit
+/// testing, which missed taps on the gear above its middle, at the screen's top edge.
+struct CornerTap: UIViewRepresentable {
+    let enabled: Bool
+    let action: () -> Void
+
+    final class TapView: UIView, UIGestureRecognizerDelegate {
+        var action: () -> Void = {}
+        var enabled = true
+        private var recognizer: UITapGestureRecognizer?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if let recognizer { recognizer.view?.removeGestureRecognizer(recognizer) }
+            recognizer = nil
+            guard let window else { return }
+            let tap = UITapGestureRecognizer(target: self, action: #selector(tapped))
+            tap.cancelsTouchesInView = false
+            tap.delegate = self
+            window.addGestureRecognizer(tap)
+            recognizer = tap
+        }
+
+        @objc private func tapped(_ recognizer: UITapGestureRecognizer) {
+            guard enabled, bounds.contains(recognizer.location(in: self)) else { return }
+            action()
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            enabled && bounds.contains(touch.location(in: self))
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+        ) -> Bool { true }
+    }
+
+    func makeUIView(context: Context) -> TapView {
+        let view = TapView()
+        view.isUserInteractionEnabled = false
+        view.action = action
+        view.enabled = enabled
+        return view
+    }
+
+    func updateUIView(_ view: TapView, context: Context) {
+        view.action = action
+        view.enabled = enabled
+    }
+}

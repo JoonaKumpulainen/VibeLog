@@ -51,6 +51,7 @@ struct CameraScreen: View {
                     selectedDial: $selectedDial, showMonitor: $showMonitor, showFormat: $showFormat, showLook: $showLook,
                     hold: hold.hold, insets: insets, stripDepth: screen.height - layout.picture.maxY,
                     openSettings: {
+                        guard !showSettings else { return }
                         model.settingsOpened()
                         showSettings = true
                     })
@@ -319,7 +320,7 @@ struct CameraHUD: View {
             .padding(.bottom, max(insets.bottom, 10))
             .padding(.leading, max(insets.leading, 12))
             .padding(.trailing, max(insets.trailing, 12))
-            StatusBlocks(hold: hold, openSettings: openSettings)
+            StatusBlocks(hold: hold, openSettings: openSettings, cornerTaps: !showFormat && !showLook)
             if showFormat {
                 // Tapping the picture closes the panel.
                 Color.clear
@@ -741,6 +742,8 @@ struct StatusBlocks: View {
     @EnvironmentObject private var model: AppModel
     let hold: Hold
     let openSettings: () -> Void
+    /// Off while a panel covers the gear, so a tap there closes the panel instead.
+    var cornerTaps = true
 
     private enum Side {
         case left, right
@@ -799,6 +802,10 @@ struct StatusBlocks: View {
         .buttonStyle(.plain)
         .disabled(model.isBusy != nil)
         .accessibilityLabel("Settings")
+        // The button alone missed taps in the screen's top edge, so the window watches the same
+        // corner too. Opening twice does nothing, so a tap both catch opens Settings once.
+        .background(CornerTap(enabled: cornerTaps && model.isBusy == nil && model.playingTake == nil && !model.idlePaused,
+            action: openSettings))
     }
 
     /// Where the phone's sides end up as held, which turns "outer" into a direction.
