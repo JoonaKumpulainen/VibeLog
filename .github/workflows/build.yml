@@ -14,6 +14,9 @@ jobs:
   build:
     runs-on: macos-26
     timeout-minutes: 30
+    # Writes the sidestore release after a build of main.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -59,6 +62,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             | tail -n 60
 
       - name: Package IPA
@@ -86,3 +90,21 @@ jobs:
           path: dist/VibeLog-unsigned.ipa
           if-no-files-found: error
           retention-days: 30
+
+      # SideStore on the phone adds the source once, then offers each build of main as an update.
+      # The build number is the run number, which is how SideStore tells one build from the next.
+      - name: Publish to the SideStore source
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BASE="https://github.com/${{ github.repository }}/releases/download/sidestore"
+          cp dist/VibeLog-unsigned.ipa dist/VibeLog.ipa
+          python3 tools/sidestore_source.py dist/VibeLog.ipa \
+            --download "$BASE/VibeLog.ipa" --source "$BASE/source.json" \
+            --notes "Build ${{ github.run_number }}, $(git log -1 --format=%h): $(git log -1 --format=%s)" \
+            > dist/source.json
+          cat dist/source.json
+          gh release view sidestore > /dev/null 2>&1 || gh release create sidestore --prerelease \
+            --title "SideStore" --notes "The newest build of main for SideStore. Add $BASE/source.json as a source."
+          gh release upload sidestore dist/VibeLog.ipa dist/source.json --clobber
