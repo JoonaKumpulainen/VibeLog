@@ -124,10 +124,14 @@ public enum BuiltInLook: String, CaseIterable, Sendable {
         let graded = GradeTransform(grade)
         let decoded = (0..<size).map { curve.decode(Double($0) / Double(size - 1)) }
         var samples = [SIMD3<Float>](repeating: .zero, count: size * size * size)
-        // Points that came out as something other than a number, one count per slice.
+        // Points that came out as something other than a number, one count per slice, and the
+        // first one in each slice, to name in the log.
         var broken = [Int](repeating: 0, count: size)
+        var firstBroken = [String?](repeating: nil, count: size)
         broken.withUnsafeMutableBufferPointer { counts in
+          firstBroken.withUnsafeMutableBufferPointer { firsts in
             let countsBase = counts.baseAddress!
+            let firstsBase = firsts.baseAddress!
             samples.withUnsafeMutableBufferPointer { buffer in
                 let base = buffer.baseAddress!
                 DispatchQueue.concurrentPerform(iterations: size) { blue in
@@ -136,20 +140,34 @@ public enum BuiltInLook: String, CaseIterable, Sendable {
                             let linear = toRec2020 * SIMD3(decoded[red], decoded[green], decoded[blue])
                             var out = display(graded.apply(linear))
                             if !(out.x.isFinite && out.y.isFinite && out.z.isFinite) {
-                                out = SIMD3(out.x.isFinite ? out.x : 0, out.y.isFinite ? out.y : 0, out.z.isFinite ? out.z : 0)
                                 countsBase[blue] += 1
+                                if firstsBase[blue] == nil {
+                                    let step = Double(size - 1)
+                                    firstsBase[blue] = String(
+                                        format: "log (%.4f, %.4f, %.4f), linear (%.6g, %.6g, %.6g), graded (%.6g, %.6g, %.6g)",
+                                        Double(red) / step, Double(green) / step, Double(blue) / step,
+                                        linear.x, linear.y, linear.z,
+                                        graded.apply(linear).x, graded.apply(linear).y, graded.apply(linear).z)
+                                }
+                                // A tiny nudge of the light almost always steps off the edge case,
+                                // which keeps the point near its neighbours rather than black.
+                                let nudged = display(graded.apply(linear * 1.0001))
+                                out = nudged.x.isFinite && nudged.y.isFinite && nudged.z.isFinite ? nudged
+                                    : SIMD3(out.x.isFinite ? out.x : 0, out.y.isFinite ? out.y : 0, out.z.isFinite ? out.z : 0)
                             }
                             base[(blue * size + green) * size + red] = SIMD3(Float(out.x), Float(out.y), Float(out.z))
                         }
                     }
                 }
             }
+          }
         }
         let total = broken.reduce(0, +)
         if total > 0 {
             Log.shared.warn(
                 "Look LUT for \(curve.label) in \(gamut.label) had \(total) of \(size * size * size) points that "
-                    + "weren't numbers, made black; grade \(grade.label)")
+                    + "weren't numbers, retried a hair brighter; grade \(grade.label); first at "
+                    + (firstBroken.compactMap { $0 }.first ?? "?"))
         }
         return CubeLUT(size: size, samples: samples)
     }
@@ -351,6 +369,18 @@ public final class ACES2Renderer: @unchecked Sendable {
         let ap0 = ACES13Output.mult(Self.ap1ToAP0, ap1)
         let out = transform.forward((Float(ap0.0), Float(ap0.1), Float(ap0.2)))
         return SIMD3(Double(out.0), Double(out.1), Double(out.2))
+    }
+
+    /// `displayLinear` one stage at a time, for tracing where a value stops being a number.
+    func traceStages(ap0 input: (Double, Double, Double)) -> [(String, SIMD3<Double>)] {
+        var ap1 = ACES13Output.mult(Self.ap0ToAP1, input)
+        let rawAP1 = SIMD3(ap1.0, ap1.1, ap1.2)
+        let bound = ap1UpperBound
+        ap1 = (min(max(ap1.0, 0), bound), min(max(ap1.1, 0), bound), min(max(ap1.2, 0), bound))
+        let ap0 = ACES13Output.mult(Self.ap1ToAP0, ap1)
+        let stages = transform.forwardStages((Float(ap0.0), Float(ap0.1), Float(ap0.2)))
+        return [("AP0 in", SIMD3(input.0, input.1, input.2)), ("AP1", rawAP1), ("AP1 clamped", SIMD3(ap1.0, ap1.1, ap1.2))]
+            + stages.map { ($0.0, SIMD3(Double($0.1.0), Double($0.1.1), Double($0.1.2))) }
     }
 
     func display(ap0 input: (Double, Double, Double)) -> SIMD3<Double> {

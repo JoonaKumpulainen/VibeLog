@@ -438,6 +438,22 @@ final class LookExportJob: ObservableObject {
         }
     }
 
+    /// The last whole percent sent to the screen, read from the export's own thread.
+    final class Steps: @unchecked Sendable {
+        private let lock = NSLock()
+        private var last = -1
+
+        /// Whether `share` reaches a new whole percent.
+        func advance(to share: Double) -> Bool {
+            let step = Int(share * 100)
+            lock.lock()
+            defer { lock.unlock() }
+            guard step != last else { return false }
+            last = step
+            return true
+        }
+    }
+
     /// The step an export is on and how far it got, so a failure can say where it stopped.
     final class Trace: @unchecked Sendable {
         private let lock = NSLock()
@@ -494,6 +510,7 @@ final class LookExportJob: ObservableObject {
                     + "\(take.info.map { "\($0.width)x\($0.height) \($0.preset)" } ?? "no sidecar"), "
                     + "into \(choice.codec), \(choice.quality.label), \(choice.resolution.label), crop \(choice.crop.label), "
                     + "as \(choice.fileTag.label): \(label)")
+            let reported = Steps()
             let outcome: String
             var saved: URL?
             var failure: String?
@@ -504,6 +521,9 @@ final class LookExportJob: ObservableObject {
                     trace: trace
                 ) { share in
                     trace.reached(share)
+                    // Each update redraws the whole export screen, grade editor included, so only
+                    // a whole percent more reaches it, not every frame.
+                    guard reported.advance(to: share) else { return }
                     Task { @MainActor in self?.progress = share }
                 }
                 outcome = "Saved as \(saved?.lastPathComponent ?? "")"
@@ -710,6 +730,17 @@ struct ExportGradeEditor: View {
     @State private var naming = false
     @State private var styleName = ""
 
+    /// Short enough for six segments across a phone held upright.
+    static func scopeName(_ kind: ScopeKind) -> String {
+        switch kind {
+        case .waveform: return "Wave"
+        case .parade: return "RGB"
+        case .yrgbParade: return "YRGB"
+        case .vectorscope: return "Vector"
+        case .histogram: return "Hist"
+        }
+    }
+
     enum Tab: String, CaseIterable { case looks = "Looks", adjust = "Adjust", color = "Color", wheels = "Wheels", fx = "FX" }
 
     var body: some View {
@@ -721,12 +752,17 @@ struct ExportGradeEditor: View {
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets())
             .haptic(.selection, trigger: tab)
+            // The scope as a second row of the same control, so the two read as one header.
             Picker("Scope", selection: $scopeKind) {
                 Text("Off").tag(ScopeKind?.none)
-                ForEach(ScopeKind.allCases, id: \.self) { Text($0.label).tag(ScopeKind?.some($0)) }
+                ForEach(ScopeKind.allCases, id: \.self) { Text(Self.scopeName($0)).tag(ScopeKind?.some($0)) }
             }
+            .pickerStyle(.segmented)
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 0, trailing: 0))
+            .accessibilityLabel("Scope")
         } footer: {
-            Text("The scope sits over the preview's top left and measures what the export writes. A tap on it shows the next one.")
+            Text("The scope sits over the preview and measures what the export writes. Tap it for the next one.")
         }
         switch tab {
         case .looks: looks

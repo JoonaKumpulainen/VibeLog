@@ -157,34 +157,45 @@ struct ExportChoice: Sendable {
         return look == "log, as recorded"
     }
 
+    /// The LUT size an export's look is built at: 129 points a side against the viewfinder's 65,
+    /// since CI run 87 measured the 65-point ACES LUT up to 0.06 to 0.10 off between grid points in
+    /// saturated colours. An export isn't held to the frame rate, so it can take the second or so
+    /// a 129-point build needs, and the GPU still does one lookup a pixel.
+    static let exportLUTSize = 129
+
     /// The look for playback, without HDR. Reading a .cube or building an ACES look takes a
     /// moment, so this belongs off the main thread.
     func previewLook(curve: LogCurve, gamut: Gamut, sourceRec709: Bool) -> LookExporter.Look {
-        var look = gradedLook(curve: curve, gamut: gamut, sourceRec709: sourceRec709)
+        var look = gradedLook(curve: curve, gamut: gamut, sourceRec709: sourceRec709, size: 65)
         look.effects = effects
         return look
     }
 
-    /// The look the export writes, HDR included.
+    /// The look the export writes, HDR included, at the export's finer LUT size.
     func exportLook(curve: LogCurve, gamut: Gamut, sourceRec709: Bool) -> LookExporter.Look {
-        var look = previewLook(curve: curve, gamut: gamut, sourceRec709: sourceRec709)
+        var look: LookExporter.Look
         if let hdr {
-            look.lut = BuiltInLook.hdrLUT(curve: curve, gamut: gamut, grade: grade, target: hdr)
-            look.lutExpectsRec709 = false
+            look = LookExporter.Look(
+                curve: curve, gamut: gamut,
+                lut: BuiltInLook.hdrLUT(curve: curve, gamut: gamut, grade: grade, target: hdr, size: Self.exportLUTSize),
+                lutExpectsRec709: false, sourceRec709: sourceRec709)
             look.hdr = true
+        } else {
+            look = gradedLook(curve: curve, gamut: gamut, sourceRec709: sourceRec709, size: Self.exportLUTSize)
         }
+        look.effects = effects
         return look
     }
 
-    private func gradedLook(curve: LogCurve, gamut: Gamut, sourceRec709: Bool) -> LookExporter.Look {
+    private func gradedLook(curve: LogCurve, gamut: Gamut, sourceRec709: Bool, size: Int) -> LookExporter.Look {
         if let builtIn = BuiltInLook.named(lutName) {
             return LookExporter.Look(
-                curve: curve, gamut: gamut, lut: builtIn.lut(curve: curve, gamut: gamut, grade: grade),
+                curve: curve, gamut: gamut, lut: builtIn.lut(curve: curve, gamut: gamut, grade: grade, size: size),
                 lutExpectsRec709: false, sourceRec709: sourceRec709)
         }
         if lutName.isEmpty, !grade.isNeutral {
             return LookExporter.Look(
-                curve: curve, gamut: gamut, lut: BuiltInLook.rec709LUT(curve: curve, gamut: gamut, grade: grade),
+                curve: curve, gamut: gamut, lut: BuiltInLook.rec709LUT(curve: curve, gamut: gamut, grade: grade, size: size),
                 lutExpectsRec709: false, sourceRec709: sourceRec709)
         }
         var lut: CubeLUT?
@@ -196,7 +207,8 @@ struct ExportChoice: Sendable {
         if let cube = lut, !grade.isNeutral {
             return LookExporter.Look(
                 curve: curve, gamut: gamut,
-                lut: BuiltInLook.graded(cube, expectsRec709: lutMadeForRec709, curve: curve, gamut: gamut, grade: grade),
+                lut: BuiltInLook.graded(
+                    cube, expectsRec709: lutMadeForRec709, curve: curve, gamut: gamut, grade: grade, size: size),
                 lutExpectsRec709: false, sourceRec709: sourceRec709)
         }
         return LookExporter.Look(

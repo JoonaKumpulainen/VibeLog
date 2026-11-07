@@ -30,13 +30,21 @@ public struct LensProfile: Codable, Equatable, Sendable {
     /// Where the focal length and centre came from, and when.
     public var source: String
     public var measured: String
+    /// How many captures were averaged, and how far they strayed from the average: the optical
+    /// centre's largest move in pixels, and the focal length's as a share.
+    public var captures: Int?
+    public var centreSpread: Double?
+    public var focalSpread: Double?
 
     public init(
         model: String, lens: String, width: Int, height: Int, fx: Double, fy: Double, cx: Double, cy: Double,
         distortionCenterX: Double? = nil, distortionCenterY: Double? = nil, distortionTable: [Double] = [],
         pixelSize: Double? = nil, fieldOfView: Double, correctedFieldOfView: Double? = nil, source: String,
-        measured: String
+        measured: String, captures: Int? = nil, centreSpread: Double? = nil, focalSpread: Double? = nil
     ) {
+        self.captures = captures
+        self.centreSpread = centreSpread
+        self.focalSpread = focalSpread
         self.model = model
         self.lens = lens
         self.width = width

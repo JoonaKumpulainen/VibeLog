@@ -212,6 +212,11 @@ public final class LookExporter {
         var batchStart = Date()
         var waitedSeconds = 0.0
         var gpuSeconds = 0.0
+        // Wall time reading a frame, waiting for the GPU's work to finish, and handing the frame
+        // to the encoder, which the GPU's own time and the pool wait above leave out.
+        var readSeconds = 0.0
+        var gpuWallSeconds = 0.0
+        var appendSeconds = 0.0
         Log.shared.info("Export memory at start: \(Self.memoryText)")
         while true {
             if cancelled() { throw Failure.cancelled }
@@ -231,7 +236,9 @@ public final class LookExporter {
             // objects or the texture cache by itself, so each frame lets go of its own before the
             // next. Without this a long take runs the app out of memory.
             let finished: Bool = try autoreleasepool {
+                let readStart = Date()
                 guard let sample = output.copyNextSampleBuffer() else { return true }
+                readSeconds += Date().timeIntervalSince(readStart)
                 guard let frame = CMSampleBufferGetImageBuffer(sample) else { return false }
                 let time = CMSampleBufferGetPresentationTimeStamp(sample)
                 first = first ?? time
@@ -240,13 +247,17 @@ public final class LookExporter {
                     let planes = pipeline.encodeImage(
                         source, into: buffer, commands: commands, look: look, lut: lutTexture, smooth: true)
                 else { throw Failure.gpu }
+                let gpuStart = Date()
                 commands.commit()
                 commands.waitUntilCompleted()
+                gpuWallSeconds += Date().timeIntervalSince(gpuStart)
                 withExtendedLifetime((decoded.wrapped, planes)) {}
                 if let cache { CVMetalTextureCacheFlush(cache, 0) }
                 guard commands.status == .completed else { throw Failure.gpu }
                 gpuSeconds += max(commands.gpuEndTime - commands.gpuStartTime, 0)
+                let appendStart = Date()
                 sink.append(buffer, at: time)
+                appendSeconds += Date().timeIntervalSince(appendStart)
                 if seconds > 0, let first { progress(min((time - first).seconds / seconds, 1)) }
                 return false
             }
@@ -258,10 +269,15 @@ public final class LookExporter {
                     "Export at frame \(frames): "
                         + String(format: "%.1f fps, gpu %.0f ms a frame, waited %.1f s for the encoder, ",
                             30 / max(batch, 0.001), gpuSeconds / 30 * 1000, waitedSeconds)
+                        + String(format: "a frame: read %.0f ms, gpu wall %.0f ms, append %.0f ms, ",
+                            readSeconds / 30 * 1000, gpuWallSeconds / 30 * 1000, appendSeconds / 30 * 1000)
                         + "\(Self.memoryText), thermal \(SystemStatus.thermalName)")
                 batchStart = Date()
                 waitedSeconds = 0
                 gpuSeconds = 0
+                readSeconds = 0
+                gpuWallSeconds = 0
+                appendSeconds = 0
             }
         }
         Log.shared.info("Export memory after \(frames) frames: \(Self.memoryText)")
@@ -284,10 +300,14 @@ public final class LookExporter {
         var rowsBuffer: MTLBuffer?
         let start = Date()
         var frames = 0
+        var readSeconds = 0.0
+        var gpuWallSeconds = 0.0
         while true {
             if cancelled() { throw Failure.cancelled }
             let finished: Bool = try autoreleasepool {
+                let readStart = Date()
                 guard let sample = output.copyNextSampleBuffer() else { return true }
+                readSeconds += Date().timeIntervalSince(readStart)
                 guard let frame = CMSampleBufferGetImageBuffer(sample) else { return false }
                 let time = CMSampleBufferGetPresentationTimeStamp(sample)
                 first = first ?? time
@@ -313,8 +333,10 @@ public final class LookExporter {
                     MTLSize(width: height, height: 1, depth: 1),
                     threadsPerThreadgroup: MTLSize(width: threads, height: 1, depth: 1))
                 encoder.endEncoding()
+                let gpuStart = Date()
                 commands.commit()
                 commands.waitUntilCompleted()
+                gpuWallSeconds += Date().timeIntervalSince(gpuStart)
                 withExtendedLifetime(decoded.wrapped) {}
                 if let cache { CVMetalTextureCacheFlush(cache, 0) }
                 guard commands.status == .completed else { throw Failure.gpu }
@@ -340,7 +362,7 @@ public final class LookExporter {
         let maxFALL = min(Int(brightestFrame.rounded(.up)), maxCLL)
         Log.shared.info(
             "Export light levels over \(frames) frames in "
-                + String(format: "%.1f s", Date().timeIntervalSince(start))
+                + String(format: "%.1f s, reading %.1f s, GPU %.1f s", Date().timeIntervalSince(start), readSeconds, gpuWallSeconds)
                 + ": MaxCLL \(maxCLL) nits, MaxFALL \(maxFALL) nits")
         return (maxCLL, maxFALL)
     }

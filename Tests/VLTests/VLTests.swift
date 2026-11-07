@@ -2149,9 +2149,11 @@ final class LookGradeTests: XCTestCase {
             state = state &* 6364136223846793005 &+ 1442695040888963407
             return Double(state >> 11) / Double(1 << 53)
         }
-        for curve in LogCurve.allCases {
+        // Every curve at the viewfinder's 65 points, and three at the export's 129.
+        let cases = LogCurve.allCases.map { ($0, 65) } + [LogCurve.appleLog, .sLog3, .canonLog3].map { ($0, 129) }
+        for (curve, size) in cases {
             let gamut = curve.nativeGamut
-            let cube = BuiltInLook.aces20.lut(curve: curve, gamut: gamut, size: 65)
+            let cube = BuiltInLook.aces20.lut(curve: curve, gamut: gamut, size: size)
             let toRec2020 = BuiltInLook.acesInput(gamut)
             var worst = 0.0
             var worstShadow = 0.0
@@ -2171,8 +2173,8 @@ final class LookGradeTests: XCTestCase {
             }
             errors.sort()
             print(String(
-                format: "LUT error %@: max %.4f, p99 %.4f, median %.5f, deep shadows max %.4f",
-                curve.label, worst, errors[errors.count * 99 / 100], errors[errors.count / 2], worstShadow))
+                format: "LUT error %@ at %ld points: max %.4f, p99 %.4f, median %.5f, deep shadows max %.4f",
+                curve.label, size, worst, errors[errors.count * 99 / 100], errors[errors.count / 2], worstShadow))
             XCTAssertLessThan(errors[errors.count / 2], 0.001, curve.label)
             XCTAssertLessThan(errors[errors.count * 99 / 100], 0.06, curve.label)
             XCTAssertLessThan(worst, 0.15, curve.label)
@@ -2256,6 +2258,45 @@ final class LookGradeTests: XCTestCase {
             let lut = BuiltInLook.aces20.lut(curve: curve, gamut: gamut, grade: grades.last!.1, size: size)
             XCTAssertTrue(lut.samples.allSatisfy { $0.x.isFinite && $0.y.isFinite && $0.z.isFinite }, curve.label)
         }
+    }
+
+    /// The one grade the phone found that makes a NaN, exposure +2 with contrast +57 on Apple Log 2
+    /// in Apple Wide Gamut, through ACES 2.0 at 65 points. Each such point is traced stage by stage
+    /// through the transform and printed as `NaN trace` lines, which CI shows, so the stage that
+    /// first stops giving a number can be fixed. The built LUT must still hold only numbers.
+    func testTraceTheNaNGrade() {
+        var grade = LookGrade()
+        grade.exposure = 2
+        grade.contrast = 0.57
+        let size = 65
+        let curve = LogCurve.appleLog2
+        let gamut = Gamut.appleWideGamut
+        let toRec2020 = BuiltInLook.acesInput(gamut)
+        let transform = GradeTransform(grade)
+        let decoded = (0..<size).map { curve.decode(Double($0) / Double(size - 1)) }
+        let m = BuiltInLook.rec2020ToAP0
+        var found = 0
+        for blue in 0..<size {
+            for green in 0..<size {
+                for red in 0..<size {
+                    let graded = transform.apply(toRec2020 * SIMD3(decoded[red], decoded[green], decoded[blue]))
+                    let out = BuiltInLook.aces20.display(linearRec2020: graded)
+                    guard !(out.x.isFinite && out.y.isFinite && out.z.isFinite) else { continue }
+                    found += 1
+                    guard found <= 3 else { continue }
+                    print("NaN trace point \(found) at grid (\(red), \(green), \(blue)), graded \(graded)")
+                    let ap0 = (m[0] * graded.x + m[1] * graded.y + m[2] * graded.z,
+                               m[3] * graded.x + m[4] * graded.y + m[5] * graded.z,
+                               m[6] * graded.x + m[7] * graded.y + m[8] * graded.z)
+                    for (stage, value) in ACES2Renderer.shared.traceStages(ap0: ap0) {
+                        print("NaN trace   \(stage): \(value)")
+                    }
+                }
+            }
+        }
+        print("NaN trace found \(found) points")
+        let lut = BuiltInLook.aces20.lut(curve: curve, gamut: gamut, grade: grade, size: size)
+        XCTAssertTrue(lut.samples.allSatisfy { $0.x.isFinite && $0.y.isFinite && $0.z.isFinite })
     }
 
     func testOlderGradeReadsWithoutBands() throws {

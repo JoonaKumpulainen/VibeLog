@@ -19,7 +19,7 @@ struct LensesView: View {
                 }
                 .disabled(model.isRecording)
             } footer: {
-                Text("Releases the camera for a few seconds and takes a depth photo through the 1x and tele lens pairs, which carry Apple's factory calibration: focal length, optical centre and distortion. The ultra wide has none, so its focal length comes from its field of view.")
+                Text("Releases the camera for about 15 seconds and takes five depth photos through each of the 1x and tele lens pairs, averaged, which carry Apple's factory calibration: focal length, optical centre and distortion. The ultra wide has none, so its focal length comes from its field of view.")
             }
             if profiles.isEmpty {
                 Section {
@@ -34,6 +34,13 @@ struct LensesView: View {
                     LabeledContent("Field of view", value: String(format: "%.2f°", profile.fieldOfView))
                     if let range = profile.distortionRange {
                         LabeledContent("Distortion", value: String(format: "%+.2f%% at the edge, %ld points", range * 100, profile.distortionTable.count))
+                    }
+                    if let captures = profile.captures, captures > 1 {
+                        LabeledContent(
+                            "Captures",
+                            value: String(
+                                format: "%ld, centre within %.1f px, focal length within %.2f%%",
+                                captures, profile.centreSpread ?? 0, (profile.focalSpread ?? 0) * 100))
                     }
                     LabeledContent("Source", value: profile.source)
                     LabeledContent("Measured", value: profile.measured)

@@ -54,7 +54,7 @@ jobs:
       # Measurements tests print, which the 60 lines above cut off.
       - name: Show test measurements
         if: always()
-        run: grep -hE "LUT error|NaN sweep" build/test-output.txt || true
+        run: grep -hE "LUT error|NaN sweep|NaN trace" build/test-output.txt || true
 
       - name: Build for device, unsigned
         run: |

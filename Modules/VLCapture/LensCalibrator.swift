@@ -33,18 +33,35 @@ public enum LensCalibrator {
             for (virtual, lens) in [(AVCaptureDevice.DeviceType.builtInDualWideCamera, "back-wide"),
                                     (.builtInDualCamera, "back-tele")] {
                 guard let device = AVCaptureDevice.default(virtual, for: .video, position: .back) else { continue }
-                progress("Reading Apple's calibration for \(label(lens))")
-                for found in calibrations(device) {
-                    // A photo names the lens it came from; failing that, the one this camera gives.
-                    let from = lenses.first { $0.type == found.source }?.lens ?? lens
+                // One capture's centre moved about 12 px from another's, likely the stabilizer
+                // shifting the lens, so several are averaged and their spread kept.
+                var all: [Found] = []
+                for capture in 1...captureCount {
+                    progress("Reading Apple's calibration for \(label(lens)), \(capture) of \(captureCount)")
+                    all += calibrations(device)
+                }
+                // A photo names the lens it came from; failing that, the one this camera gives.
+                let groups = Dictionary(grouping: all) { found in
+                    "\(lenses.first { $0.type == found.source }?.lens ?? lens) \(found.width)x\(found.height)"
+                }
+                for (_, group) in groups.sorted(by: { $0.key < $1.key }) {
+                    guard let first = group.first else { continue }
+                    let from = lenses.first { $0.type == first.source }?.lens ?? lens
                     let field = fields[from]
+                    let average = Found.average(group)
+                    let centreSpread = group.map { hypot($0.cx - average.cx, $0.cy - average.cy) }.max() ?? 0
+                    let focalSpread = group.map { abs($0.fx - average.fx) / max(average.fx, 1) }.max() ?? 0
                     keep(LensProfile(
-                        model: model, lens: from, width: found.width, height: found.height,
-                        fx: found.fx, fy: found.fy, cx: found.cx, cy: found.cy,
-                        distortionCenterX: found.centerX, distortionCenterY: found.centerY,
-                        distortionTable: found.table, pixelSize: found.pixelSize,
+                        model: model, lens: from, width: average.width, height: average.height,
+                        fx: average.fx, fy: average.fy, cx: average.cx, cy: average.cy,
+                        distortionCenterX: average.centerX, distortionCenterY: average.centerY,
+                        distortionTable: average.table, pixelSize: average.pixelSize,
                         fieldOfView: field?.fov ?? 0, correctedFieldOfView: field?.corrected,
-                        source: "Apple's calibration, from \(virtual.rawValue) with depth", measured: measured))
+                        source: "Apple's calibration, from \(virtual.rawValue) with depth", measured: measured,
+                        captures: group.count, centreSpread: centreSpread, focalSpread: focalSpread))
+                    Log.shared.info(String(
+                        format: "Lenses: %@ from %ld captures, fx %.2f within %.2f%%, centre (%.1f, %.1f) within %.1f px",
+                        from, group.count, average.fx, focalSpread * 100, average.cx, average.cy, centreSpread))
                 }
             }
             // Lenses Apple gave nothing for get a pinhole focal length from their field of view.
@@ -61,6 +78,9 @@ public enum LensCalibrator {
             DispatchQueue.main.async { completion(LensProfile.folder) }
         }
     }
+
+    /// Captures averaged per virtual camera.
+    static let captureCount = 5
 
     private static let lenses: [(lens: String, type: AVCaptureDevice.DeviceType)] = [
         ("back-wide", .builtInWideAngleCamera), ("back-ultrawide", .builtInUltraWideCamera),
@@ -101,6 +121,20 @@ public enum LensCalibrator {
         var centerX, centerY: Double
         var table: [Double]
         var pixelSize: Double
+
+        /// The mean of each value, the tables point by point where their lengths agree.
+        static func average(_ group: [Found]) -> Found {
+            let n = Double(group.count)
+            func mean(_ value: (Found) -> Double) -> Double { group.map(value).reduce(0, +) / n }
+            var tables = group.map(\.table)
+            let length = tables.first?.count ?? 0
+            tables = tables.filter { $0.count == length }
+            let table = (0..<length).map { index in tables.map { $0[index] }.reduce(0, +) / Double(max(tables.count, 1)) }
+            return Found(
+                source: group[0].source, width: group[0].width, height: group[0].height,
+                fx: mean(\.fx), fy: mean(\.fy), cx: mean(\.cx), cy: mean(\.cy),
+                centerX: mean(\.centerX), centerY: mean(\.centerY), table: table, pixelSize: mean(\.pixelSize))
+        }
     }
 
     /// One depth photo from a virtual camera, with each constituent's photo, and the calibration

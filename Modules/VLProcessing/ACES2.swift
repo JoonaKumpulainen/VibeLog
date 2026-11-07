@@ -889,6 +889,26 @@ struct ACES2OutputTransform {
 
     // MARK: The transform
 
+    /// `forward` one stage at a time, named, for tracing where a value stops being a number.
+    func forwardStages(_ rgb: F3) -> [(String, F3)] {
+        let Aab = Self.rgbToAab(rgb, pIn)
+        let JMh = Self.aabToJMh(Aab, pIn)
+        let rp = resolve(JMh.2)
+        let h = Self.toRadians(JMh.2)
+        let cosH = cosf(h)
+        let sinH = sinf(h)
+        let Mnorm = Self.chromaCompressNorm(cosH, sinH, chroma.chromaCompressScale)
+        let J_ts = Self.tonescaleAToJFwd(Aab.0, pIn, tone)
+        let tonemapped = Self.chromaCompressFwd(JMh, J_ts, Mnorm, rp, chroma)
+        let compressed = gamutCompressFwd(tonemapped, rp)
+        let Aab2 = Self.jmhToAab(compressed, cosH, sinH, pOut)
+        return [
+            ("input", rgb), ("Aab", Aab), ("JMh", JMh), ("cos, sin, Mnorm", (cosH, sinH, Mnorm)),
+            ("J tonescaled", (J_ts, 0, 0)), ("chroma compressed", tonemapped), ("gamut compressed", compressed),
+            ("Aab out", Aab2), ("output", Self.aabToRGB(Aab2, pOut)),
+        ]
+    }
+
     /// As Renderer_ACES_OutputTransform20::fwd.
     func forward(_ rgb: F3) -> F3 {
         let Aab = Self.rgbToAab(rgb, pIn)
