@@ -225,7 +225,7 @@ public final class LookExporter {
         var light: (maxCLL: Int, maxFALL: Int)?
         if measuringLight {
             light = try lightPass(reader: reader, output: output, seconds: seconds, share: lightShare, progress: progress, cancelled: cancelled)
-            output.resetForReading(timeRanges: [NSValue(timeRange: range)])
+            output.reset(forReadingTimeRanges: [NSValue(timeRange: range)])
         }
         let sink = try makeSink(light)
         var first: CMTime?
