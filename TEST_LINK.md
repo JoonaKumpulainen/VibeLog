@@ -105,6 +105,8 @@ python3 tools/test_server.py send set lens 0.5x
 python3 tools/test_server.py send set tools peaking,grid
 ```
 
+A setting's name and value go as two arguments. Settings added in November 2026 include `hdrViewfinder`, `fineLookLUT`, `vignetteCorrection` and `bakeEffects`, all `true` or `false`.
+
 ```bash
 python3 tools/test_server.py send record 20 --wait
 ```
@@ -119,11 +121,12 @@ Other commands:
 | `applyPreset <name>`, `savePreset <name>`, `defaultPreset <name or none>` | Manage presets |
 | `resetSettings` | Returns every setting to the app's own, keeping presets and the link |
 | `controlTest`, `encoderTest`, `probe` | Run the Diagnostics tests |
+| `measureLenses` | Saves this phone's lens profiles, as **Measure Lenses** does; `listFiles` and `sendFile` reach them |
 | `sendPreview` | Sends a small JPEG of the scene |
 | `saveStill`, `sendStill` | Saves a full still, and sends the newest one |
 | `sendReference` | Sends the newest RAW clip's reference frame and metadata |
 | `sendLog`, `listFiles`, `sendFile <name>` | Fetch logs and files |
-| `export [file] [look=ACES 2.0;target=sdr;codec=hevc420]` | Bakes a take, the newest in log unless named. `look` is `monitor` or a look's name, `target` is `sdr`, `pq` or `hlg`, `codec` is `hevc420`, `prores422lt`, `prores422` or `prores422hq`, `size` is HEVC's `master`, `high` or `share`, `resolution` is `full`, `medium` (2880 wide) or `small` (1920 wide), `crop` is `none`, `wide` (16:9) or `tall` (9:16) as the take plays, and `effects` is `none` or names and values such as `halation:1,bloom:0.5`. Status reports `exporting`, `exports` and `lastExport` |
+| `export [file] [look=ACES 2.0;target=sdr;codec=hevc420]` | Bakes a take, the newest in log unless named. `look` is `monitor` or a look's name, `target` is `sdr`, `pq` or `hlg`, `codec` is `hevc420`, `prores422lt`, `prores422` or `prores422hq`, `size` is HEVC's `master`, `high` or `share`, `resolution` is `full`, `medium` (2880 wide) or `small` (1920 wide), `crop` is `none`, `wide` (16:9) or `tall` (9:16) as the take plays, and `effects` is `none` or names and values such as `halation:1,bloom:0.5`. `log` writes log instead of a look, as `S-Log3` or `S-Log3/S-Gamut3`, and `shift` moves a crop, -1 to 1 across what it leaves out. Status reports `exporting`, `exports` and `lastExport` |
 | `cancelExport` | Stops that export |
 
 Every export, from the screen or the link, logs which step it stopped in and adds a row to `logs/exports.csv`, which `sendFile exports.csv` fetches.
