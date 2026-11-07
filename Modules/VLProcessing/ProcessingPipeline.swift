@@ -737,8 +737,11 @@ public final class ProcessingPipeline: NSObject {
         let effectsParams = bakedEffects.map { EffectsParams($0, curve: settings.curve, frame: takeEffectsFrame) }
         lock.unlock()
 
-        // Stills and resized recordings need the full image.
-        let direct = efficient && (sinkFrame == nil || sinkFrame?.planes.width == input.width)
+        // Stills and resized recordings need the full image, and so do baked FX: on the phone,
+        // 15-second takes at serious heat with them baked took 28 to 30 ms a frame through the full
+        // image, as without, but 43 ms and lost 72 frames through the direct kernels, which carry
+        // the debayer and the FX in one, so baked FX keep the full path even when hot.
+        let direct = efficient && bakedEffects == nil && (sinkFrame == nil || sinkFrame?.planes.width == input.width)
         var image: MTLTexture?
         var still: (() -> Void)?
         var encoded: Bool
