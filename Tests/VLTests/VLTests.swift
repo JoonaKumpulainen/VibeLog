@@ -2299,10 +2299,14 @@ final class ScopeTests: XCTestCase {
         XCTAssertEqual(counts.wave[(0 * levels + gray) * 256 + 10], 192)
         XCTAssertEqual(counts.wave[(1 * levels + levels - 1) * 256 + 250], 192)
         XCTAssertEqual(counts.histogram.reduce(0, +), UInt32(4 * 256 * 192))
-        // Gray falls in the middle, within rounding of the half-way level.
-        let grayBin = try XCTUnwrap(counts.vector.firstIndex(of: 128 * 192))
-        XCTAssertLessThanOrEqual(abs(Double(grayBin / levels) - top / 2), 1)
-        XCTAssertLessThanOrEqual(abs(Double(grayBin % levels) - top / 2), 1)
+        // Each half fills one bin: gray in the middle, within rounding of the half-way level, and
+        // red away from it.
+        let full = counts.vector.indices.filter { counts.vector[$0] == 128 * 192 }
+        XCTAssertEqual(full.count, 2)
+        let nearMiddle = { (bin: Int) in
+            abs(Double(bin / levels) - top / 2) <= 1 && abs(Double(bin % levels) - top / 2) <= 1
+        }
+        XCTAssertEqual(full.filter(nearMiddle).count, 1)
         XCTAssertEqual(counts.vector.reduce(0, +), UInt32(256 * 192))
     }
 }
