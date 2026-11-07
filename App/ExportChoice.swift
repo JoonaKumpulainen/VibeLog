@@ -82,6 +82,31 @@ struct ExportChoice: Sendable {
     var quality = ExportQuality.master
     var resolution = ExportResolution.full
     var crop = ExportCrop.none
+    /// Where the crop sits as the take plays, -1 to 1: left to right for a crop that cuts the
+    /// sides, top to bottom for one that cuts top and bottom. 0 is the centre.
+    var cropShift = 0.0
+
+    /// Whether the crop, as the take plays, cuts the sides rather than the top and bottom.
+    func cropCutsSides(width: Int, height: Int, quarterTurns: Int) -> Bool {
+        guard let aspect = crop.aspect else { return false }
+        let playing = quarterTurns % 2 == 0 ? Double(width) / Double(height) : Double(height) / Double(width)
+        return aspect < playing
+    }
+
+    /// The crop's shift in the stored picture's axes, turned back from how the take plays: the
+    /// player turns the stored picture `quarterTurns` clockwise, taking a stored (u, v) to (1 - v, u).
+    func storedCropShift(width: Int, height: Int, quarterTurns: Int) -> SIMD2<Float> {
+        guard crop.aspect != nil, cropShift != 0 else { return .zero }
+        let played = cropCutsSides(width: width, height: height, quarterTurns: quarterTurns)
+            ? SIMD2<Float>(Float(cropShift), 0) : SIMD2<Float>(0, Float(cropShift))
+        switch ((quarterTurns % 4) + 4) % 4 {
+        case 1: return SIMD2(played.y, -played.x)
+        case 2: return -played
+        case 3: return SIMD2(-played.y, played.x)
+        default: return played
+        }
+    }
+
     /// A log curve and gamut to write the take as, in place of a look, or nil for a look.
     var logTarget: LogTarget?
 

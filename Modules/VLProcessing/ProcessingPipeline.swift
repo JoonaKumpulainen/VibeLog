@@ -79,10 +79,12 @@ public enum PeakingSensitivity: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// Half way between the first values, 0.1 and 0.05, and the doubled ones the owner found too
+    /// strong at first, 0.2 and 0.1, at the owner's request, so each marks a little more.
     var threshold: Float {
         switch self {
-        case .low: return 0.2
-        case .high: return 0.1
+        case .low: return 0.15
+        case .high: return 0.075
         }
     }
 }
@@ -124,6 +126,8 @@ public struct ProcessingSettings: Equatable, Sendable {
     public var bilinearWhenHot = false
     /// Applies Apple's lens shading correction, FixVignetteRadial, as the debayer builds each pixel.
     public var vignetteCorrection = true
+    /// Records the FX into baked takes, applied per pixel before the look as export does.
+    public var bakeEffects = false
     /// Look LUTs expect Rec.709; conversion LUTs expect the log image.
     public var lutExpectsRec709 = false
     private var storedCurve = LogCurve.appleLog
@@ -412,6 +416,11 @@ public final class ProcessingPipeline: NSObject {
     /// Bound in place of a custom LUT, which the shader then never reads.
     private var emptyLUT: MTLTexture?
     private var takeLook: (look: LookParams, lut: MTLTexture?)?
+    /// The FX a take records, fixed as it starts, with their own kit and grain count, apart from
+    /// the viewfinder's, since frames are processed on the capture queue while the viewfinder draws.
+    private var takeEffects: LookEffects?
+    private var takeEffectsKit: EffectsKit?
+    private var takeEffectsFrame = 0
     /// A look only takes record, such as HDR, while the viewfinder shows the SDR one.
     private var bakeLUT: CustomLUT?
     private var customLUT: CustomLUT?
@@ -534,8 +543,7 @@ public final class ProcessingPipeline: NSObject {
         scopeOn = scopes != nil
     }
 
-    /// The FX tab's effects on the viewfinder. Only the viewfinder and export apply them for now;
-    /// takes are recorded without them.
+    /// The FX tab's effects on the viewfinder and export, and on baked takes with `bakeEffects`.
     public func setEffects(_ value: LookEffects) {
         lock.lock()
         if !value.isNeutral, effectsKit == nil { effectsKit = EffectsKit(device: device) }
@@ -585,6 +593,11 @@ public final class ProcessingPipeline: NSObject {
         sink = newSink
         let recorded = bakeLUT ?? customLUT
         takeLook = newSink == nil ? nil : (LookParams(settings: settings, lut: recorded?.lut, expectsRec709: recorded?.expectsRec709), recorded?.texture)
+        // FX are baked only with the look, never into a log take, and never change mid-take.
+        let baking = newSink != nil && settings.bakeLook && settings.bakeEffects && !effects.isNeutral
+        takeEffects = baking ? effects : nil
+        if baking, takeEffectsKit == nil { takeEffectsKit = EffectsKit(device: device) }
+        takeEffectsFrame = 0
         lock.unlock()
     }
 
@@ -718,6 +731,10 @@ public final class ProcessingPipeline: NSObject {
         let lookLUT = takeLook == nil ? customLUT?.texture : takeLook?.lut
         let hotPath = hot && settings.efficientWhenHot
         let efficient = (settings.pipeline == .efficient || hotPath) && stillRequest == nil
+        let bakedEffects = sinkFrame != nil ? takeEffects : nil
+        let effectsKit = takeEffectsKit
+        if bakedEffects != nil { takeEffectsFrame += 1 }
+        let effectsParams = bakedEffects.map { EffectsParams($0, curve: settings.curve, frame: takeEffectsFrame) }
         lock.unlock()
 
         // Stills and resized recordings need the full image.
@@ -726,25 +743,32 @@ public final class ProcessingPipeline: NSObject {
         var still: (() -> Void)?
         var encoded: Bool
         if direct {
-            encoded = sinkFrame.map { frame -> Bool in
-                switch frame.planes {
-                case .biplanar(let luma, let chroma):
-                    return encodeDirect(into: commands, input: input, luma: luma, chroma: chroma, cfa: cfa,
-                                        gains: capture.whiteBalanceGains, look: look, lut: lookLUT)
-                case .packed(let packed):
-                    return encodeDirectPacked(into: commands, input: input, packed: packed, cfa: cfa,
-                                              gains: capture.whiteBalanceGains, look: look, lut: lookLUT)
-                }
-            } ?? true
-            // Every other frame is enough for the monitor while recording.
+            // Every other frame is enough for the monitor while recording, but baked FX take their
+            // glow from it, so then it's made every frame, first, for the planes to sample.
             efficientFrames += 1
-            if sinkFrame == nil || efficientFrames % 2 == 0,
+            var effects: TakeEffects?
+            encoded = true
+            if sinkFrame == nil || efficientFrames % 2 == 0 || effectsParams != nil,
                 let monitor = takeMonitorOutput(width: input.width / 2, height: input.height / 2) {
-                encoded = encoded && encodeMonitor(
+                encoded = encodeMonitor(
                     into: commands, input: input, output: monitor, cfa: cfa,
                     gains: capture.whiteBalanceGains)
                 image = monitor
+                if let effectsParams, let effectsKit,
+                    let glow = effectsKit.glow(for: monitor, params: effectsParams, commands: commands, reduction: 4) {
+                    effects = (glow, effectsParams)
+                }
             }
+            encoded = encoded && (sinkFrame.map { frame -> Bool in
+                switch frame.planes {
+                case .biplanar(let luma, let chroma):
+                    return encodeDirect(into: commands, input: input, luma: luma, chroma: chroma, cfa: cfa,
+                                        gains: capture.whiteBalanceGains, look: look, lut: lookLUT, effects: effects)
+                case .packed(let packed):
+                    return encodeDirectPacked(into: commands, input: input, packed: packed, cfa: cfa,
+                                              gains: capture.whiteBalanceGains, look: look, lut: lookLUT, effects: effects)
+                }
+            } ?? true)
         } else {
             guard let output = takeOutput(width: input.width, height: input.height) else {
                 finishFrame(success: false)
@@ -752,12 +776,19 @@ public final class ProcessingPipeline: NSObject {
             }
             encoded = encode(into: commands, input: input, output: output, cfa: cfa, gains: capture.whiteBalanceGains)
             if encoded, let sinkFrame {
+                var effects: TakeEffects?
+                if let effectsParams, let effectsKit,
+                    let glow = effectsKit.glow(for: output, params: effectsParams, commands: commands) {
+                    effects = (glow, effectsParams)
+                }
                 switch sinkFrame.planes {
                 case .biplanar(let luma, let chroma):
                     encoded = encodeYCbCr(
-                        into: commands, image: output, luma: luma, chroma: chroma, look: look, lut: lookLUT)
+                        into: commands, image: output, luma: luma, chroma: chroma, look: look, lut: lookLUT,
+                        effects: effects)
                 case .packed(let packed):
-                    encoded = encodePacked(into: commands, image: output, packed: packed, look: look, lut: lookLUT)
+                    encoded = encodePacked(
+                        into: commands, image: output, packed: packed, look: look, lut: lookLUT, effects: effects)
                 }
             }
             still = encoded ? encodeStillReadback(commands, output: output, capture: capture) : nil
@@ -854,17 +885,19 @@ public final class ProcessingPipeline: NSObject {
     /// the command buffer.
     func encodeImage(
         _ image: MTLTexture, into buffer: CVPixelBuffer, commands: MTLCommandBuffer, look: LookParams,
-        lut: MTLTexture?, smooth: Bool = false
+        lut: MTLTexture?, smooth: Bool = false, shift: SIMD2<Float> = .zero
     ) -> [CVMetalTexture]? {
         guard let wrapping = wrapPlanes(buffer) else { return nil }
         let wrapped = wrapping.0
         switch wrapping.1 {
         case .biplanar(let luma, let chroma):
             guard encodeYCbCr(
-                into: commands, image: image, luma: luma, chroma: chroma, look: look, lut: lut, smooth: smooth)
+                into: commands, image: image, luma: luma, chroma: chroma, look: look, lut: lut, smooth: smooth,
+                shift: shift)
             else { return nil }
         case .packed(let packed):
-            guard encodePacked(into: commands, image: image, packed: packed, look: look, lut: lut, smooth: smooth)
+            guard encodePacked(
+                into: commands, image: image, packed: packed, look: look, lut: lut, smooth: smooth, shift: shift)
             else { return nil }
         }
         return wrapped
@@ -895,9 +928,12 @@ public final class ProcessingPipeline: NSObject {
     @discardableResult
     func encodeDirect(
         into commands: MTLCommandBuffer, input: MTLTexture, luma: MTLTexture, chroma: MTLTexture,
-        cfa: CFAPattern, gains: [Float], look: LookParams = .log, lut: MTLTexture? = nil
+        cfa: CFAPattern, gains: [Float], look: LookParams = .log, lut: MTLTexture? = nil,
+        effects: TakeEffects? = nil
     ) -> Bool {
         var look = look
+        var effectParams = effects?.params ?? .off
+        guard let glow = effects?.glow ?? placeholder2D else { return false }
         guard let lut = lut ?? placeholderLUT() else { return false }
         guard let encoder = commands.makeComputeCommandEncoder() else { return false }
         var parameters = makeParameters(cfa: cfa, gains: gains)
@@ -909,9 +945,11 @@ public final class ProcessingPipeline: NSObject {
         encoder.setTexture(luma, index: 1)
         encoder.setTexture(chroma, index: 2)
         encoder.setTexture(lut, index: 3)
+        encoder.setTexture(glow, index: 4)
         encoder.setBytes(&parameters, length: MemoryLayout<ProcessParams>.stride, index: 0)
         encoder.setBytes(&direct, length: MemoryLayout<DirectParams>.stride, index: 1)
         encoder.setBytes(&look, length: MemoryLayout<LookParams>.stride, index: 2)
+        encoder.setBytes(&effectParams, length: MemoryLayout<EffectsParams>.stride, index: 3)
         let width = directState.threadExecutionWidth
         let height = max(directState.maxTotalThreadsPerThreadgroup / width, 1)
         encoder.dispatchThreads(
@@ -925,9 +963,11 @@ public final class ProcessingPipeline: NSObject {
     @discardableResult
     func encodeDirectPacked(
         into commands: MTLCommandBuffer, input: MTLTexture, packed: MTLTexture, cfa: CFAPattern, gains: [Float],
-        look: LookParams = .log, lut: MTLTexture? = nil
+        look: LookParams = .log, lut: MTLTexture? = nil, effects: TakeEffects? = nil
     ) -> Bool {
         var look = look
+        var effectParams = effects?.params ?? .off
+        guard let glow = effects?.glow ?? placeholder2D else { return false }
         guard let lut = lut ?? placeholderLUT() else { return false }
         guard let encoder = commands.makeComputeCommandEncoder() else { return false }
         var parameters = makeParameters(cfa: cfa, gains: gains)
@@ -938,9 +978,11 @@ public final class ProcessingPipeline: NSObject {
         encoder.setTexture(input, index: 0)
         encoder.setTexture(packed, index: 1)
         encoder.setTexture(lut, index: 2)
+        encoder.setTexture(glow, index: 3)
         encoder.setBytes(&parameters, length: MemoryLayout<ProcessParams>.stride, index: 0)
         encoder.setBytes(&direct, length: MemoryLayout<DirectParams>.stride, index: 1)
         encoder.setBytes(&look, length: MemoryLayout<LookParams>.stride, index: 2)
+        encoder.setBytes(&effectParams, length: MemoryLayout<EffectsParams>.stride, index: 3)
         let width = directPackedState.threadExecutionWidth
         let height = max(directPackedState.maxTotalThreadsPerThreadgroup / width, 1)
         encoder.dispatchThreads(
@@ -974,21 +1016,29 @@ public final class ProcessingPipeline: NSObject {
     @discardableResult
     func encodeYCbCr(
         into commands: MTLCommandBuffer, image: MTLTexture, luma: MTLTexture, chroma: MTLTexture,
-        look: LookParams = .log, lut: MTLTexture? = nil, smooth: Bool = false
+        look: LookParams = .log, lut: MTLTexture? = nil, smooth: Bool = false, shift: SIMD2<Float> = .zero,
+        effects: TakeEffects? = nil
     ) -> Bool {
         var look = look
-        guard let lut = lut ?? placeholderLUT(), let encoder = commands.makeComputeCommandEncoder() else { return false }
+        var effectParams = effects?.params ?? .off
+        guard let lut = lut ?? placeholderLUT(), let glow = effects?.glow ?? placeholder2D,
+            let encoder = commands.makeComputeCommandEncoder()
+        else { return false }
         var crop = Self.centerCrop(
             imageAspect: Float(image.width) / Float(image.height),
             targetAspect: Float(luma.width) / Float(luma.height))
         crop.smooth = smooth ? 1 : 0
+        // Moves the crop within what it leaves out, -1 to 1 along each axis of the stored picture.
+        crop.uvOffset += (SIMD2(repeating: 1) - crop.uvScale) * 0.5 * simd_clamp(shift, SIMD2(repeating: -1), SIMD2(repeating: 1))
         for (state, target) in [(lumaState, luma), (chromaState, chroma)] {
             encoder.setComputePipelineState(state)
             encoder.setTexture(image, index: 0)
             encoder.setTexture(target, index: 1)
             encoder.setTexture(lut, index: 2)
+            encoder.setTexture(glow, index: 3)
             encoder.setBytes(&crop, length: MemoryLayout<CropParams>.stride, index: 0)
             encoder.setBytes(&look, length: MemoryLayout<LookParams>.stride, index: 1)
+            encoder.setBytes(&effectParams, length: MemoryLayout<EffectsParams>.stride, index: 2)
             let width = state.threadExecutionWidth
             let height = max(state.maxTotalThreadsPerThreadgroup / width, 1)
             encoder.dispatchThreads(
@@ -1003,20 +1053,27 @@ public final class ProcessingPipeline: NSObject {
     @discardableResult
     func encodePacked(
         into commands: MTLCommandBuffer, image: MTLTexture, packed: MTLTexture, look: LookParams = .log,
-        lut: MTLTexture? = nil, smooth: Bool = false
+        lut: MTLTexture? = nil, smooth: Bool = false, shift: SIMD2<Float> = .zero, effects: TakeEffects? = nil
     ) -> Bool {
         var look = look
-        guard let lut = lut ?? placeholderLUT(), let encoder = commands.makeComputeCommandEncoder() else { return false }
+        var effectParams = effects?.params ?? .off
+        guard let lut = lut ?? placeholderLUT(), let glow = effects?.glow ?? placeholder2D,
+            let encoder = commands.makeComputeCommandEncoder()
+        else { return false }
         var crop = Self.centerCrop(
             imageAspect: Float(image.width) / Float(image.height),
             targetAspect: Float(packed.width) / Float(packed.height))
         crop.smooth = smooth ? 1 : 0
+        // Moves the crop within what it leaves out, -1 to 1 along each axis of the stored picture.
+        crop.uvOffset += (SIMD2(repeating: 1) - crop.uvScale) * 0.5 * simd_clamp(shift, SIMD2(repeating: -1), SIMD2(repeating: 1))
         encoder.setComputePipelineState(packedState)
         encoder.setTexture(image, index: 0)
         encoder.setTexture(packed, index: 1)
         encoder.setTexture(lut, index: 2)
+        encoder.setTexture(glow, index: 3)
         encoder.setBytes(&crop, length: MemoryLayout<CropParams>.stride, index: 0)
         encoder.setBytes(&look, length: MemoryLayout<LookParams>.stride, index: 1)
+        encoder.setBytes(&effectParams, length: MemoryLayout<EffectsParams>.stride, index: 2)
         let width = packedState.threadExecutionWidth
         let height = max(packedState.maxTotalThreadsPerThreadgroup / width, 1)
         encoder.dispatchThreads(

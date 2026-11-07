@@ -92,7 +92,7 @@ struct SettingsView: View {
     private static let hapticsDetail = "Ticks for dials, sliders, carousels and taps across the app. Off silences every one."
     private static let scopeDetail = "RGB and YRGB draw their channels in one waveform, mixing toward white where they agree. Off sets them side by side."
     private static let offsetDetail = "Baked into the file, in stops."
-    private static let bakeDetail = "Records the look into takes instead of log: Monitor's Rec.709 view, an ACES look or a LUT, with its grade, tagged Rec.709 or HDR. It can't be graded back. Switches to HEVC 4:2:0 for small files, or ProRes, and the look is fixed as a take starts. BAKE in the LOOK panel does the same. FX aren't baked yet."
+    private static let bakeDetail = "Records the look into takes instead of log: Monitor's Rec.709 view, an ACES look or a LUT, with its grade, tagged Rec.709 or HDR. It can't be graded back. Switches to HEVC 4:2:0 for small files, or ProRes, and the look is fixed as a take starts. BAKE in the LOOK panel does the same. FX are baked only with FX in baked takes on."
     private static let proResDetail = "Baked takes record ProRes 422 HQ instead of HEVC 4:2:0: about 160 MB/s instead of 25 to 30, with 4:2:2 color and no compression smear, for finishing in an editor."
     private static let rangeDetail = "HDR records ACES 2.0 at 1000 nits in Rec.2020, as PQ for HDR10 with its mastering metadata, or as HLG. Other looks bake SDR. The viewfinder still shows SDR. Also from ACES 2.0 in the LOOK panel."
     private static let pairDetail = "Choosing a log curve also chooses its color space, and the other way round. Off, either changes alone."
@@ -554,10 +554,14 @@ struct SettingsView: View {
             .disabled(model.isRecording)
     }
 
-    private var bakeToProResRow: some View {
+    @ViewBuilder private var bakeToProResRow: some View {
         switchRow("Bake to ProRes", Self.proResDetail, isOn: $model.bakeToProRes)
             .disabled(model.isRecording)
+        switchRow("FX in baked takes", Self.bakeEffectsDetail, isOn: $model.processing.bakeEffects)
+            .disabled(model.isRecording)
     }
+
+    private static let bakeEffectsDetail = "Records the FX tab's halation, bloom, diffusion, vignette and grain into baked takes, as the viewfinder shows them, fixed as a take starts. Each frame then makes its own glow, a cost measured only in a long take so far. Log takes never get FX. Grain suits ProRes better than HEVC, which smears it."
 
     private var twelveBitRow: some View {
         switchRow("12-bit ProRes 4444", Self.twelveBitDetail, isOn: $model.twelveBitProRes)

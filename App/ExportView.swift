@@ -19,6 +19,8 @@ struct ExportView: View {
     @State private var quality = ExportQuality.master
     @State private var resolution = ExportResolution.full
     @State private var crop = ExportCrop.none
+    /// Where the crop sits, -1 to 1 across what it leaves out, as the take plays.
+    @State private var cropShift = 0.0
     /// A log curve and gamut to write the take as instead of a look.
     @State private var logTarget: ExportChoice.LogTarget?
     @State private var player = AVPlayer()
@@ -198,7 +200,8 @@ struct ExportView: View {
             // Where the crop cuts, over the picture as it plays, since the preview shows it whole.
             .overlay {
                 if let aspect = crop.aspect, previewReady {
-                    CropOutline(pictureAspect: takeTurns % 2 == 0 ? 4.0 / 3 : 3.0 / 4, cropAspect: aspect)
+                    CropOutline(
+                        pictureAspect: takeTurns % 2 == 0 ? 4.0 / 3 : 3.0 / 4, cropAspect: aspect, shift: cropShift)
                         .allowsHitTesting(false)
                 }
             }
@@ -287,6 +290,26 @@ struct ExportView: View {
                     Picker("Crop", selection: $crop) {
                         ForEach(ExportCrop.allCases) { Text($0.label).tag($0) }
                     }
+                    if let aspect = crop.aspect {
+                        let sides = aspect < (takeTurns % 2 == 0 ? 4.0 / 3 : 3.0 / 4)
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text("Position")
+                                Spacer()
+                                Text(cropShift == 0 ? "Centre" : String(format: "%+.0f%%", cropShift * 100))
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
+                            HStack(spacing: 8) {
+                                Text(sides ? "Left" : "Top").font(.caption).foregroundStyle(.secondary)
+                                Slider(value: $cropShift, in: -1...1)
+                                Text(sides ? "Right" : "Bottom").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        .onTapGesture(count: 2) { cropShift = 0 }
+                        .accessibilityElement(children: .contain)
+                        .accessibilityLabel("Crop position")
+                    }
                 } header: {
                     Text("File")
                 } footer: {
@@ -328,7 +351,7 @@ struct ExportView: View {
     private var choice: ExportChoice {
         ExportChoice(
             lutName: lutName, lutMadeForRec709: lutMadeForRec709, grade: grade, effects: effects, target: target,
-            codec: codec, quality: quality, resolution: resolution, crop: crop, logTarget: logTarget)
+            codec: codec, quality: quality, resolution: resolution, crop: crop, cropShift: cropShift, logTarget: logTarget)
     }
 
     /// A paused player redraws only for a composition it hasn't seen, so it gets a copy of the same.
@@ -628,10 +651,12 @@ final class LookExportJob: ObservableObject {
         take: Take, look: LookExporter.Look, choice: ExportChoice, lookLabel: String, fileTag: FileTag, stop: StopFlag,
         trace: Trace, progress: @escaping (Double) -> Void
     ) async throws -> URL {
-        trace.begin("setting up the GPU")
-        guard let exporter = LookExporter(look: look) else { throw LookExporter.Failure.gpu }
         trace.begin("reading the take's size and length")
         let source = try await LookExporter.describe(take.url)
+        trace.begin("setting up the GPU")
+        var look = look
+        look.cropShift = choice.storedCropShift(width: source.width, height: source.height, quarterTurns: source.quarterTurns)
+        guard let exporter = LookExporter(look: look) else { throw LookExporter.Failure.gpu }
         let size = choice.outputSize(width: source.width, height: source.height, quarterTurns: source.quarterTurns)
         let preset = choice.preset(width: size.width, height: size.height)
         let format = choice.formatLabel(width: size.width, height: size.height)
@@ -999,14 +1024,18 @@ struct ExportGradeEditor: View {
 struct CropOutline: View {
     let pictureAspect: Double
     let cropAspect: Double
+    /// -1 to 1 across what the crop leaves out, along the axis it cuts.
+    var shift = 0.0
 
     var body: some View {
         GeometryReader { proxy in
             let box = proxy.size
             let picture = Self.fit(aspect: pictureAspect, in: box)
             let kept = Self.fit(aspect: cropAspect, in: picture.size)
+            let spareX = (picture.width - kept.width) / 2
+            let spareY = (picture.height - kept.height) / 2
             let cut = CGRect(
-                x: picture.midX - kept.width / 2, y: picture.midY - kept.height / 2,
+                x: picture.midX - kept.width / 2 + spareX * shift, y: picture.midY - kept.height / 2 + spareY * shift,
                 width: kept.width, height: kept.height)
             ZStack {
                 Path { path in

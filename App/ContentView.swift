@@ -2204,9 +2204,11 @@ struct FXPanel: View {
             .accessibilityValue(selected.text(shown[keyPath: selected.keyPath]))
             Spacer(minLength: 0)
             HStack(spacing: 16) {
-                Text(model.bakeLook ? "NOT BAKED" : "NOT IN TAKES")
+                // In baked takes only with FX in takes on in Settings, and never in log takes.
+                let baked = model.bakeLook && model.processing.bakeEffects
+                Text(baked ? "IN TAKES" : model.bakeLook ? "NOT BAKED" : "NOT IN TAKES")
                     .font(Tokens.markFont)
-                    .foregroundStyle(model.bakeLook ? Tokens.warning : Tokens.label)
+                    .foregroundStyle(baked ? Tokens.held : model.bakeLook ? Tokens.warning : Tokens.label)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .minimumScaleFactor(0.7)

@@ -29,6 +29,14 @@ struct EffectsParams {
 /// Makes the glow the effects come from, a blurred eighth-size copy of the picture in linear
 /// light, and applies the effects to a whole image for export. The viewfinder applies them per
 /// drawn pixel instead, with the same function, so both look alike.
+/// A take's glow and effects for the encode kernels, which apply them per pixel before the look.
+typealias TakeEffects = (glow: MTLTexture, params: EffectsParams)
+
+extension EffectsParams {
+    /// No effects, which the encode kernels take when nothing is baked.
+    static let off = EffectsParams(LookEffects(), curve: .appleLog, frame: 0)
+}
+
 final class EffectsKit {
     private let device: MTLDevice
     private let downsample: MTLComputePipelineState
@@ -58,10 +66,12 @@ final class EffectsKit {
         self.placeholder = placeholder
     }
 
-    /// The glow for `image`, blurred both ways, ready for the same command buffer to sample.
-    func glow(for image: MTLTexture, params: EffectsParams, commands: MTLCommandBuffer) -> MTLTexture? {
-        let width = max(image.width / 8, 1)
-        let height = max(image.height / 8, 1)
+    /// The glow for `image`, blurred both ways, ready for the same command buffer to sample. It's
+    /// an eighth of the full picture each way; `reduction` is 4 for a half-size image, such as the
+    /// Efficient path's monitor, so the glow comes out the same size and spread.
+    func glow(for image: MTLTexture, params: EffectsParams, commands: MTLCommandBuffer, reduction: Int = 8) -> MTLTexture? {
+        let width = max(image.width / reduction, 1)
+        let height = max(image.height / reduction, 1)
         if small?.width != width || small?.height != height {
             let descriptor = MTLTextureDescriptor.texture2DDescriptor(
                 pixelFormat: .rgba16Float, width: width, height: height, mipmapped: false)

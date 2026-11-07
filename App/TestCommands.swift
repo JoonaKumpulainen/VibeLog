@@ -104,6 +104,9 @@ extension AppModel {
             case "crop":
                 guard let crop = ExportCrop(rawValue: pair[1]) else { return "crop takes none, wide or tall" }
                 choice.crop = crop
+            case "shift":
+                guard let shift = Double(pair[1]), (-1...1).contains(shift) else { return "shift takes -1 to 1" }
+                choice.cropShift = shift
             case "log":
                 // A curve's label, which pairs it with its own gamut, or curve/gamut by label.
                 let names = pair[1].split(separator: "/").map(String.init)
@@ -298,7 +301,7 @@ extension AppModel {
             "pipeline": processing.pipeline.rawValue, "tools": toolsLabel,
             "fixedFrameTime": String(fixedFrameTime), "uncompressedAudio": String(pcmAudio),
             "stereoAudio": String(stereoAudio),
-            "distortionCorrection": String(distortionCorrection), "vignetteCorrection": String(processing.vignetteCorrection), "twelveBitProRes": String(twelveBitProRes),
+            "distortionCorrection": String(distortionCorrection), "vignetteCorrection": String(processing.vignetteCorrection), "bakeEffects": String(processing.bakeEffects), "twelveBitProRes": String(twelveBitProRes),
             "bakeLook": String(bakeLook), "bakeToProRes": String(bakeToProRes), "bakeTarget": bakeTarget.rawValue,
             "effects": lookEffects.label, "scopeOverlaid": String(scopeOverlaid), "hdrViewfinder": String(hdrViewfinder), "fineLookLUT": String(fineLookLUT), "hdrShown": String(showsHDRViewfinder), "fileTagWritten": takeFileTag.label, "grade": lookGrade.label, "style": currentStyleChoice.map { String($0.dropFirst(Self.stylePrefix.count)) } ?? "",
             "efficientWhenHot": String(processing.efficientWhenHot), "isoAuto": String(isoAuto),
@@ -356,6 +359,7 @@ extension AppModel {
         case "fixedFrameTime": return flag { fixedFrameTime = $0 }
         case "distortionCorrection": return flag { distortionCorrection = $0 }
         case "vignetteCorrection": return flag { processing.vignetteCorrection = $0 }
+        case "bakeEffects": return flag { processing.bakeEffects = $0 }
         case "twelveBitProRes": return flag { twelveBitProRes = $0 }
         case "bakeLook": return flag { bakeLook = $0 }
         case "bakeToProRes": return flag { bakeToProRes = $0 }

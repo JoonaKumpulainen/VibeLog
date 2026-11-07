@@ -72,6 +72,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var bilinearWhenHot = false
     /// Apple's lens shading correction in the debayer.
     public var vignetteCorrection = true
+    /// The FX recorded into baked takes.
+    public var bakeEffects = false
     /// Stops the stream after this long with no touch. Zero never does.
     public var idlePauseMinutes = 2.0
     public var monitor = "rec709"
@@ -165,6 +167,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         reduceLoadWhenHot = read(.reduceLoadWhenHot, defaults.reduceLoadWhenHot)
         bilinearWhenHot = read(.bilinearWhenHot, defaults.bilinearWhenHot)
         vignetteCorrection = read(.vignetteCorrection, defaults.vignetteCorrection)
+        bakeEffects = read(.bakeEffects, defaults.bakeEffects)
         idlePauseMinutes = read(.idlePauseMinutes, defaults.idlePauseMinutes)
         monitor = read(.monitor, defaults.monitor)
         monitorLUT = read(.monitorLUT, defaults.monitorLUT)

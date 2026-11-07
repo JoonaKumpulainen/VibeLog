@@ -652,6 +652,7 @@ final class AppModel: ObservableObject {
         config.reduceLoadWhenHot = processing.reduceLoadWhenHot
         config.bilinearWhenHot = processing.bilinearWhenHot
         config.vignetteCorrection = processing.vignetteCorrection
+        config.bakeEffects = processing.bakeEffects
         config.idlePauseMinutes = idlePauseMinutes
         config.monitor = processing.monitor.rawValue
         config.monitorLUT = selectedLUT
@@ -740,6 +741,7 @@ final class AppModel: ObservableObject {
         processing.reduceLoadWhenHot = saved.reduceLoadWhenHot
         processing.bilinearWhenHot = saved.bilinearWhenHot
         processing.vignetteCorrection = saved.vignetteCorrection
+        processing.bakeEffects = saved.bakeEffects
         idlePauseMinutes = saved.idlePauseMinutes
         processing.monitor = MonitorMode(rawValue: saved.monitor) ?? processing.monitor
         if saved.monitorLUT.isEmpty || isAvailableLook(saved.monitorLUT) { selectedLUT = saved.monitorLUT }
@@ -1724,6 +1726,7 @@ final class AppModel: ObservableObject {
             "frameTime": fixedFrameTime ? "fixed" : "variable at 30 fps",
             "distortionCorrection": distortionCorrection ? "on" : "off, so the lens's distortion stays in the picture",
             "vignetteCorrection": processing.vignetteCorrection ? "Apple's lens shading, FixVignetteRadial" : "off",
+            "effects": bakeLook && processing.bakeEffects && !lookEffects.isNeutral ? "baked in: \(lookEffects.label)" : "none in the file",
             "bitDepth": String(takePreset.bitDepth),
             "appPreview": appPreviewConnected ? "connected" : "disconnected",
             "fileTag": takeFileTag.label,

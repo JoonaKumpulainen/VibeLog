@@ -1529,7 +1529,7 @@ final class TakeAccountingTests: XCTestCase {
     }
 
     func testPeakingThresholds() {
-        XCTAssertEqual(PeakingSensitivity.low.threshold, 0.2)
+        XCTAssertEqual(PeakingSensitivity.low.threshold, 0.15)
         XCTAssertLessThan(PeakingSensitivity.high.threshold, PeakingSensitivity.low.threshold)
     }
 

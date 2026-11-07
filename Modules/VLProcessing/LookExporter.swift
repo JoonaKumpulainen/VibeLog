@@ -18,6 +18,8 @@ public final class LookExporter {
         public var effects: LookEffects
         /// The LUT gives HDR codes in Rec.2020, written in Rec.2020's matrix.
         public var hdr = false
+        /// Where the crop sits within what it leaves out, -1 to 1 along each axis of the stored picture.
+        public var cropShift = SIMD2<Float>.zero
 
         public init(
             curve: LogCurve, gamut: Gamut, lut: CubeLUT?, lutExpectsRec709: Bool, sourceRec709: Bool,
@@ -70,6 +72,7 @@ public final class LookExporter {
     private let renderLock = NSLock()
     private var effectsImage: MTLTexture?
     private var effectsFrame = 0
+    private let cropShift: SIMD2<Float>
 
     public init?(look: Look) {
         guard let pipeline = ProcessingPipeline(), let queue = pipeline.device.makeCommandQueue(),
@@ -91,6 +94,7 @@ public final class LookExporter {
         sourceLuma = look.sourceRec709 ? LookParams.rec709Luma : LookParams.rec2020Luma
         effects = look.effects
         curve = look.curve
+        cropShift = look.cropShift
         effectsKit = look.effects.isNeutral ? nil : EffectsKit(device: pipeline.device)
         CVMetalTextureCacheCreate(nil, nil, pipeline.device, nil, &cache)
     }
@@ -267,7 +271,8 @@ public final class LookExporter {
                 guard let commands = queue.makeCommandBuffer(), let decoded = decode(frame, commands: commands),
                     let source = withEffects(decoded.image, commands: commands),
                     let planes = pipeline.encodeImage(
-                        source, into: buffer, commands: commands, look: look, lut: lutTexture, smooth: true)
+                        source, into: buffer, commands: commands, look: look, lut: lutTexture, smooth: true,
+                        shift: cropShift)
                 else { throw Failure.gpu }
                 let gpuStart = Date()
                 commands.commit()
@@ -374,11 +379,12 @@ public final class LookExporter {
                     total += tile.y
                 }
                 brightestFrame = max(brightestFrame, total / Float(max(width * height, 1)))
+                // Only samples with a picture count: a rewound reader also hands one without.
+                frames += 1
                 if seconds > 0, let first { progress(min((time - first).seconds / seconds, 1) * share) }
                 return false
             }
             if finished { break }
-            frames += 1
         }
         if reader.status == .failed { throw Failure.cannotRead(reader.error?.localizedDescription ?? "unknown") }
         // Grain then starts the export from the same frame it would without the pass.

@@ -182,25 +182,37 @@ public enum LensCalibrator {
         if catcher.done.wait(timeout: .now() + 10) == .timedOut {
             Log.shared.warn("Lenses: \(device.localizedName) timed out")
         }
+        // Each lens's own reported position, as it stood for the photo, not the one asked for.
+        let lenses = device.constituentDevices.isEmpty ? [device] : device.constituentDevices
         return catcher.found.map { found in
             var found = found
-            found.focus = held.first { $0.deviceType == found.source }.map { Double($0.lensPosition) }
+            found.focus = lenses.first { $0.deviceType == found.source }.map { Double($0.lensPosition) }
             return found
         }
     }
 
-    /// Locks each lens of a virtual camera at its farthest focus, waiting until it's there, and
-    /// returns the ones it locked.
+    /// Holds a virtual camera's lenses at their farthest focus, waiting until they're there, and
+    /// returns what it locked. Dual Wide ignored a lock on its 1x alone, reporting 0.62 where the
+    /// tele inside Dual Camera held 1.0, so the virtual camera is locked first, which drives its
+    /// lenses, then any lens that still takes a lock of its own.
     private static func holdFocus(_ device: AVCaptureDevice) -> [AVCaptureDevice] {
-        let lenses = device.constituentDevices.isEmpty ? [device] : device.constituentDevices
         var locked: [AVCaptureDevice] = []
-        for lens in lenses where lens.isLockingFocusWithCustomLensPositionSupported {
-            guard (try? lens.lockForConfiguration()) != nil else { continue }
+        func lock(_ lens: AVCaptureDevice) {
+            guard lens.isLockingFocusWithCustomLensPositionSupported,
+                (try? lens.lockForConfiguration()) != nil
+            else { return }
             let arrived = DispatchSemaphore(value: 0)
             lens.setFocusModeLocked(lensPosition: 1.0) { _ in arrived.signal() }
             lens.unlockForConfiguration()
             _ = arrived.wait(timeout: .now() + 2)
             locked.append(lens)
+        }
+        lock(device)
+        for lens in device.constituentDevices { lock(lens) }
+        // Let the lenses settle where they were put before the first photo.
+        Thread.sleep(forTimeInterval: 0.3)
+        for lens in [device] + device.constituentDevices {
+            Log.shared.info("Lenses: \(lens.localizedName) focus \(lens.focusMode == .locked ? "locked" : "not locked") at \(String(format: "%.2f", lens.lensPosition))")
         }
         return locked
     }

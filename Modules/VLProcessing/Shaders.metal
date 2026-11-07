@@ -325,27 +325,106 @@ static inline float3 coveredSample(texture2d<float, access::sample> image, float
         + logSample(image, uv + float2(-q.x, q.y)) + logSample(image, uv + float2(q.x, q.y))) * 0.25;
 }
 
+// Must match EffectsParams in LookEffects.swift.
+struct EffectsParams {
+    float halation;
+    float bloom;
+    float diffusion;
+    float vignette;
+    float grain;
+    float frame;  // Moves the grain from frame to frame.
+    uint curve;
+    uint enabled;
+};
+
+static inline float3 decodeLog3(float3 v, uint curve) {
+    return float3(decodeLog(v.r, curve), decodeLog(v.g, curve), decodeLog(v.b, curve));
+}
+
+static inline float3 encodeLog3(float3 v, uint curve) {
+    return float3(encodeLog(v.r, curve), encodeLog(v.g, curve), encodeLog(v.b, curve));
+}
+
+// A hash of a pixel and frame, evenly spread in 0 to 1. Integer maths, since sin() of large
+// coordinates loses its precision on the GPU and stopped varying.
+static inline float grainNoise(uint2 p, uint frame) {
+    uint h = p.x * 1973u + p.y * 9277u + frame * 26699u;
+    h = (h ^ (h >> 15)) * 0x2c1b3c6du;
+    h = (h ^ (h >> 12)) * 0x297a2d39u;
+    h ^= h >> 15;
+    return float(h & 0xffffffu) / 16777215.0;
+}
+
+// What glows: light above about middle gray plus a stop, rising smoothly so the glow has no edge.
+static inline float3 glowSource(float3 linear) {
+    float3 over = max(linear - 0.3, 0.0);
+    return over * over / (over + 0.3);
+}
+
+// The effects on one pixel, in linear light in the recorded gamut, and back to the curve.
+// Halation is the red-orange glow film's backing reflects around highlights, bloom a neutral
+// glow, and diffusion a soft mist like a filter on the lens, lifting shadows toward the light
+// around them and glowing highlights. Vignette darkens or lightens the corners, and grain is
+// noise that follows brightness, at the size of a sensor pixel.
+static inline float3 applyEffects(float3 logColor, float2 uv, float2 pixel, texture2d<float, access::sample> glow,
+                                  constant EffectsParams &e) {
+    constexpr sampler linearSampler(filter::linear, address::clamp_to_edge);
+    float3 linear = decodeLog3(saturate(logColor), e.curve);
+    float4 soft = glow.sample(linearSampler, uv);
+    float3 halo = soft.rgb;
+    linear += halo * e.bloom * 3.0;
+    linear += halo * e.halation * 4.0 * float3(1.0, 0.3, 0.08);
+    // Toward the surrounding light, which leaves an even area as it is, plus a glow.
+    float mist = e.diffusion;
+    linear = mix(linear, float3(soft.a), 0.3 * mist) + halo * 2.0 * mist;
+    float2 centered = uv - 0.5;
+    float corner = dot(centered, centered) * 2.0;
+    linear *= max(1.0 - e.vignette * corner, 0.0);
+    if (e.grain > 0.0) {
+        uint2 at = uint2(pixel);
+        uint frame = uint(e.frame);
+        float noise = grainNoise(at, frame) + grainNoise(at + uint2(7919u, 104729u), frame) - 1.0;
+        float y = max(rec2020Luma(linear), 0.0);
+        linear *= 1.0 + noise * e.grain * 0.5 * rsqrt(y + 0.02) * 0.12;
+    }
+    return saturate(encodeLog3(max(linear, 0.0), e.curve));
+}
+
+// The log colour a take records at `uv` of the log image, with the FX on it when they're baked:
+// the same per-pixel step as export and the viewfinder, before the look.
+static inline float3 takeColor(float3 logColor, float2 uv, float2 imageSize,
+                               texture2d<float, access::sample> glow, constant EffectsParams &e) {
+    float3 color = saturate(logColor);
+    return e.enabled != 0 ? applyEffects(color, uv, uv * imageSize, glow, e) : color;
+}
+
 kernel void encodeLuma(texture2d<float, access::sample> image [[texture(0)]],
                        texture2d<float, access::write> luma [[texture(1)]],
                        texture3d<float> lut [[texture(2)]],
+                       texture2d<float, access::sample> glow [[texture(3)]],
                        constant CropParams &crop [[buffer(0)]],
                        constant LookParams &k [[buffer(1)]],
+                       constant EffectsParams &e [[buffer(2)]],
                        uint2 gid [[thread_position_in_grid]]) {
     float2 step = crop.uvScale / float2(luma.get_width(), luma.get_height());
     float2 uv = crop.uvOffset + step * (float2(gid) + 0.5);
-    float3 codes = videoCodes(lookColor(saturate(coveredSample(image, uv, step, crop.smooth)), k, lut), k);
+    float2 imageSize = float2(image.get_width(), image.get_height());
+    float3 codes = videoCodes(lookColor(takeColor(coveredSample(image, uv, step, crop.smooth), uv, imageSize, glow, e), k, lut), k);
     luma.write(float4(msbAligned(codes.x)), gid);
 }
 
 kernel void encodeChroma(texture2d<float, access::sample> image [[texture(0)]],
                          texture2d<float, access::write> chroma [[texture(1)]],
                          texture3d<float> lut [[texture(2)]],
+                         texture2d<float, access::sample> glow [[texture(3)]],
                          constant CropParams &crop [[buffer(0)]],
                          constant LookParams &k [[buffer(1)]],
+                         constant EffectsParams &e [[buffer(2)]],
                          uint2 gid [[thread_position_in_grid]]) {
     float2 step = crop.uvScale / float2(chroma.get_width(), chroma.get_height());
     float2 uv = crop.uvOffset + step * (float2(gid) + 0.5);
-    float3 codes = videoCodes(lookColor(saturate(coveredSample(image, uv, step, crop.smooth)), k, lut), k);
+    float2 imageSize = float2(image.get_width(), image.get_height());
+    float3 codes = videoCodes(lookColor(takeColor(coveredSample(image, uv, step, crop.smooth), uv, imageSize, glow, e), k, lut), k);
     chroma.write(float4(msbAligned(codes.y), msbAligned(codes.z), 0.0, 0.0), gid);
 }
 
@@ -355,16 +434,19 @@ kernel void processDirect(texture2d<ushort, access::read> raw [[texture(0)]],
                           texture2d<float, access::write> luma [[texture(1)]],
                           texture2d<float, access::write> chroma [[texture(2)]],
                           texture3d<float> lut [[texture(3)]],
+                          texture2d<float, access::sample> glow [[texture(4)]],
                           constant ProcessParams &u [[buffer(0)]],
                           constant DirectParams &d [[buffer(1)]],
                           constant LookParams &k [[buffer(2)]],
+                          constant EffectsParams &e [[buffer(3)]],
                           uint2 gid [[thread_position_in_grid]]) {
     int2 size = int2(raw.get_width(), raw.get_height());
     float3 total = float3(0.0);
     for (uint y = 0; y < d.chromaStep.y; y++) {
         for (uint x = 0; x < d.chromaStep.x; x++) {
             uint2 target = gid * d.chromaStep + uint2(x, y);
-            float3 rgb = saturate(logPixel(raw, int2(target) + d.sourceOrigin, size, u));
+            int2 at = int2(target) + d.sourceOrigin;
+            float3 rgb = takeColor(logPixel(raw, at, size, u), (float2(at) + 0.5) / float2(size), float2(size), glow, e);
             total += rgb;
             luma.write(float4(msbAligned(videoCodes(lookColor(rgb, k, lut), k).x)), target);
         }
@@ -384,24 +466,31 @@ static inline float4 packedPixel(float3 rgb, constant LookParams &k, texture3d<f
 kernel void encodePacked(texture2d<float, access::sample> image [[texture(0)]],
                          texture2d<float, access::write> packed [[texture(1)]],
                          texture3d<float> lut [[texture(2)]],
+                         texture2d<float, access::sample> glow [[texture(3)]],
                          constant CropParams &crop [[buffer(0)]],
                          constant LookParams &k [[buffer(1)]],
+                         constant EffectsParams &e [[buffer(2)]],
                          uint2 gid [[thread_position_in_grid]]) {
     float2 step = crop.uvScale / float2(packed.get_width(), packed.get_height());
     float2 uv = crop.uvOffset + step * (float2(gid) + 0.5);
-    packed.write(packedPixel(saturate(coveredSample(image, uv, step, crop.smooth)), k, lut), gid);
+    float2 imageSize = float2(image.get_width(), image.get_height());
+    packed.write(packedPixel(takeColor(coveredSample(image, uv, step, crop.smooth), uv, imageSize, glow, e), k, lut), gid);
 }
 
 // The efficient path for packed 4:4:4: one thread per pixel, the same math as processDirect.
 kernel void processDirectPacked(texture2d<ushort, access::read> raw [[texture(0)]],
                                 texture2d<float, access::write> packed [[texture(1)]],
                                 texture3d<float> lut [[texture(2)]],
+                                texture2d<float, access::sample> glow [[texture(3)]],
                                 constant ProcessParams &u [[buffer(0)]],
                                 constant DirectParams &d [[buffer(1)]],
                                 constant LookParams &k [[buffer(2)]],
+                                constant EffectsParams &e [[buffer(3)]],
                                 uint2 gid [[thread_position_in_grid]]) {
     int2 size = int2(raw.get_width(), raw.get_height());
-    packed.write(packedPixel(saturate(logPixel(raw, int2(gid) + d.sourceOrigin, size, u)), k, lut), gid);
+    int2 at = int2(gid) + d.sourceOrigin;
+    float3 rgb = takeColor(logPixel(raw, at, size, u), (float2(at) + 0.5) / float2(size), float2(size), glow, e);
+    packed.write(packedPixel(rgb, k, lut), gid);
 }
 
 // A decoded frame, 16-bit AYCbCr in video range, back to the log RGB image the encoder was given.
@@ -505,42 +594,6 @@ vertex VertexOut monitorVertex(uint vertexID [[vertex_id]]) {
     return out;
 }
 
-// Must match EffectsParams in LookEffects.swift.
-struct EffectsParams {
-    float halation;
-    float bloom;
-    float diffusion;
-    float vignette;
-    float grain;
-    float frame;  // Moves the grain from frame to frame.
-    uint curve;
-    uint enabled;
-};
-
-static inline float3 decodeLog3(float3 v, uint curve) {
-    return float3(decodeLog(v.r, curve), decodeLog(v.g, curve), decodeLog(v.b, curve));
-}
-
-static inline float3 encodeLog3(float3 v, uint curve) {
-    return float3(encodeLog(v.r, curve), encodeLog(v.g, curve), encodeLog(v.b, curve));
-}
-
-// A hash of a pixel and frame, evenly spread in 0 to 1. Integer maths, since sin() of large
-// coordinates loses its precision on the GPU and stopped varying.
-static inline float grainNoise(uint2 p, uint frame) {
-    uint h = p.x * 1973u + p.y * 9277u + frame * 26699u;
-    h = (h ^ (h >> 15)) * 0x2c1b3c6du;
-    h = (h ^ (h >> 12)) * 0x297a2d39u;
-    h ^= h >> 15;
-    return float(h & 0xffffffu) / 16777215.0;
-}
-
-// What glows: light above about middle gray plus a stop, rising smoothly so the glow has no edge.
-static inline float3 glowSource(float3 linear) {
-    float3 over = max(linear - 0.3, 0.0);
-    return over * over / (over + 0.3);
-}
-
 // An eighth-size copy of the picture, each texel from sixteen taps across the block under it:
 // in RGB what glows, taken before the blur so a small bright light keeps its strength, and in
 // alpha the luminance, which diffusion lifts the shadows toward.
@@ -580,35 +633,6 @@ kernel void effectsBlur(texture2d<float, access::read> input [[texture(0)]],
         total += weight;
     }
     output.write(sum / total, gid);
-}
-
-// The effects on one pixel, in linear light in the recorded gamut, and back to the curve.
-// Halation is the red-orange glow film's backing reflects around highlights, bloom a neutral
-// glow, and diffusion a soft mist like a filter on the lens, lifting shadows toward the light
-// around them and glowing highlights. Vignette darkens or lightens the corners, and grain is
-// noise that follows brightness, at the size of a sensor pixel.
-static inline float3 applyEffects(float3 logColor, float2 uv, float2 pixel, texture2d<float, access::sample> glow,
-                                  constant EffectsParams &e) {
-    constexpr sampler linearSampler(filter::linear, address::clamp_to_edge);
-    float3 linear = decodeLog3(saturate(logColor), e.curve);
-    float4 soft = glow.sample(linearSampler, uv);
-    float3 halo = soft.rgb;
-    linear += halo * e.bloom * 3.0;
-    linear += halo * e.halation * 4.0 * float3(1.0, 0.3, 0.08);
-    // Toward the surrounding light, which leaves an even area as it is, plus a glow.
-    float mist = e.diffusion;
-    linear = mix(linear, float3(soft.a), 0.3 * mist) + halo * 2.0 * mist;
-    float2 centered = uv - 0.5;
-    float corner = dot(centered, centered) * 2.0;
-    linear *= max(1.0 - e.vignette * corner, 0.0);
-    if (e.grain > 0.0) {
-        uint2 at = uint2(pixel);
-        uint frame = uint(e.frame);
-        float noise = grainNoise(at, frame) + grainNoise(at + uint2(7919u, 104729u), frame) - 1.0;
-        float y = max(rec2020Luma(linear), 0.0);
-        linear *= 1.0 + noise * e.grain * 0.5 * rsqrt(y + 0.02) * 0.12;
-    }
-    return saturate(encodeLog3(max(linear, 0.0), e.curve));
 }
 
 // The effects on the whole log image, for export, which then encodes as usual.
