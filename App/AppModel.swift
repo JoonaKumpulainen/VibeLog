@@ -129,7 +129,17 @@ final class AppModel: ObservableObject {
         return bakeTarget == .hlg ? .hlg : .pq
     }
 
-    /// HDR for baked takes, which only ACES 2.0 has. The viewfinder stays SDR either way.
+    /// The viewfinder shows ACES 2.0's HDR picture through the screen's extended range while the
+    /// look's dynamic range is HDR, baked or not. Off keeps it SDR.
+    @Published var hdrViewfinder = true {
+        didSet { if hdrViewfinder != oldValue { buildLook() } }
+    }
+
+    var showsHDRViewfinder: Bool {
+        hdrViewfinder && bakeTarget.isHDR && selectedLUT == BuiltInLook.aces20.name && processing.monitor == .rec709
+    }
+
+    /// HDR for baked takes, which only ACES 2.0 has.
     @Published var bakeTarget = BakeTarget.sdr {
         didSet {
             guard bakeTarget != oldValue else { return }
@@ -220,7 +230,11 @@ final class AppModel: ObservableObject {
     @Published var processing = ProcessingSettings() {
         didSet {
             pipeline?.update(processing)
-            if processing.monitor != oldValue.monitor { updateScope() }
+            if processing.monitor != oldValue.monitor {
+                updateScope()
+                // The HDR viewfinder only shows a look, so leaving LOG may need its LUT.
+                if showsHDRViewfinder { buildLook() }
+            }
             if processing.curve != oldValue.curve || processing.gamut != oldValue.gamut {
                 if !adopting { followPairLUT(from: Self.lutKey(oldValue.curve, oldValue.gamut)) }
                 buildLook()
@@ -663,6 +677,7 @@ final class AppModel: ObservableObject {
         config.lookEffects = lookEffects
         config.scopeOverlaid = scopeOverlaid
         config.haptics = hapticsOn
+        config.hdrViewfinder = hdrViewfinder
         config.scopeCorner = scopeCorner.rawValue
         config.scopeScale = scopeScale
         config.testServer = testServer
@@ -747,6 +762,7 @@ final class AppModel: ObservableObject {
         lookEffects = saved.lookEffects
         scopeOverlaid = saved.scopeOverlaid
         hapticsOn = saved.haptics
+        hdrViewfinder = saved.hdrViewfinder
         scopeCorner = ScreenCorner(rawValue: saved.scopeCorner) ?? .bottomLeft
         scopeScale = saved.scopeScale
     }
@@ -1131,6 +1147,14 @@ final class AppModel: ObservableObject {
                 if self.isCurrentLook(request) { pipeline?.setBakeLUT(hdr) }
             }
         }
+        // The HDR viewfinder shows the look at 1000 nits as PQ, whichever HDR the takes encode,
+        // and follows a drag's preview, as the SDR one does.
+        let hdrView = showsHDRViewfinder
+        lookQueue.async { [weak self] in
+            guard let self, self.isCurrentLook(request) else { return }
+            let lut = hdrView ? BuiltInLook.hdrLUT(curve: curve, gamut: gamut, grade: grade, target: .pq, size: size) : nil
+            if self.isCurrentLook(request) { pipeline?.setMonitorHDR(lut) }
+        }
         if look == nil, !name.isEmpty {
             lookQueue.async { [weak self] in
                 guard let self, self.isCurrentLook(request) else { return }
@@ -1413,8 +1437,17 @@ final class AppModel: ObservableObject {
         runReleasingCamera(CaptureProbe.run)
     }
 
+    /// Saves a profile of each lens from Apple's calibration, or its field of view, for this phone.
+    func measureLenses() {
+        runReleasingCamera(LensCalibrator.run) { _ in
+            let saved = LensProfile.saved()
+            return saved.isEmpty ? "No lens gave a profile" : "Lens profiles saved: " + saved.map(\.lens).joined(separator: ", ")
+        }
+    }
+
     private func runReleasingCamera(
-        _ probe: @escaping (@escaping (String) -> Void, @escaping (URL) -> Void) -> Void
+        _ probe: @escaping (@escaping (String) -> Void, @escaping (URL) -> Void) -> Void,
+        result: @escaping (URL) -> String = { "Probe saved: probes/\($0.lastPathComponent)" }
     ) {
         guard !isRecording, isBusy == nil else { return }
         isBusy = "Releasing camera"
@@ -1424,7 +1457,7 @@ final class AppModel: ObservableObject {
                 DispatchQueue.main.async { self.isBusy = text }
             }, { [self] url in
                 isBusy = nil
-                lastResult = "Probe saved: probes/\(url.lastPathComponent)"
+                lastResult = result(url)
                 startStreamAfterConfigure = true
                 reconfigure()
             })

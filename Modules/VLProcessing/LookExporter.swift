@@ -56,13 +56,18 @@ public final class LookExporter {
     private let previewState: MTLComputePipelineState
     private let lightState: MTLComputePipelineState
     private var cache: CVMetalTextureCache?
-    private let look: LookParams
-    private let lutTexture: MTLTexture?
+    // The look can change while the preview plays, through `update`, so these are guarded by
+    // `renderLock` whenever `render` reads them.
+    private var look: LookParams
+    private var lutTexture: MTLTexture?
     private var sourceLuma: SIMD4<Float>
     private var logImage: MTLTexture?
-    private let effects: LookEffects
-    private let curve: LogCurve
-    private let effectsKit: EffectsKit?
+    private var effects: LookEffects
+    private var curve: LogCurve
+    private var effectsKit: EffectsKit?
+    /// One frame at a time: AVFoundation may run more than one compositor over the same exporter,
+    /// and the log image and effects textures are shared from frame to frame.
+    private let renderLock = NSLock()
     private var effectsImage: MTLTexture?
     private var effectsFrame = 0
 
@@ -81,18 +86,43 @@ public final class LookExporter {
         self.queue = queue
         self.decodeState = decodeState
         self.previewState = previewState
-        var settings = ProcessingSettings()
-        settings.restore(curve: look.curve, gamut: look.gamut)
-        settings.bakeLook = true
-        settings.lutExpectsRec709 = look.lutExpectsRec709
-        settings.bakeHDR = look.hdr
-        self.look = LookParams(settings: settings, lut: look.lut)
+        self.look = Self.params(look)
         lutTexture = look.lut.flatMap { pipeline.lutTexture(for: $0) }
         sourceLuma = look.sourceRec709 ? LookParams.rec709Luma : LookParams.rec2020Luma
         effects = look.effects
         curve = look.curve
         effectsKit = look.effects.isNeutral ? nil : EffectsKit(device: pipeline.device)
         CVMetalTextureCacheCreate(nil, nil, pipeline.device, nil, &cache)
+    }
+
+    private static func params(_ look: Look) -> LookParams {
+        var settings = ProcessingSettings()
+        settings.restore(curve: look.curve, gamut: look.gamut)
+        settings.bakeLook = true
+        settings.lutExpectsRec709 = look.lutExpectsRec709
+        settings.bakeHDR = look.hdr
+        return LookParams(settings: settings, lut: look.lut)
+    }
+
+    /// A new look for the frames still to come, so the export preview keeps one exporter, with its
+    /// GPU state and full-size textures, however often the grade changes. Waits for a frame being
+    /// drawn to finish.
+    public func update(look: Look) {
+        let params = Self.params(look)
+        let texture = look.lut.flatMap { pipeline.lutTexture(for: $0) }
+        renderLock.lock()
+        defer { renderLock.unlock() }
+        self.look = params
+        lutTexture = texture
+        sourceLuma = look.sourceRec709 ? LookParams.rec709Luma : LookParams.rec2020Luma
+        effects = look.effects
+        curve = look.curve
+        if look.effects.isNeutral {
+            effectsKit = nil
+            effectsImage = nil
+        } else if effectsKit == nil {
+            effectsKit = EffectsKit(device: pipeline.device)
+        }
     }
 
     /// The frame's log image with the effects on it, or as it is without any. Grain moves from
@@ -133,6 +163,8 @@ public final class LookExporter {
     /// `quarterTurns` clockwise, so a take held upright plays upright. For playback, which calls
     /// it from one queue at a time.
     public func render(_ frame: CVPixelBuffer, into output: CVPixelBuffer, quarterTurns: Int = 0) throws {
+        renderLock.lock()
+        defer { renderLock.unlock() }
         let width = CVPixelBufferGetWidth(output)
         let height = CVPixelBufferGetHeight(output)
         var wrappedOutput: CVMetalTexture?

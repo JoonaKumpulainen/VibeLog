@@ -42,13 +42,19 @@ jobs:
           print(ids[0])
           ")
           echo "Simulator: $SIM_ID"
+          mkdir -p build
           xcodebuild test \
             -project VibeLog.xcodeproj \
             -scheme VibeLog \
             -destination "id=$SIM_ID,arch=arm64" \
             -derivedDataPath build/test \
             CODE_SIGNING_ALLOWED=NO \
-            | tail -n 60
+            | tee build/test-output.txt | tail -n 60
+
+      # Measurements tests print, which the 60 lines above cut off.
+      - name: Show test measurements
+        if: always()
+        run: grep -h "LUT error" build/test-output.txt || true
 
       - name: Build for device, unsigned
         run: |

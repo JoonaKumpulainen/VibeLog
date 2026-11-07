@@ -1980,7 +1980,7 @@ final class ACESTests: XCTestCase {
         let size = 9
         let lut = BuiltInLook.aces20.lut(curve: .sLog3, gamut: .sGamut3Cine, size: size)
         XCTAssertEqual(lut.samples.count, size * size * size)
-        let toRec2020 = Gamut.sGamut3Cine.fromRec2020.inverse
+        let toRec2020 = BuiltInLook.acesInput(.sGamut3Cine)
         for (r, g, b) in [(0, 0, 0), (4, 4, 4), (8, 2, 5), (3, 7, 1)] {
             let log = SIMD3(Double(r), Double(g), Double(b)) / Double(size - 1)
             let linear = toRec2020 * SIMD3(LogCurve.sLog3.decode(log.x), LogCurve.sLog3.decode(log.y), LogCurve.sLog3.decode(log.z))
@@ -1989,6 +1989,30 @@ final class ACESTests: XCTestCase {
             XCTAssertEqual(Double(got.x), expected.x, accuracy: 1e-5)
             XCTAssertEqual(Double(got.y), expected.y, accuracy: 1e-5)
             XCTAssertEqual(Double(got.z), expected.z, accuracy: 1e-5)
+        }
+    }
+
+    /// Log codes through VibeLog's ACES 2.0 look match OpenColorIO's own camera inputs to the same
+    /// view, from tools/check_camera_inputs.py's config, now that the look takes the vendors'
+    /// matrices to ACES. OCIO's values above 1 are clamped, as the port clamps to the display.
+    func testACESLookMatchesOCIOCameraInputs() {
+        let codes: [SIMD3<Double>] = [SIMD3(0.5, 0.5, 0.5), SIMD3(0.62, 0.41, 0.3), SIMD3(0.35, 0.55, 0.62), SIMD3(0.7, 0.3, 0.6)]
+        let references: [(LogCurve, Gamut, [[Double]])] = [
+            (.sLog3, .sGamut3, [[0.550278, 0.550277, 0.550278], [1.000006, 0.312072, 0.244938], [0.0, 0.628108, 0.752428], [1.000006, 0.338382, 0.669042]]),
+            (.sLog3, .sGamut3Cine, [[0.550278, 0.550277, 0.550278], [0.981475, 0.279395, 0.126602], [0.023624, 0.622618, 0.785113], [1.000006, 0.294677, 0.684274]]),
+            (.logC3, .arriWideGamut3, [[0.593558, 0.593558, 0.593558], [1.000006, 0.452447, 0.289412], [0.0, 0.639387, 0.83678], [1.000006, 0.381372, 0.713242]]),
+            (.logC4, .arriWideGamut4, [[0.842817, 0.842817, 0.842817], [1.000006, 0.635085, 0.602157], [0.567462, 0.888606, 1.000006], [1.000006, 0.723834, 0.830347]]),
+            (.canonLog3, .cinemaGamut, [[0.61842, 0.61842, 0.61842], [0.998049, 0.436189, 0.28252], [0.0, 0.671739, 0.794417], [1.000006, 0.302923, 0.745904]]),
+        ]
+        for (curve, gamut, outputs) in references {
+            let input = BuiltInLook.acesInput(gamut)
+            for (code, reference) in zip(codes, outputs) {
+                let linear = input * SIMD3(curve.decode(code.x), curve.decode(code.y), curve.decode(code.z))
+                let got = BuiltInLook.aces20.display(linearRec2020: linear)
+                for channel in 0..<3 {
+                    XCTAssertEqual(got[channel], min(reference[channel], 1), accuracy: 0.003, "\(curve.label) \(gamut.label) \(code)")
+                }
+            }
         }
     }
 
@@ -2114,6 +2138,43 @@ final class LookGradeTests: XCTestCase {
     }
 
     /// A grade saved before colour bands existed reads back with every colour neutral.
+    /// How far the 65-point ACES 2.0 LUT on log strays from the exact transform between its grid
+    /// points, for each curve in its own gamut. It prints the figures, since the error is
+    /// measured, not known, and fails only on an error a viewer would plainly see.
+    func testACESLUTInterpolationError() {
+        var state: UInt64 = 0x9E3779B97F4A7C15
+        func next() -> Double {
+            state = state &* 6364136223846793005 &+ 1442695040888963407
+            return Double(state >> 11) / Double(1 << 53)
+        }
+        for curve in LogCurve.allCases {
+            let gamut = curve.nativeGamut
+            let cube = BuiltInLook.aces20.lut(curve: curve, gamut: gamut, size: 65)
+            let toRec2020 = BuiltInLook.acesInput(gamut)
+            var worst = 0.0
+            var worstShadow = 0.0
+            var errors: [Double] = []
+            for index in 0..<600 {
+                // A third in deep shadows near the curve's black, where the curve bends hardest.
+                let low = index % 3 == 0 ? 0.0 : 0.05
+                let high = index % 3 == 0 ? 0.25 : 0.95
+                let code = SIMD3((0..<3).map { _ in low + next() * (high - low) })
+                let exact = BuiltInLook.aces20.display(
+                    linearRec2020: toRec2020 * SIMD3(curve.decode(code.x), curve.decode(code.y), curve.decode(code.z)))
+                let looked = cube.sample(SIMD3<Float>(Float(code.x), Float(code.y), Float(code.z)))
+                let error = simd_reduce_max(simd_abs(SIMD3(Double(looked.x), Double(looked.y), Double(looked.z)) - exact))
+                errors.append(error)
+                worst = max(worst, error)
+                if index % 3 == 0 { worstShadow = max(worstShadow, error) }
+            }
+            errors.sort()
+            print(String(
+                format: "LUT error %@: max %.4f, p99 %.4f, median %.5f, deep shadows max %.4f",
+                curve.label, worst, errors[errors.count * 99 / 100], errors[errors.count / 2], worstShadow))
+            XCTAssertLessThan(worst, 0.05, curve.label)
+        }
+    }
+
     func testOlderGradeReadsWithoutBands() throws {
         let grade = try JSONDecoder().decode(LookGrade.self, from: Data(#"{"exposure":0.5}"#.utf8))
         XCTAssertEqual(grade.exposure, 0.5)
@@ -2203,6 +2264,28 @@ final class LookGradeTests: XCTestCase {
             XCTAssertEqual(Double(got.x), expected.x, accuracy: 1e-5)
             XCTAssertEqual(Double(got.y), expected.y, accuracy: 1e-5)
         }
+    }
+}
+
+/// Lens profiles: a pinhole focal length from a field of view, and a profile survives its file.
+final class LensProfileTests: XCTestCase {
+    /// The 1x's 71.29 degrees across 4032 gave 2812 px, against Apple's calibration of 2818.
+    func testFocalLengthFromFieldOfView() {
+        XCTAssertEqual(LensProfile.focalLength(fieldOfView: 71.29, width: 4032), 2812, accuracy: 1)
+        XCTAssertEqual(LensProfile.focalLength(fieldOfView: 90, width: 2000), 1000, accuracy: 1e-9)
+    }
+
+    func testProfileReadsBack() throws {
+        let profile = LensProfile(
+            model: "Test,1", lens: "back-wide", width: 4032, height: 3024, fx: 2817.99, fy: 2817.99,
+            cx: 2018.9, cy: 1517.9, distortionCenterX: 2045.7, distortionCenterY: 1519.6,
+            distortionTable: [0, 0.01, 0.021], pixelSize: 0.00244, fieldOfView: 71.29,
+            correctedFieldOfView: 71.29, source: "test", measured: "2026-11-07")
+        let read = try JSONDecoder().decode(LensProfile.self, from: JSONEncoder().encode(profile))
+        XCTAssertEqual(read, profile)
+        XCTAssertEqual(profile.fileName, "back-wide-4032x3024.json")
+        XCTAssertTrue(profile.isCalibrated)
+        XCTAssertEqual(profile.distortionRange ?? 0, 0.021, accuracy: 1e-12)
     }
 }
 

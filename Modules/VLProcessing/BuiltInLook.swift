@@ -29,6 +29,44 @@ public enum BuiltInLook: String, CaseIterable, Sendable {
         -0.0005739431944675744, 0.02846776880323887, 0.9721061587333679,
     ]
 
+    /// OpenColorIO's camera inputs to ACES2065-1, the vendors' own matrices, from its ACES 2.0 and
+    /// 1.3 studio configs, which agree. Apple Wide Gamut has none, and S-Gamut takes S-Gamut3's,
+    /// whose primaries it shares.
+    static func cameraToAP0(_ gamut: Gamut) -> simd_double3x3? {
+        func rows(_ values: [[Double]]) -> simd_double3x3 {
+            simd_double3x3(rows: values.map { SIMD3($0[0], $0[1], $0[2]) })
+        }
+        switch gamut {
+        case .rec2020, .appleWideGamut: return nil
+        case .sGamut3, .sGamut:
+            return rows([[0.7529826164, 0.1433702111, 0.1036471874], [0.0217076968, 1.0153188705, -0.037026532],
+                         [-0.0094160531, 0.0033704177, 1.0060455799]])
+        case .sGamut3Cine:
+            return rows([[0.6387886405, 0.2723514438, 0.0888599008], [-0.003915906, 1.0880732536, -0.0841573253],
+                         [-0.0299072023, -0.0264325794, 1.0563397408]])
+        case .arriWideGamut3:
+            return rows([[0.680205524, 0.2361366004, 0.0836578906], [0.0854149833, 1.0174708366, -0.1028858572],
+                         [0.0020565216, -0.0625625029, 1.0605059862]])
+        case .arriWideGamut4:
+            return rows([[0.7509573698, 0.1444227844, 0.1046198532], [0.0008218371, 1.0073975325, -0.0082194218],
+                         [-0.0004999521, -0.0008541772, 1.0013540983]])
+        case .cinemaGamut:
+            return rows([[0.7630644441, 0.1490211636, 0.0879143849], [0.0036574567, 1.1069604158, -0.1106178388],
+                         [-0.0094077941, -0.2183833122, 1.2277910709]])
+        }
+    }
+
+    /// The gamut to linear Rec.2020 as an ACES look takes it: through the vendor's matrix to
+    /// ACES2065-1 and back by OpenColorIO's own Rec.2020 matrix, so `display` sends the colour to
+    /// ACES exactly as the vendor's input would, and an ACES grade in Resolve matches. Off it by
+    /// about 0.4% from the direct conversion between two D65 spaces, which MONITOR and LUTs keep.
+    static func acesInput(_ gamut: Gamut) -> simd_double3x3 {
+        guard let vendor = cameraToAP0(gamut) else { return gamut.fromRec2020.inverse }
+        let m = rec2020ToAP0
+        let toAP0 = simd_double3x3(rows: [SIMD3(m[0], m[1], m[2]), SIMD3(m[3], m[4], m[5]), SIMD3(m[6], m[7], m[8])])
+        return toAP0.inverse * vendor
+    }
+
     /// Display code values for a scene-linear Rec.2020 colour, as the OpenColorIO view
     /// "Rec.1886 Rec.709 - Display" shows it.
     public func display(linearRec2020 rgb: SIMD3<Double>, aces2: ACES2Renderer? = nil) -> SIMD3<Double> {
@@ -49,7 +87,7 @@ public enum BuiltInLook: String, CaseIterable, Sendable {
     /// the gamut to Rec.2020, graded, then through the transform. 65 points keeps interpolation small.
     public func lut(curve: LogCurve, gamut: Gamut, grade: LookGrade = LookGrade(), size: Int = 65) -> CubeLUT {
         let renderer = ACES2Renderer.shared
-        return Self.makeLUT(curve: curve, gamut: gamut, grade: grade, size: size) {
+        return Self.makeLUT(curve: curve, gamut: gamut, grade: grade, size: size, toRec2020: Self.acesInput(gamut)) {
             display(linearRec2020: $0, aces2: renderer)
         }
     }
@@ -79,10 +117,10 @@ public enum BuiltInLook: String, CaseIterable, Sendable {
     }
 
     private static func makeLUT(
-        curve: LogCurve, gamut: Gamut, grade: LookGrade, size: Int,
+        curve: LogCurve, gamut: Gamut, grade: LookGrade, size: Int, toRec2020 input: simd_double3x3? = nil,
         display: @escaping (SIMD3<Double>) -> SIMD3<Double>
     ) -> CubeLUT {
-        let toRec2020 = gamut.fromRec2020.inverse
+        let toRec2020 = input ?? gamut.fromRec2020.inverse
         let graded = GradeTransform(grade)
         let decoded = (0..<size).map { curve.decode(Double($0) / Double(size - 1)) }
         var samples = [SIMD3<Float>](repeating: .zero, count: size * size * size)
@@ -375,7 +413,7 @@ extension BuiltInLook {
         curve: LogCurve, gamut: Gamut, grade: LookGrade = LookGrade(), target: BakeTarget, size: Int = 65
     ) -> CubeLUT {
         let renderer = ACES2Renderer.hdr
-        return makeLUT(curve: curve, gamut: gamut, grade: grade, size: size) { linear in
+        return makeLUT(curve: curve, gamut: gamut, grade: grade, size: size, toRec2020: acesInput(gamut)) { linear in
             let m = rec2020ToAP0
             let ap0 = (m[0] * linear.x + m[1] * linear.y + m[2] * linear.z,
                        m[3] * linear.x + m[4] * linear.y + m[5] * linear.z,

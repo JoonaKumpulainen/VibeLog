@@ -217,10 +217,14 @@ extension AppModel {
             guard !isRecording else { return refused("A take is running") }
             resetSettings()
             return done()
-        case "encoderTest", "probe":
+        case "encoderTest", "probe", "measureLenses":
             guard !isRecording else { return refused("A take is running") }
             if let cameraBlocked { return refused(cameraBlocked) }
-            command.action == "probe" ? runProbe() : runEncoderTest()
+            switch command.action {
+            case "probe": runProbe()
+            case "measureLenses": measureLenses()
+            default: runEncoderTest()
+            }
             return done()
         case "saveStill", "sendPreview":
             guard isStreaming, !isRecording else { return refused("Needs a running stream and no take") }
@@ -251,7 +255,7 @@ extension AppModel {
             return done(testFiles().joined(separator: "\n"))
         case "sendFile":
             guard let name = command.name.flatMap(TestLinkAddress.safeName) else { return refused("sendFile needs a name") }
-            guard let file = [Storage.videos, Storage.logs, Storage.probes]
+            guard let file = [Storage.videos, Storage.logs, Storage.probes, LensProfile.folder]
                 .map({ $0.appendingPathComponent(name) })
                 .first(where: { FileManager.default.fileExists(atPath: $0.path) })
             else { return refused("No file named \(name)") }
@@ -263,7 +267,7 @@ extension AppModel {
     }
 
     private func testFiles() -> [String] {
-        [Storage.videos, Storage.logs, Storage.probes, Storage.clips, Storage.stills].flatMap { folder in
+        [Storage.videos, Storage.logs, Storage.probes, Storage.clips, Storage.stills, LensProfile.folder].flatMap { folder in
             let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path)
             return (names ?? []).sorted()
         }
@@ -289,7 +293,7 @@ extension AppModel {
             "stereoAudio": String(stereoAudio),
             "distortionCorrection": String(distortionCorrection), "twelveBitProRes": String(twelveBitProRes),
             "bakeLook": String(bakeLook), "bakeToProRes": String(bakeToProRes), "bakeTarget": bakeTarget.rawValue,
-            "effects": lookEffects.label, "scopeOverlaid": String(scopeOverlaid), "fileTagWritten": takeFileTag.label, "grade": lookGrade.label, "style": currentStyleChoice.map { String($0.dropFirst(Self.stylePrefix.count)) } ?? "",
+            "effects": lookEffects.label, "scopeOverlaid": String(scopeOverlaid), "hdrViewfinder": String(hdrViewfinder), "hdrShown": String(showsHDRViewfinder), "fileTagWritten": takeFileTag.label, "grade": lookGrade.label, "style": currentStyleChoice.map { String($0.dropFirst(Self.stylePrefix.count)) } ?? "",
             "efficientWhenHot": String(processing.efficientWhenHot), "isoAuto": String(isoAuto),
             "bilinearWhenHot": String(processing.bilinearWhenHot),
             "yields": String(pipelineStats.monitorYields),
@@ -351,6 +355,7 @@ extension AppModel {
             guard !isRecording else { return "bakeTarget can't change during a take" }
             return pick(BakeTarget.allCases, \.rawValue) { bakeTarget = $0 }
         case "scopeOverlaid": return flag { scopeOverlaid = $0 }
+        case "hdrViewfinder": return flag { hdrViewfinder = $0 }
         case "effects":
             // "none", or names and values such as bloom=0.5,grain=0.3, from the FX sliders' ranges.
             guard !isRecording else { return "effects can't change during a take" }

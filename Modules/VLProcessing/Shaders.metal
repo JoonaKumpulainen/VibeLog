@@ -35,6 +35,7 @@ struct MonitorParams {
     float4 toRec709Row0;  // Linear in the recorded gamut to linear Rec.709.
     float4 toRec709Row1;
     float4 toRec709Row2;
+    uint hdr;  // 0 SDR, 1 SDR shown in the HDR viewfinder, 2 the HDR look's PQ codes.
 };
 
 struct CropParams {
@@ -653,6 +654,22 @@ kernel void scopeBins(texture2d<float, access::sample> image [[texture(0)]],
     atomic_fetch_add_explicit(&vector[up * s.levels + across], 1, memory_order_relaxed);
 }
 
+// An SDR display colour into the HDR viewfinder: decoded from the 2.4 display power, moved from
+// Rec.709 to Rec.2020, placed at the 203 nits of BT.2408's reference white, then PQ encoded.
+static inline float3 sdrToPQ(float3 display) {
+    float3 linear709 = pow(saturate(display), 2.4);
+    float3 rec2020 = float3(dot(linear709, float3(0.6274, 0.3293, 0.0433)),
+                            dot(linear709, float3(0.0691, 0.9195, 0.0114)),
+                            dot(linear709, float3(0.0164, 0.0880, 0.8956)));
+    const float m1 = 2610.0 / 16384.0;
+    const float m2 = 2523.0 / 4096.0 * 128.0;
+    const float c1 = 3424.0 / 4096.0;
+    const float c2 = 2413.0 / 4096.0 * 32.0;
+    const float c3 = 2392.0 / 4096.0 * 32.0;
+    float3 y = pow(max(rec2020 * 203.0 / 10000.0, 0.0), m1);
+    return pow((c1 + c2 * y) / (1.0 + c3 * y), m2);
+}
+
 // Shows the log image, optionally through the Rec.709 LUT. The sensor is landscape, so the
 // image is rotated 90 degrees for the portrait screen.
 fragment float4 monitorFragment(VertexOut in [[stage_in]],
@@ -674,13 +691,17 @@ fragment float4 monitorFragment(VertexOut in [[stage_in]],
     float3 color = monitorLook(shownLog, m, custom);
 
     float clip = m.bandsHigh.z;
+    // Overlays draw in SDR colours, which the HDR viewfinder moves to reference white.
+    bool marked = false;
     if (m.overlay == 1) {
         bool clipped = max(max(logColor.r, logColor.g), logColor.b) >= clip;
         if (clipped) {
+            marked = true;
             color = float3(fmod(in.position.x + in.position.y, 24.0) < 12.0 ? 1.0 : 0.0);
         }
     } else if (m.overlay == 2) {
         float luma = rec2020Luma(logColor);
+        marked = true;
         color = float3(luma);
         if (luma >= clip) {
             color = float3(1.0, 0.0, 0.0);
@@ -704,11 +725,15 @@ fragment float4 monitorFragment(VertexOut in [[stage_in]],
         edge -= rec2020Luma(image.sample(linearSampler, rotated - float2(0, m.peakStep.y)).rgb);
         if (abs(edge) > m.peakThreshold) {
             color = float3(0.0, 1.0, 1.0);
+            marked = true;
         }
     }
 
     if (abs(rotated.y - 0.5) * 2.0 > m.cropFraction) {
         color *= 0.35;
+    }
+    if (m.hdr == 1 || (m.hdr == 2 && marked)) {
+        color = sdrToPQ(color);
     }
     return float4(color, 1.0);
 }

@@ -33,6 +33,9 @@ struct ExportView: View {
         layer.magnificationFilter = .linear
         return layer
     }()
+    /// The preview's one exporter and composition, made once and given each new look in place.
+    @State private var previewExporter: LookExporter?
+    @State private var previewComposition: AVVideoComposition?
     /// Where the preview was when an export took its item away, to return to after.
     @State private var resumeAt = CMTime.zero
     /// The export's own grade, starting neutral, so a take isn't graded until the owner grades it,
@@ -323,20 +326,45 @@ struct ExportView: View {
     }
 
     /// Gives the player the chosen look. The item keeps its place, and a paused one redraws.
+    /// The preview keeps one exporter and one composition for the take: a new look goes into the
+    /// exporter in place, since each new exporter brings its own GPU state and full-size textures,
+    /// and swapping compositions under a playing item ran the phone out of memory.
     private func refreshPreview() {
         let (chosen, takeCurve, takeGamut, scope) = (choice, curve, gamut, scope)
         let sourceRec709 = ExportChoice.sourceRec709(take)
         let url = take.url
         previewGeneration += 1
         let generation = previewGeneration
+        let existing = previewExporter.flatMap { exporter in previewComposition.map { (exporter, $0) } }
         Task.detached(priority: .userInitiated) {
             do {
                 let look = chosen.previewLook(curve: takeCurve, gamut: takeGamut, sourceRec709: sourceRec709)
-                guard let exporter = LookExporter(look: look) else { throw LookExporter.Failure.gpu }
-                let composition = try await LookPlayback.composition(for: AVURLAsset(url: url), exporter: exporter, scope: scope)
+                var made: (LookExporter, AVVideoComposition)?
+                if existing == nil {
+                    guard let exporter = LookExporter(look: look) else { throw LookExporter.Failure.gpu }
+                    let composition = try await LookPlayback.composition(
+                        for: AVURLAsset(url: url), exporter: exporter, scope: scope)
+                    made = (exporter, composition)
+                }
+                let fresh = made
                 await MainActor.run {
+                    // Only the newest look reaches the exporter, however the builds finish.
                     guard generation == previewGeneration, let item = player.currentItem else { return }
-                    item.videoComposition = composition
+                    if let fresh {
+                        previewExporter = fresh.0
+                        previewComposition = fresh.1
+                    } else {
+                        previewExporter?.update(look: look)
+                    }
+                    guard let composition = previewComposition else { return }
+                    if fresh != nil || item.videoComposition == nil {
+                        // A new exporter only reaches the player with its own composition.
+                        item.videoComposition = composition
+                    } else if player.rate == 0, let copy = composition.mutableCopy() as? AVVideoComposition {
+                        // Playing frames pick up the new look by themselves; a paused one only
+                        // redraws for a composition it hasn't seen, so it gets a copy of the same.
+                        item.videoComposition = copy
+                    }
                     if player.rate == 0 {
                         player.seek(to: player.currentTime(), toleranceBefore: .zero, toleranceAfter: .zero)
                     }
@@ -361,6 +389,9 @@ struct ExportView: View {
         previewGeneration += 1
         previewReady = false
         player.replaceCurrentItem(with: nil)
+        // Its full-size textures would sit beside the export's own.
+        previewExporter = nil
+        previewComposition = nil
         job.start(take: take, choice: choice)
     }
 
@@ -566,6 +597,8 @@ final class LookExportJob: ObservableObject {
         var metadata = take.info?.metadata ?? [:]
         metadata["look"] = lookLabel
         metadata["fileTag"] = fileTag.label
+        // The take's own note says its tag is nominal, which an export's isn't.
+        metadata["note"] = "The look is baked in, and the file's tags describe it."
         metadata["exportedFrom"] = take.url.lastPathComponent
         metadata["exportFormat"] = format
         let rate = take.info?.metadata["frameRate"].flatMap(Double.init) ?? 30
@@ -603,6 +636,8 @@ final class LookExportJob: ObservableObject {
         try await joinAudio(video: scratch, from: take.url, into: destination)
         trace.begin("writing the sidecar")
         result.file = name
+        // The encoder wrote video alone; the take's audio was copied in after, as it was recorded.
+        result.audioSamplesWritten = take.info?.audioSamplesWritten ?? 0
         do {
             try JSONEncoder().encode(result).write(to: TakeLibrary.sidecar(for: destination))
         } catch {

@@ -88,6 +88,7 @@ struct SettingsView: View {
     private static let peakingDetail = "High also marks softer detail."
     private static let guideDetail = "The shape the GUIDE tool marks. It never reaches the file."
     private static let desqueezeDetail = "Viewfinder only. The file stays squeezed."
+    private static let hdrViewfinderDetail = "While ACES 2.0's dynamic range is HDR PQ or HLG, the viewfinder shows the HDR picture at up to 1000 nits, using the screen's extra brightness, baked or not. Zebras, false color and peaking stay at SDR white. Off shows the SDR look."
     private static let hapticsDetail = "Ticks for dials, sliders, carousels and taps across the app. Off silences every one."
     private static let scopeDetail = "RGB and YRGB draw their channels in one waveform, mixing toward white where they agree. Off sets them side by side."
     private static let offsetDetail = "Baked into the file, in stops."
@@ -120,7 +121,8 @@ struct SettingsView: View {
     private static let desqueezeTerms = "anamorphic desqueeze squeeze lens " + desqueezeDetail
     private static let scopeTerms = "scope scopes waveform parade rgb yrgb overlay blend vectorscope histogram " + scopeDetail
     private static let hapticTerms = "haptics haptic vibration vibrate taptic feedback ticks " + hapticsDetail
-    private static let viewfinderTerms = [lookTerms, lutTerms, pauseTerms, peakingTerms, guideTerms, desqueezeTerms, scopeTerms, hapticTerms].joined(separator: " ")
+    private static let hdrViewfinderTerms = "hdr viewfinder edr extended dynamic range pq hlg brightness nits " + hdrViewfinderDetail
+    private static let viewfinderTerms = [lookTerms, lutTerms, pauseTerms, peakingTerms, guideTerms, desqueezeTerms, scopeTerms, hapticTerms, hdrViewfinderTerms].joined(separator: " ")
     private static let offsetTerms = "exposure offset stops brightness baked " + offsetDetail
     private static let bakeTerms = "bake baked look lut rec.709 file record prores hevc hdr pq hlg hdr10 dynamic range " + bakeDetail + proResDetail + rangeDetail
     private static let gamutTerms = "color colour space gamut native pair sync s-gamut3 s-gamut3.cine cine s-gamut s-log3 s-log2 arri wide logc3 logc4 awg3 awg4 canon cinema rec.2020 " + pairDetail
@@ -357,6 +359,9 @@ struct SettingsView: View {
             if matches(Self.hapticTerms) {
                 switchRow("Haptics", Self.hapticsDetail, isOn: $model.hapticsOn)
             }
+            if matches(Self.hdrViewfinderTerms) {
+                switchRow("HDR viewfinder", Self.hdrViewfinderDetail, isOn: $model.hdrViewfinder)
+            }
             if matches(Self.pauseTerms) {
                 switchRow("Freeze viewfinder during a take", Self.freezeDetail, isOn: $model.processing.pauseMonitorWhileRecording)
                 Picker(selection: $model.idlePauseMinutes) {
@@ -501,6 +506,13 @@ struct SettingsView: View {
                 NavigationLink("Color spaces and LUTs") { PairingView() }
             } footer: {
                 Text("Which color space each log curve records, and a viewfinder LUT for each. Kept in presets.")
+            }
+            Section {
+                NavigationLink("Lenses") {
+                    LensesView { dismiss() }
+                }
+            } footer: {
+                Text("This phone's lens profiles, from Apple's calibration. Kept on the phone, out of presets.")
             }
             Section {
                 NavigationLink("Diagnostics") {

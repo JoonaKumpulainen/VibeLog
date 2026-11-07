@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreVideo
+import VLCore
 
 /// Plays a take with a look, through the same decode and look step the export uses, so what plays
 /// is what the export writes. The take's own audio plays alongside.
@@ -69,9 +70,13 @@ final class LookInstruction: NSObject, AVVideoCompositionInstructionProtocol {
     }
 }
 
-/// Draws each frame on its own queue, one at a time, since the exporter reuses its log image.
+/// Draws each frame on one queue shared by every compositor, one at a time, since the exporter
+/// reuses its log image and a new composition can start a compositor while the last still draws.
 final class LookCompositor: NSObject, AVVideoCompositing {
-    private let queue = DispatchQueue(label: "VibeLog.lookPlayback", qos: .userInitiated)
+    private static let queue = DispatchQueue(label: "VibeLog.lookPlayback", qos: .userInitiated)
+    private var queue: DispatchQueue { Self.queue }
+    /// Failures are logged, but only the first few, since a broken look fails every frame.
+    private static var failuresLogged = 0
 
     var sourcePixelBufferAttributes: [String: any Sendable]? {
         [
@@ -103,6 +108,10 @@ final class LookCompositor: NSObject, AVVideoCompositing {
                 instruction.scope?.measure(output)
                 request.finish(withComposedVideoFrame: output)
             } catch {
+                if Self.failuresLogged < 5 {
+                    Self.failuresLogged += 1
+                    Log.shared.warn("Export preview couldn't draw a frame: \(error)")
+                }
                 request.finish(with: error)
             }
         }

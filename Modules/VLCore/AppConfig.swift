@@ -112,6 +112,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var scopeOverlaid = true
     /// Haptic ticks across the app.
     public var haptics = true
+    /// Shows ACES 2.0's HDR picture in the viewfinder when its dynamic range is HDR.
+    public var hdrViewfinder = true
     /// The screen's corner the scope sits in, whatever the hold: bottomLeft, bottomRight, topLeft or topRight.
     public var scopeCorner = "bottomLeft"
     /// The scope's size against its standard one, set with its resize handle.
@@ -184,6 +186,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         lookEffects = read(.lookEffects, defaults.lookEffects)
         scopeOverlaid = read(.scopeOverlaid, defaults.scopeOverlaid)
         haptics = read(.haptics, defaults.haptics)
+        hdrViewfinder = read(.hdrViewfinder, defaults.hdrViewfinder)
         scopeCorner = read(.scopeCorner, defaults.scopeCorner)
         scopeScale = read(.scopeScale, defaults.scopeScale)
         styles = read(.styles, defaults.styles)

@@ -956,6 +956,8 @@ struct ScopeOverlay: View {
 
     static let minimumScale = 0.6
     static let maximumScale = 2.5
+    /// How far the resize target's centre sits out past the scope's inner corner.
+    private static let handleReach = 16.0
     /// How far a touch moves before it's a drag rather than a tap.
     private static let slop: CGFloat = 10
 
@@ -1032,8 +1034,9 @@ struct ScopeOverlay: View {
             }
     }
 
-    /// At the corner facing the picture's middle, since the scope's own corner stays put. Dragging
-    /// it away from the scope's corner grows the scope, and toward it shrinks it.
+    /// An invisible round target at the corner facing the picture's middle, since the scope's own
+    /// corner stays put. Dragging it away from the scope's corner grows the scope, and toward it
+    /// shrinks it.
     private var resizeHandle: some View {
         let corner = model.scopeCorner
         let (x, y) = corner.signs
@@ -1050,15 +1053,13 @@ struct ScopeOverlay: View {
                 if let liveScale { model.scopeScale = liveScale }
                 liveScale = nil
             }
-        // The arrows point along the diagonal the handle moves on.
-        let symbol = x == y ? "arrow.up.left.and.arrow.down.right" : "arrow.up.right.and.arrow.down.left"
-        return Image(systemName: symbol)
-            .font(.system(size: 10, weight: .bold))
-            .foregroundStyle(Tokens.label)
-            .frame(width: 20, height: 20)
-            .background(Circle().fill(Color.black.opacity(0.6)))
-            .frame(width: 36, height: 36)
-            .contentShape(Rectangle())
+        // Nothing drawn: a round target 56 points across, centred just outside the scope's
+        // corner, so it's easy to catch without covering the scope.
+        let outward = CGFloat(Self.handleReach)
+        return Color.clear
+            .frame(width: 56, height: 56)
+            .contentShape(Circle())
+            .offset(x: -CGFloat(x) * outward, y: -CGFloat(y) * outward)
             .highPriorityGesture(resize)
             .haptic(.impact(weight: .light), trigger: model.scopeScale)
             .accessibilityHidden(true)
@@ -1348,7 +1349,7 @@ struct LookPanel: View {
                 Button(target == model.bakeTarget ? "\(target.label) ✓" : target.label) { model.bakeTarget = target }
             }
         } message: {
-            Text("What ACES 2.0 records when BAKE is on. HDR is 1000 nits in Rec.2020, as PQ for HDR10 or as HLG. The viewfinder shows SDR either way.")
+            Text("What ACES 2.0 records when BAKE is on. HDR is 1000 nits in Rec.2020, as PQ for HDR10 or as HLG. With HDR viewfinder on in Settings, the viewfinder shows HDR too.")
         }
     }
 

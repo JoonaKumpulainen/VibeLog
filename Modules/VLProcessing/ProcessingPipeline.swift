@@ -254,6 +254,9 @@ private struct MonitorParams {
     var toRec709Row0: SIMD4<Float>
     var toRec709Row1: SIMD4<Float>
     var toRec709Row2: SIMD4<Float>
+    /// 0 draws SDR, 1 draws SDR into the HDR viewfinder as PQ at reference white, 2 draws the
+    /// HDR look's PQ codes as they are, with only the overlays moved to reference white.
+    var hdr: UInt32 = 0
 
     /// Fills the decode the viewfinder does in the shader, for a curve in its gamut.
     mutating func setDisplay(curve: LogCurve, gamut: Gamut) {
@@ -376,6 +379,9 @@ public final class ProcessingPipeline: NSObject {
     private let packedState: MTLComputePipelineState
     private let directPackedState: MTLComputePipelineState
     private let monitorState: MTLRenderPipelineState
+    /// The same draw into the HDR viewfinder's 10-bit PQ drawable.
+    private let monitorStateHDR: MTLRenderPipelineState
+    static let hdrPixelFormat = MTLPixelFormat.bgr10a2Unorm
     private let encodeQueue = DispatchQueue(label: "vibelog.process", qos: .userInitiated)
     private var textureCache: CVMetalTextureCache?
     private weak var view: MTKView?
@@ -402,6 +408,9 @@ public final class ProcessingPipeline: NSObject {
     /// A look only takes record, such as HDR, while the viewfinder shows the SDR one.
     private var bakeLUT: CustomLUT?
     private var customLUT: CustomLUT?
+    /// ACES 2.0 at 1000 nits as PQ in Rec.2020, which the HDR viewfinder shows in place of the
+    /// SDR look while the view's drawable is PQ.
+    private var monitorHDR: CustomLUT?
     private var stats = PipelineStats()
     private var gpuTotalMs = 0.0
     private var stillRequest: ((ProcessedStill?) -> Void)?
@@ -450,6 +459,8 @@ public final class ProcessingPipeline: NSObject {
             descriptor.fragmentFunction = library.makeFunction(name: "monitorFragment")
             descriptor.colorAttachments[0].pixelFormat = pixelFormat
             monitorState = try device.makeRenderPipelineState(descriptor: descriptor)
+            descriptor.colorAttachments[0].pixelFormat = Self.hdrPixelFormat
+            monitorStateHDR = try device.makeRenderPipelineState(descriptor: descriptor)
             // Made here, since both the encode queue and the viewfinder bind it.
             let empty = MTLTextureDescriptor()
             empty.textureType = .type3D
@@ -521,6 +532,29 @@ public final class ProcessingPipeline: NSObject {
         if !value.isNeutral, effectsKit == nil { effectsKit = EffectsKit(device: device) }
         effects = value
         lock.unlock()
+    }
+
+    /// Shows the HDR look through the screen's extended range, or the SDR viewfinder with nil. The
+    /// view switches to a 10-bit drawable tagged PQ, which iOS maps to the screen's headroom, on
+    /// the main queue where it draws, so a draw never sees the LUT and the drawable disagree.
+    public func setMonitorHDR(_ lut: CubeLUT?) {
+        var custom: CustomLUT?
+        if let lut, let texture = lutTexture(for: lut) {
+            custom = CustomLUT(texture: texture, lut: lut, expectsRec709: false)
+        }
+        DispatchQueue.main.async { [self] in
+            lock.lock()
+            monitorHDR = custom
+            lock.unlock()
+            guard let view else { return }
+            let hdr = custom != nil
+            let format: MTLPixelFormat = hdr ? Self.hdrPixelFormat : .bgra8Unorm
+            if view.colorPixelFormat != format { view.colorPixelFormat = format }
+            if let layer = view.layer as? CAMetalLayer {
+                layer.wantsExtendedDynamicRangeContent = hdr
+                layer.colorspace = hdr ? CGColorSpace(name: CGColorSpace.itur_2100_PQ) : nil
+            }
+        }
     }
 
     /// The LUT baked takes record when it differs from the viewfinder's, as an HDR look does, or
@@ -1188,7 +1222,10 @@ extension ProcessingPipeline: MTKViewDelegate {
         drawScheduled = false
         let image = latest
         let current = settings
-        let custom = customLUT
+        // The drawable decides HDR: both change together on this queue.
+        let hdrOut = view.colorPixelFormat == Self.hdrPixelFormat
+        let hdrLook = hdrOut && settings.monitor == .rec709 ? monitorHDR : nil
+        let custom = hdrLook ?? customLUT
         let viewOrigin = monitorOrigin
         let viewScale = monitorScale
         let peaking = monitorPeaking
@@ -1233,9 +1270,10 @@ extension ProcessingPipeline: MTKViewDelegate {
             // drawable's height.
             peakStep: SIMD2(1 / Float(view.drawableSize.height), 1 / Float(view.drawableSize.width)),
             peakThreshold: current.peakingSensitivity.threshold, desqueeze: Float(current.desqueeze),
-            curve: 0, toRec709Row0: .zero, toRec709Row1: .zero, toRec709Row2: .zero)
+            curve: 0, toRec709Row0: .zero, toRec709Row1: .zero, toRec709Row2: .zero,
+            hdr: hdrLook != nil ? 2 : hdrOut ? 1 : 0)
         parameters.setDisplay(curve: current.curve, gamut: current.gamut)
-        encoder.setRenderPipelineState(monitorState)
+        encoder.setRenderPipelineState(hdrOut ? monitorStateHDR : monitorState)
         encoder.setFragmentTexture(image, index: 0)
         encoder.setFragmentTexture(custom?.texture ?? placeholder, index: 2)
         encoder.setFragmentBytes(&parameters, length: MemoryLayout<MonitorParams>.stride, index: 0)
