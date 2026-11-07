@@ -1,0 +1,38 @@
+{
+  "name": "VibeLog",
+  "identifier": "io.github.joonakumpulainen.vibelog.source",
+  "sourceURL": "https://raw.githubusercontent.com/JoonaKumpulainen/VibeLog/sidestore-source/source.json",
+  "iconURL": "https://raw.githubusercontent.com/JoonaKumpulainen/VibeLog/main/tools/sidestore/icon.png",
+  "apps": [
+    {
+      "name": "VibeLog",
+      "bundleIdentifier": "io.github.joonakumpulainen.vibelog",
+      "developerName": "JoonaKumpulainen",
+      "subtitle": "RAW log video for iPhone 14 Pro",
+      "localizedDescription": "Records 12 MP RAW frames as log video in ProRes or HEVC, built by CI from main.",
+      "iconURL": "https://raw.githubusercontent.com/JoonaKumpulainen/VibeLog/main/tools/sidestore/icon.png",
+      "tintColor": "#F2A900",
+      "category": "photo-video",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "buildVersion": "88",
+          "date": "2026-11-07T16:16:40Z",
+          "localizedDescription": "Build 88, 7d8dbed: Guard the ACES LUT's measured error rather than a bound it can't meet",
+          "downloadURL": "https://github.com/JoonaKumpulainen/VibeLog/releases/download/sidestore/VibeLog.ipa",
+          "size": 2061596,
+          "minOSVersion": "17.0"
+        }
+      ],
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {
+          "NSCameraUsageDescription": "VibeLog reads the camera sensor to record RAW frames.",
+          "NSLocalNetworkUsageDescription": "The test link in Diagnostics talks to your own computer.",
+          "NSMicrophoneUsageDescription": "VibeLog records sound with your video."
+        }
+      }
+    }
+  ],
+  "news": []
+}
