@@ -145,16 +145,20 @@ static inline float vignetteGain(float2 p, int2 size, constant ProcessParams &u)
 }
 
 // White-balanced camera RGB to log Rec.2020, with the lens shading gain at the pixel.
+static inline float3 cameraToLinear(float3 rgb, constant ProcessParams &u, float gain) {
+    return float3(dot(u.matrixRow0.xyz, rgb), dot(u.matrixRow1.xyz, rgb),
+                  dot(u.matrixRow2.xyz, rgb)) * (u.exposure * gain);
+}
+
 static inline float3 cameraToLog(float3 rgb, constant ProcessParams &u, float gain) {
-    float3 linear = float3(dot(u.matrixRow0.xyz, rgb), dot(u.matrixRow1.xyz, rgb),
-                           dot(u.matrixRow2.xyz, rgb)) * (u.exposure * gain);
+    float3 linear = cameraToLinear(rgb, u, gain);
     return float3(encodeLog(linear.r, u.curve), encodeLog(linear.g, u.curve),
                   encodeLog(linear.b, u.curve));
 }
 
 // Debayers with Malvar-He-Cutler (demosaic 0) or bilinear (demosaic 1), converts to linear
 // Rec.2020, applies exposure and encodes log.
-static inline float3 logPixel(texture2d<ushort, access::read> raw, int2 p, int2 size,
+static inline float3 cameraPixel(texture2d<ushort, access::read> raw, int2 p, int2 size,
                               constant ProcessParams &u) {
     bool redRow = (uint(p.y) & 1) == u.redOffset.y;
     bool redColumn = (uint(p.x) & 1) == u.redOffset.x;
@@ -198,7 +202,20 @@ static inline float3 logPixel(texture2d<ushort, access::read> raw, int2 p, int2 
     } else {
         rgb = float3(inColumn, center, inRow);
     }
-    return cameraToLog(min(rgb, float3(u.clip)), u, vignetteGain(float2(p) + 0.5, size, u));
+    return min(rgb, float3(u.clip));
+}
+
+// The pixel debayered, as log in the recorded gamut.
+static inline float3 logPixel(texture2d<ushort, access::read> raw, int2 p, int2 size,
+                              constant ProcessParams &u) {
+    return cameraToLog(cameraPixel(raw, p, size, u), u, vignetteGain(float2(p) + 0.5, size, u));
+}
+
+// The pixel debayered, as linear light in the recorded gamut, before the curve: where the direct
+// kernels apply baked FX, so they encode the curve once rather than decode and encode it again.
+static inline float3 linearPixel(texture2d<ushort, access::read> raw, int2 p, int2 size,
+                                 constant ProcessParams &u) {
+    return cameraToLinear(cameraPixel(raw, p, size, u), u, vignetteGain(float2(p) + 0.5, size, u));
 }
 
 kernel void processRaw(texture2d<ushort, access::read> raw [[texture(0)]],
@@ -366,10 +383,9 @@ static inline float3 glowSource(float3 linear) {
 // glow, and diffusion a soft mist like a filter on the lens, lifting shadows toward the light
 // around them and glowing highlights. Vignette darkens or lightens the corners, and grain is
 // noise that follows brightness, at the size of a sensor pixel.
-static inline float3 applyEffects(float3 logColor, float2 uv, float2 pixel, texture2d<float, access::sample> glow,
-                                  constant EffectsParams &e) {
+static inline float3 applyEffectsLinear(float3 linear, float2 uv, float2 pixel, texture2d<float, access::sample> glow,
+                                        constant EffectsParams &e) {
     constexpr sampler linearSampler(filter::linear, address::clamp_to_edge);
-    float3 linear = decodeLog3(saturate(logColor), e.curve);
     float4 soft = glow.sample(linearSampler, uv);
     float3 halo = soft.rgb;
     linear += halo * e.bloom * 3.0;
@@ -387,7 +403,22 @@ static inline float3 applyEffects(float3 logColor, float2 uv, float2 pixel, text
         float y = max(rec2020Luma(linear), 0.0);
         linear *= 1.0 + noise * e.grain * 0.5 * rsqrt(y + 0.02) * 0.12;
     }
+    return linear;
+}
+
+static inline float3 applyEffects(float3 logColor, float2 uv, float2 pixel, texture2d<float, access::sample> glow,
+                                  constant EffectsParams &e) {
+    float3 linear = applyEffectsLinear(decodeLog3(saturate(logColor), e.curve), uv, pixel, glow, e);
     return saturate(encodeLog3(max(linear, 0.0), e.curve));
+}
+
+// The direct kernels' pixel, from linear light: the FX on it when baked, then the curve once.
+static inline float3 directColor(float3 linear, int2 at, int2 size, texture2d<float, access::sample> glow,
+                                 constant EffectsParams &e, uint curve) {
+    // Without FX, exactly as before: the curve takes negative light as it always has.
+    if (e.enabled == 0) return saturate(encodeLog3(linear, curve));
+    float3 shown = applyEffectsLinear(linear, (float2(at) + 0.5) / float2(size), float2(at), glow, e);
+    return saturate(encodeLog3(max(shown, 0.0), curve));
 }
 
 // The log colour a take records at `uv` of the log image, with the FX on it when they're baked:
@@ -446,7 +477,7 @@ kernel void processDirect(texture2d<ushort, access::read> raw [[texture(0)]],
         for (uint x = 0; x < d.chromaStep.x; x++) {
             uint2 target = gid * d.chromaStep + uint2(x, y);
             int2 at = int2(target) + d.sourceOrigin;
-            float3 rgb = takeColor(logPixel(raw, at, size, u), (float2(at) + 0.5) / float2(size), float2(size), glow, e);
+            float3 rgb = directColor(linearPixel(raw, at, size, u), at, size, glow, e, u.curve);
             total += rgb;
             luma.write(float4(msbAligned(videoCodes(lookColor(rgb, k, lut), k).x)), target);
         }
@@ -489,7 +520,7 @@ kernel void processDirectPacked(texture2d<ushort, access::read> raw [[texture(0)
                                 uint2 gid [[thread_position_in_grid]]) {
     int2 size = int2(raw.get_width(), raw.get_height());
     int2 at = int2(gid) + d.sourceOrigin;
-    float3 rgb = takeColor(logPixel(raw, at, size, u), (float2(at) + 0.5) / float2(size), float2(size), glow, e);
+    float3 rgb = directColor(linearPixel(raw, at, size, u), at, size, glow, e, u.curve);
     packed.write(packedPixel(rgb, k, lut), gid);
 }
 

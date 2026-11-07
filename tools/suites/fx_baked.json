@@ -1,0 +1,7 @@
+[
+  {"cool": 30},
+  {"set": {"lens": "1x", "pipeline": "maximum", "efficientWhenHot": true, "bilinearWhenHot": false, "uncompressedAudio": true, "distortionCorrection": false, "fixedFrameTime": true, "shutter": "auto", "tools": "falseColor,peaking,grid,center,level,frameGuide", "hdrViewfinder": false, "vignetteCorrection": false, "fineLookLUT": false}},
+  {"set": {"look": "rec709", "lut": "ACES 2.0", "bakeTarget": "sdr", "bakeLook": true, "codec": "hevc420", "effects": "halation=0.5,bloom=0.5,diffusion=0.3,grain=0.3", "bakeEffects": true}},
+  {"take": 600, "gbPerSecond": 0.03, "label": "FX baked into an SDR HEVC take, as fx_cost otherwise"},
+  {"set": {"bakeEffects": false, "bakeLook": false, "effects": "none", "codec": "prores422hq", "bakeTarget": "pq", "hdrViewfinder": true, "vignetteCorrection": true}}
+]

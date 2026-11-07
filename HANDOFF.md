@@ -432,6 +432,9 @@ Step 2 of the plan below, batched with the export player's rotation fix. `b75941
   - **Crop moves:** the 5-second take exported to 1920 wide at 16:9 with `shift=-1` matched the source's top, row 0 of 360 by gradient correlation, and with `shift=1` its bottom, 360 of 360.
 - **Baked FX keep the full path:** `process()` uses the direct kernels only when no FX are baked. Not built.
 
+- **Baked FX on the full path, a long take, failed hot:** `tools/suites/fx_baked.json` on `b76befc`, charging from 95%, after 30 minutes' cooling: an SDR HEVC take baked with ACES 2.0 and halation and bloom +50, diffusion and grain +30, kept on Maximum since the last fix. GPU 19 to 22 ms a frame at nominal and fair, about 1.5 ms over the viewfinder-only FX take, with nothing lost; serious at 1:47, sooner than the 4:00 unplugged, then 44 ms and from 4:00 56 to 58 ms, `draw` 26 to 36 ms. Stopped at 5:52 with 8,150 frames written at 23.21 fps and 2,381 lost at the GPU. So the cost is the full path when hot, not the FX: the Efficient path held 30 ms at serious with FX on the viewfinder only. The `test_server.py` suite check now takes a take's own `gbPerSecond`, for HEVC.
+- **FX in linear in the direct kernels:** the Efficient kernels had baked FX decode the log they'd just encoded, then encode it again, six transcendental curves a pixel on top of the debayer, which likely cost them their occupancy, 43 ms a frame. `logPixel` is now `cameraPixel` (debayer and clip) with `logPixel` and `linearPixel` over it, `applyEffects` is `applyEffectsLinear` with the decode and encode around it, and `directColor` applies the FX to the debayer's own linear light, then encodes the curve once; without FX it encodes exactly as before. Baked FX take the direct kernels again when hot. Not built.
+
 ### Still to build
 
 - **FX in baked takes: the long take** with them on, against `fx_cost`.

@@ -300,6 +300,7 @@ class Suite:
         {"set": {"lens": "1x", "tools": "none"}}
         {"take": 20, "label": "ultra wide"}
         {"cool": 30}    stops the stream, waits at least that many minutes and for nominal heat
+        {"take": 600, "gbPerSecond": 0.03}   a take's storage rate, when it isn't ProRes 422 HQ's
         {"wait": 5}     seconds
         {"export": {"look": "ACES 2.0", "target": "sdr", "codec": "hevc420"}, "label": "S-Log3"}
                         bakes the newest take in log, as the export screen would
@@ -436,7 +437,8 @@ class Suite:
             sys.exit(f"The phone is on {values.get('screen')}. Return it to the camera screen first")
         if values.get("busy"):
             sys.exit(f"The phone is busy: {values['busy']}")
-        needed = sum(step.get("take", 0) for step in steps) * GB_PER_SECOND + PHONE_FLOOR_GB
+        # ProRes 422 HQ's rate, unless a take says its own, as a baked HEVC take's 0.03 GB a second.
+        needed = sum(step.get("take", 0) * step.get("gbPerSecond", GB_PER_SECOND) for step in steps) + PHONE_FLOOR_GB
         if float(values.get("freeGB", 0)) < needed:
             sys.exit(f"The phone needs about {needed:.0f} GB free and has {values.get('freeGB')} GB")
 
