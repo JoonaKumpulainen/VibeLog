@@ -2295,6 +2295,8 @@ final class LookGradeTests: XCTestCase {
             }
         }
         print("NaN trace found \(found) points")
+        // CI run 90 traced it to gamut compression at J exactly 100, now held at zero.
+        XCTAssertEqual(found, 0)
         let lut = BuiltInLook.aces20.lut(curve: curve, gamut: gamut, grade: grade, size: size)
         XCTAssertTrue(lut.samples.allSatisfy { $0.x.isFinite && $0.y.isFinite && $0.z.isFinite })
     }

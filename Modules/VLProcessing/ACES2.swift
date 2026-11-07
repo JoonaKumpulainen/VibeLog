@@ -6,7 +6,9 @@
 //
 // The full BSD 3-Clause terms are in LICENSES/OpenColorIO-BSD-3-Clause.txt. The algorithm is the
 // Academy's ACES 2.0 Output Transform, under the Apache License 2.0 in LICENSES/ACES-Apache-2.0.txt.
-// Changes from the original: translated to Swift, with only the forward SDR path kept. Names
+// Changes from the original: translated to Swift, with only the forward SDR path kept, and
+// lineBoundaryIntersectionM holds its normalised J at zero or above, where float rounding at the
+// peak made a NaN. Names
 // follow the original so the two can be compared line by line.
 
 import Foundation
@@ -708,7 +710,10 @@ struct ACES2OutputTransform {
     @inline(__always) static func lineBoundaryIntersectionM(
         _ jAxisIntersect: Float, _ slope: Float, _ invGamma: Float, _ jMax: Float, _ mMax: Float, _ jReference: Float
     ) -> Float {
-        let normalisedJ = jAxisIntersect / jReference
+        // At the peak, J's distance to the top can round a hair below zero, and a fractional power
+        // of that isn't a number: a bright saturated green graded +2 stops did. Held at zero, the
+        // upper boundary closes and the colour compresses to white, as it should there.
+        let normalisedJ = max(jAxisIntersect / jReference, 0)
         let shifted = jReference * powf(normalisedJ, invGamma)
         return shifted * mMax / (jMax - slope * mMax)
     }
