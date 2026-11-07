@@ -98,6 +98,21 @@ public enum BuiltInLook: String, CaseIterable, Sendable {
         makeLUT(curve: curve, gamut: gamut, grade: grade, size: size, display: MonitorTransform.display(linearRec2020:))
     }
 
+    /// A take's log turned into another curve and gamut, as a LUT on log, for writing log again,
+    /// such as Apple Log 2 into S-Log3 in S-Gamut3.Cine for an S-Log3 grade. The grade, if any, is
+    /// applied in scene-linear between. Values outside the target curve's range are held at its ends.
+    public static func logConversion(
+        curve: LogCurve, gamut: Gamut, to targetCurve: LogCurve, in targetGamut: Gamut,
+        grade: LookGrade = LookGrade(), size: Int = 65
+    ) -> CubeLUT {
+        let fromRec2020 = targetGamut.fromRec2020
+        return makeLUT(curve: curve, gamut: gamut, grade: grade, size: size) { linear in
+            let native = fromRec2020 * linear
+            func encode(_ value: Double) -> Double { min(max(targetCurve.encode(value), 0), 1) }
+            return SIMD3(encode(native.x), encode(native.y), encode(native.z))
+        }
+    }
+
     /// An imported LUT with a grade under it, as one LUT on log, so the GPU still does one lookup.
     /// Each grid point is decoded, graded in scene-linear and encoded back to the curve, then,
     /// through the Rec.709 view if the LUT was made for it, looked up in the imported LUT. Grading

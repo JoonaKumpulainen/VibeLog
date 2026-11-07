@@ -104,6 +104,13 @@ extension AppModel {
             case "crop":
                 guard let crop = ExportCrop(rawValue: pair[1]) else { return "crop takes none, wide or tall" }
                 choice.crop = crop
+            case "log":
+                // A curve's label, which pairs it with its own gamut, or curve/gamut by label.
+                let names = pair[1].split(separator: "/").map(String.init)
+                guard let target = ExportChoice.LogTarget.all.first(where: {
+                    $0.curve.label == names[0] && (names.count == 1 ? $0.gamut == $0.curve.nativeGamut : $0.gamut.label == names[1])
+                }) else { return "log takes a curve's label, such as S-Log3, or curve/gamut, such as S-Log3/S-Gamut3" }
+                choice.logTarget = target
             case "effects":
                 // As the effects setting takes them: none, or halation=1,bloom=0.5 and so on.
                 for effect in pair[1].split(separator: ",") where pair[1] != "none" {
@@ -291,9 +298,9 @@ extension AppModel {
             "pipeline": processing.pipeline.rawValue, "tools": toolsLabel,
             "fixedFrameTime": String(fixedFrameTime), "uncompressedAudio": String(pcmAudio),
             "stereoAudio": String(stereoAudio),
-            "distortionCorrection": String(distortionCorrection), "twelveBitProRes": String(twelveBitProRes),
+            "distortionCorrection": String(distortionCorrection), "vignetteCorrection": String(processing.vignetteCorrection), "twelveBitProRes": String(twelveBitProRes),
             "bakeLook": String(bakeLook), "bakeToProRes": String(bakeToProRes), "bakeTarget": bakeTarget.rawValue,
-            "effects": lookEffects.label, "scopeOverlaid": String(scopeOverlaid), "hdrViewfinder": String(hdrViewfinder), "hdrShown": String(showsHDRViewfinder), "fileTagWritten": takeFileTag.label, "grade": lookGrade.label, "style": currentStyleChoice.map { String($0.dropFirst(Self.stylePrefix.count)) } ?? "",
+            "effects": lookEffects.label, "scopeOverlaid": String(scopeOverlaid), "hdrViewfinder": String(hdrViewfinder), "fineLookLUT": String(fineLookLUT), "hdrShown": String(showsHDRViewfinder), "fileTagWritten": takeFileTag.label, "grade": lookGrade.label, "style": currentStyleChoice.map { String($0.dropFirst(Self.stylePrefix.count)) } ?? "",
             "efficientWhenHot": String(processing.efficientWhenHot), "isoAuto": String(isoAuto),
             "bilinearWhenHot": String(processing.bilinearWhenHot),
             "yields": String(pipelineStats.monitorYields),
@@ -348,6 +355,7 @@ extension AppModel {
         case "captureTiming": return flag { logCaptureTiming = $0 }
         case "fixedFrameTime": return flag { fixedFrameTime = $0 }
         case "distortionCorrection": return flag { distortionCorrection = $0 }
+        case "vignetteCorrection": return flag { processing.vignetteCorrection = $0 }
         case "twelveBitProRes": return flag { twelveBitProRes = $0 }
         case "bakeLook": return flag { bakeLook = $0 }
         case "bakeToProRes": return flag { bakeToProRes = $0 }
@@ -356,6 +364,7 @@ extension AppModel {
             return pick(BakeTarget.allCases, \.rawValue) { bakeTarget = $0 }
         case "scopeOverlaid": return flag { scopeOverlaid = $0 }
         case "hdrViewfinder": return flag { hdrViewfinder = $0 }
+        case "fineLookLUT": return flag { fineLookLUT = $0 }
         case "effects":
             // "none", or names and values such as bloom=0.5,grain=0.3, from the FX sliders' ranges.
             guard !isRecording else { return "effects can't change during a take" }

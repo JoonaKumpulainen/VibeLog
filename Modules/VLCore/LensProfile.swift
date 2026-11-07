@@ -35,13 +35,17 @@ public struct LensProfile: Codable, Equatable, Sendable {
     public var captures: Int?
     public var centreSpread: Double?
     public var focalSpread: Double?
+    /// The lens position, 0 near to 1 far, focus was held at while measured.
+    public var focusPosition: Double?
 
     public init(
         model: String, lens: String, width: Int, height: Int, fx: Double, fy: Double, cx: Double, cy: Double,
         distortionCenterX: Double? = nil, distortionCenterY: Double? = nil, distortionTable: [Double] = [],
         pixelSize: Double? = nil, fieldOfView: Double, correctedFieldOfView: Double? = nil, source: String,
-        measured: String, captures: Int? = nil, centreSpread: Double? = nil, focalSpread: Double? = nil
+        measured: String, captures: Int? = nil, centreSpread: Double? = nil, focalSpread: Double? = nil,
+        focusPosition: Double? = nil
     ) {
+        self.focusPosition = focusPosition
         self.captures = captures
         self.centreSpread = centreSpread
         self.focalSpread = focalSpread

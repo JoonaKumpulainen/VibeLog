@@ -58,7 +58,8 @@ public enum LensCalibrator {
                         distortionTable: average.table, pixelSize: average.pixelSize,
                         fieldOfView: field?.fov ?? 0, correctedFieldOfView: field?.corrected,
                         source: "Apple's calibration, from \(virtual.rawValue) with depth", measured: measured,
-                        captures: group.count, centreSpread: centreSpread, focalSpread: focalSpread))
+                        captures: group.count, centreSpread: centreSpread, focalSpread: focalSpread,
+                        focusPosition: average.focus))
                     Log.shared.info(String(
                         format: "Lenses: %@ from %ld captures, fx %.2f within %.2f%%, centre (%.1f, %.1f) within %.1f px",
                         from, group.count, average.fx, focalSpread * 100, average.cx, average.cy, centreSpread))
@@ -121,6 +122,8 @@ public enum LensCalibrator {
         var centerX, centerY: Double
         var table: [Double]
         var pixelSize: Double
+        /// The lens position, 0 to 1, it was held at while measured, if it could be.
+        var focus: Double?
 
         /// The mean of each value, the tables point by point where their lengths agree.
         static func average(_ group: [Found]) -> Found {
@@ -133,7 +136,8 @@ public enum LensCalibrator {
             return Found(
                 source: group[0].source, width: group[0].width, height: group[0].height,
                 fx: mean(\.fx), fy: mean(\.fy), cx: mean(\.cx), cy: mean(\.cy),
-                centerX: mean(\.centerX), centerY: mean(\.centerY), table: table, pixelSize: mean(\.pixelSize))
+                centerX: mean(\.centerX), centerY: mean(\.centerY), table: table, pixelSize: mean(\.pixelSize),
+                focus: group.compactMap(\.focus).first)
         }
     }
 
@@ -156,7 +160,11 @@ public enum LensCalibrator {
             _ = VLTryCatch { photo.isDepthDataDeliveryEnabled = true }
         }
         session.startRunning()
+        // The tele's focal length moved 2.4% between sessions, likely with focus, so each lens is
+        // held at its farthest focus while measured, and the position kept with the profile.
+        let held = holdFocus(device)
         defer {
+            release(held)
             session.stopRunning()
             session.removeInput(input)
         }
@@ -174,7 +182,35 @@ public enum LensCalibrator {
         if catcher.done.wait(timeout: .now() + 10) == .timedOut {
             Log.shared.warn("Lenses: \(device.localizedName) timed out")
         }
-        return catcher.found
+        return catcher.found.map { found in
+            var found = found
+            found.focus = held.first { $0.deviceType == found.source }.map { Double($0.lensPosition) }
+            return found
+        }
+    }
+
+    /// Locks each lens of a virtual camera at its farthest focus, waiting until it's there, and
+    /// returns the ones it locked.
+    private static func holdFocus(_ device: AVCaptureDevice) -> [AVCaptureDevice] {
+        let lenses = device.constituentDevices.isEmpty ? [device] : device.constituentDevices
+        var locked: [AVCaptureDevice] = []
+        for lens in lenses where lens.isLockingFocusWithCustomLensPositionSupported {
+            guard (try? lens.lockForConfiguration()) != nil else { continue }
+            let arrived = DispatchSemaphore(value: 0)
+            lens.setFocusModeLocked(lensPosition: 1.0) { _ in arrived.signal() }
+            lens.unlockForConfiguration()
+            _ = arrived.wait(timeout: .now() + 2)
+            locked.append(lens)
+        }
+        return locked
+    }
+
+    private static func release(_ lenses: [AVCaptureDevice]) {
+        for lens in lenses where lens.isFocusModeSupported(.continuousAutoFocus) {
+            guard (try? lens.lockForConfiguration()) != nil else { continue }
+            lens.focusMode = .continuousAutoFocus
+            lens.unlockForConfiguration()
+        }
     }
 
     private final class Catcher: NSObject, AVCapturePhotoCaptureDelegate {

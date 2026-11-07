@@ -82,6 +82,19 @@ struct ExportChoice: Sendable {
     var quality = ExportQuality.master
     var resolution = ExportResolution.full
     var crop = ExportCrop.none
+    /// A log curve and gamut to write the take as, in place of a look, or nil for a look.
+    var logTarget: LogTarget?
+
+    struct LogTarget: Hashable, Sendable {
+        var curve: LogCurve
+        var gamut: Gamut
+
+        var label: String { "\(curve.label) in \(gamut.label)" }
+
+        /// Each curve in its own gamut, and S-Log3 in S-Gamut3 too, as editors' inputs expect.
+        static let all: [LogTarget] = LogCurve.allCases.map { LogTarget(curve: $0, gamut: $0.nativeGamut) }
+            + [LogTarget(curve: .sLog3, gamut: .sGamut3)]
+    }
 
     static let codecs = ["hevc420", "prores422lt", "prores422", "prores422hq"]
 
@@ -125,11 +138,20 @@ struct ExportChoice: Sendable {
         return "\(preset.label)\(rate), \(width)x\(height)" + (crop == .none ? "" : ", cropped \(crop.label)")
     }
 
-    var hdr: BakeTarget? { lutName == BuiltInLook.aces20.name && target.isHDR ? target : nil }
+    var hdr: BakeTarget? { logTarget == nil && lutName == BuiltInLook.aces20.name && target.isHDR ? target : nil }
 
-    var fileTag: FileTag { hdr == .hlg ? .hlg : hdr == .pq ? .pq : .rec709 }
+    /// Log stays tagged Rec.2020, as takes are, since no tag names these curves.
+    var fileTag: FileTag { logTarget != nil ? .rec2020 : hdr == .hlg ? .hlg : hdr == .pq ? .pq : .rec709 }
 
     var label: String {
+        if let logTarget {
+            let graded = grade.isNeutral ? "" : ", graded (\(grade.label))"
+            return "converted to \(logTarget.label)\(graded)"
+        }
+        return lookLabel
+    }
+
+    private var lookLabel: String {
         let graded = (grade.isNeutral ? "" : ", graded (\(grade.label))")
             + (effects.isNeutral ? "" : ", effects (\(effects.label))")
         let lutLabel = lutName.isEmpty
@@ -188,6 +210,16 @@ struct ExportChoice: Sendable {
     }
 
     private func gradedLook(curve: LogCurve, gamut: Gamut, sourceRec709: Bool, size: Int) -> LookExporter.Look {
+        if let logTarget {
+            var look = LookExporter.Look(
+                curve: curve, gamut: gamut,
+                lut: BuiltInLook.logConversion(
+                    curve: curve, gamut: gamut, to: logTarget.curve, in: logTarget.gamut, grade: grade, size: size),
+                lutExpectsRec709: false, sourceRec709: sourceRec709)
+            // Log is written in Rec.2020's YCbCr matrix, as takes are; this flag gives that matrix.
+            look.hdr = true
+            return look
+        }
         if let builtIn = BuiltInLook.named(lutName) {
             return LookExporter.Look(
                 curve: curve, gamut: gamut, lut: builtIn.lut(curve: curve, gamut: gamut, grade: grade, size: size),

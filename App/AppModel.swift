@@ -135,6 +135,11 @@ final class AppModel: ObservableObject {
         didSet { if hdrViewfinder != oldValue { buildLook() } }
     }
 
+    /// Builds the camera's look at 129 points rather than 65, for the viewfinder and baked takes.
+    @Published var fineLookLUT = false {
+        didSet { if fineLookLUT != oldValue { buildLook() } }
+    }
+
     var showsHDRViewfinder: Bool {
         hdrViewfinder && bakeTarget.isHDR && selectedLUT == BuiltInLook.aces20.name && processing.monitor == .rec709
     }
@@ -646,6 +651,7 @@ final class AppModel: ObservableObject {
         config.exposureOffset = processing.exposureStops
         config.reduceLoadWhenHot = processing.reduceLoadWhenHot
         config.bilinearWhenHot = processing.bilinearWhenHot
+        config.vignetteCorrection = processing.vignetteCorrection
         config.idlePauseMinutes = idlePauseMinutes
         config.monitor = processing.monitor.rawValue
         config.monitorLUT = selectedLUT
@@ -678,6 +684,7 @@ final class AppModel: ObservableObject {
         config.scopeOverlaid = scopeOverlaid
         config.haptics = hapticsOn
         config.hdrViewfinder = hdrViewfinder
+        config.fineLookLUT = fineLookLUT
         config.scopeCorner = scopeCorner.rawValue
         config.scopeScale = scopeScale
         config.testServer = testServer
@@ -732,6 +739,7 @@ final class AppModel: ObservableObject {
         processing.exposureStops = saved.exposureOffset
         processing.reduceLoadWhenHot = saved.reduceLoadWhenHot
         processing.bilinearWhenHot = saved.bilinearWhenHot
+        processing.vignetteCorrection = saved.vignetteCorrection
         idlePauseMinutes = saved.idlePauseMinutes
         processing.monitor = MonitorMode(rawValue: saved.monitor) ?? processing.monitor
         if saved.monitorLUT.isEmpty || isAvailableLook(saved.monitorLUT) { selectedLUT = saved.monitorLUT }
@@ -763,6 +771,7 @@ final class AppModel: ObservableObject {
         scopeOverlaid = saved.scopeOverlaid
         hapticsOn = saved.haptics
         hdrViewfinder = saved.hdrViewfinder
+        fineLookLUT = saved.fineLookLUT
         scopeCorner = ScreenCorner(rawValue: saved.scopeCorner) ?? .bottomLeft
         scopeScale = saved.scopeScale
     }
@@ -1129,7 +1138,15 @@ final class AppModel: ObservableObject {
     /// and an imported LUT with the grade folded in front of it. Ungraded, the Rec.709 view needs
     /// no LUT and an imported one goes as read. Ungraded built-in looks are kept for the session;
     /// graded ones change too often while a slider moves.
-    private func buildLook(grade override: LookGrade? = nil, size: Int = 65) {
+    /// A finished look's LUT size in the camera: 65, or 129 with **Fine look LUT**, which CI run 90
+    /// measured at about a quarter of the error between grid points but which the GPU reads from a
+    /// texture eight times larger during takes, unmeasured.
+    var lookLUTSize: Int { fineLookLUT ? 129 : 65 }
+
+    private func buildLook(grade override: LookGrade? = nil, size requested: Int? = nil) {
+        let size = requested ?? lookLUTSize
+        // A drag's preview builds small; only a finished build is kept or recorded.
+        let finished = requested == nil
         let name = selectedLUT
         let look = BuiltInLook.named(name)
         let grade = override ?? lookGrade
@@ -1140,10 +1157,10 @@ final class AppModel: ObservableObject {
         let madeForRec709 = processing.lutExpectsRec709
         // Takes record the HDR look only from a finished build, never a drag's preview.
         let hdrTarget: BakeTarget? = bakesHDR ? bakeTarget : nil
-        if size == 65 {
+        if finished {
             lookQueue.async { [weak self] in
                 guard let self, self.isCurrentLook(request) else { return }
-                let hdr = hdrTarget.map { BuiltInLook.hdrLUT(curve: curve, gamut: gamut, grade: grade, target: $0) }
+                let hdr = hdrTarget.map { BuiltInLook.hdrLUT(curve: curve, gamut: gamut, grade: grade, target: $0, size: size) }
                 if self.isCurrentLook(request) { pipeline?.setBakeLUT(hdr) }
             }
         }
@@ -1182,14 +1199,14 @@ final class AppModel: ObservableObject {
             }
             return
         }
-        let key = "\(look?.name ?? "Rec.709") · \(curve.label) · \(gamut.label)"
-        let cached = grade.isNeutral && size == 65 ? builtInLUTs[key] : nil
+        let key = "\(look?.name ?? "Rec.709") · \(curve.label) · \(gamut.label) · \(size)"
+        let cached = grade.isNeutral && finished ? builtInLUTs[key] : nil
         lookQueue.async { [weak self] in
             guard let self, self.isCurrentLook(request) else { return }
             let start = Date()
             let lut = cached ?? look?.lut(curve: curve, gamut: gamut, grade: grade, size: size)
                 ?? BuiltInLook.rec709LUT(curve: curve, gamut: gamut, grade: grade, size: size)
-            if cached == nil, grade.isNeutral, size == 65 {
+            if cached == nil, grade.isNeutral, finished {
                 Log.shared.info("Built \(key) in \(String(format: "%.2f", Date().timeIntervalSince(start))) s")
                 DispatchQueue.main.async { self.builtInLUTs[key] = lut }
             }
@@ -1706,6 +1723,7 @@ final class AppModel: ObservableObject {
             "tools": toolsLabel,
             "frameTime": fixedFrameTime ? "fixed" : "variable at 30 fps",
             "distortionCorrection": distortionCorrection ? "on" : "off, so the lens's distortion stays in the picture",
+            "vignetteCorrection": processing.vignetteCorrection ? "Apple's lens shading, FixVignetteRadial" : "off",
             "bitDepth": String(takePreset.bitDepth),
             "appPreview": appPreviewConnected ? "connected" : "disconnected",
             "fileTag": takeFileTag.label,
@@ -1872,7 +1890,14 @@ final class AppModel: ObservableObject {
     /// Runs off the main thread with a DNG from the capture driver.
     private func handleReference(_ data: Data?, _ metadata: [String: Any]) {
         let levels = RawLevels(photoMetadata: metadata)
-        pipeline?.setCalibration(data.flatMap { try? DNGMetadata(dng: $0) }, levels: levels)
+        let vignette = VignetteRadial(photoMetadata: metadata)
+        pipeline?.setCalibration(data.flatMap { try? DNGMetadata(dng: $0) }, levels: levels, vignette: vignette)
+        if let vignette {
+            Log.shared.info(String(
+                format: "Lens shading: k %@, centre (%.4f, %.4f), corner gain %.2f",
+                vignette.k.map { String(format: "%.3f", $0) }.joined(separator: " "),
+                vignette.centreX, vignette.centreY, vignette.gain(radius: 1)))
+        }
         if let levels {
             Log.shared.info("RAW buffer levels: black \(levels.black) white \(levels.white) clip \(levels.clipValue)")
         } else {

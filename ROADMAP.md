@@ -10,8 +10,8 @@
 | 4 | Heat, crop, exposure tools, LUT import | Done: 10 minutes at 30 fps |
 | 5 | Camera experience redesign | Done, apart from the long heat tests |
 | 6 | Image quality and capture | In progress |
-| 7 | Shooting tools | In progress: grading, styles, scopes, FX and HDR built |
-| 8 | On-phone finishing | Started: export with look, grade, FX and HDR |
+| 7 | Shooting tools | In progress: grading with wheels, styles, scopes, FX, HDR and an HDR viewfinder built |
+| 8 | On-phone finishing | Started: export with look, grade, FX, HDR10 light levels and log conversion |
 
 ## Design rules for new additions
 
@@ -91,7 +91,7 @@ The rule for this phase: anything that adds to real-time GPU load must prove it 
 
 - **Frame rates:** 24, 25 and 30 fps record with no dropped frames. 23.98 and 29.97 were removed: set to them, the camera still delivered 24 and 30. RAW Cam also offers 18 fps.
 - **Highlight reconstruction:** rebuild clipped green from red and blue, which still hold data above the point where green saturates. This could recover some highlight range that is currently clipped.
-- **Vignette correction:** apply the `FixVignetteRadial` values already found in the photo metadata.
+- **Vignette correction:** built. Apple's own `FixVignetteRadial` from each RAW photo's metadata, about two stops at the 1x's corners, applied in the debayer, with a switch under Advanced. Untested on the phone.
 - **Gyro logging:** done. CoreMotion data at 100 Hz in a Gyroflow `.gcsv` next to each clip, with the axes right in Gyroflow and no frame cost seen.
 - **Stabilization check:** find out whether optical stabilization is active during RAW capture, and how it affects gyro stabilization.
 - **Exposure modes:** a 180-degree button, lock at start and auto during a take are in. Shutter priority and an EV dial are added, and their frame cost is unmeasured.
@@ -100,7 +100,7 @@ The rule for this phase: anything that adds to real-time GPU load must prove it 
 - **Audio:** PCM recording and level meters are in, and PCM sounded clean over a 10-minute take. External microphones are left.
 - **Log curves and gamuts:** Apple Log, Apple Log 2, S-Log3, S-Log2, LogC3, LogC4 and Canon Log 3, with S-Gamut3.Cine, S-Gamut3, S-Gamut, ARRI Wide Gamut 3 and 4, Cinema Gamut, Apple Wide Gamut and Rec.2020. Each curve pairs with a color space, and the pairs and a viewfinder LUT for each curve can be set under **Advanced** and kept in presets. Apple Log 2 grades well. The others haven't been graded, and file tag options are untested.
 - **Color accuracy:** measure against a chart, and confirm the exposure default.
-- **Lenses:** the ultra wide and tele record at 30 fps with lens correction off. Each still needs its own color calibration.
+- **Lenses:** the ultra wide and tele record at 30 fps with lens correction off. Each still needs its own color calibration. Lens profiles from Apple's calibration, averaged over five captures with focus held, are saved per phone under Advanced, Lenses; the ultra wide's comes from its field of view.
 - **Zoom RAW:** not available. Bayer RAW refuses any zoom and the 48 MP size, so 2x can only be a crop of the 12 MP frame.
 
 ## Phase 7: shooting tools
@@ -111,7 +111,8 @@ The rule for this phase: anything that adds to real-time GPU load must prove it 
 - Horizon indicator: the Level tool does this.
 - Frame guides, a 3x3 grid and anamorphic desqueeze: added, with frame guides and desqueeze untested.
 - Look adjustments: ADJUST and COLOR grade any look but LOG live in the viewfinder, in scene-linear before the look, and bake in with it. Built, with styles, built-in and saved, under each look.
-- Baked HDR: ACES 2.0 at 1000 nits recorded as PQ with HDR10 metadata or as HLG, as Bake does for SDR. Built; PQ works on the phone, HLG's first-frame failure has a fix awaiting a take. An HDR viewfinder is left.
+- Baked HDR: ACES 2.0 at 1000 nits recorded as PQ with HDR10 metadata or as HLG, as Bake does for SDR. Built and working on the phone, both PQ and HLG. The HDR viewfinder shows it through the screen's extended range, at no measurable draw cost.
+- Shadow, midtone and highlight wheels: built, in WHEELS and in export's grade editor.
 - Halation, bloom, diffusion, vignette and grain: built for the viewfinder and export. Baking them waits on a frame-cost take.
 - Looks baked into recordings: built and proven, at no measurable GPU cost in a 60-second take, to HEVC or ProRes.
 - Timecode and Apple Watch control, if they prove useful.
@@ -123,7 +124,7 @@ Keep recording clean, and do the heavy work after the shot, when real-time limit
 - **One-tap stabilization:** use the saved gyro data and the spare sensor area from open gate, with an optional horizon lock.
 - **One-tap denoise:** use the noise profile from the metadata, with temporal denoise where quality justifies the time.
 - **Export with look:** a copy with any look, its grade, FX and SDR or HDR, played through first, is built, with HEVC's rate, a smaller resolution, a centred 16:9 or 9:16 crop and ProRes 422 LT. A movable crop, a crop outline on the preview and a new name for each export are left.
-- **Roll-off and gamut conversions:** convert between log curves and gamuts for different grading workflows.
+- **Roll-off and gamut conversions:** export's **Write as** writes a take as another log curve and gamut, such as Apple Log 2 as S-Log3 in S-Gamut3.Cine, in ProRes. Built, untested on the phone.
 
 ## Later ideas
 

@@ -128,7 +128,9 @@ struct SettingsView: View {
     private static let gamutTerms = "color colour space gamut native pair sync s-gamut3 s-gamut3.cine cine s-gamut s-log3 s-log2 arri wide logc3 logc4 awg3 awg4 canon cinema rec.2020 " + pairDetail
     private static let tagTerms = "file tag color colour rec.709 rec.2020 hlg editor " + tagDetail
     private static let processingTerms = "pipeline debayer demosaic quality processing efficient bilinear malvar hot advanced " + pipelineDetail + efficientDetail + debayerDetail + bilinearDetail
-    private static let distortionTerms = "lens distortion correction ultra wide advanced " + distortionDetail
+    private static let distortionTerms = "lens distortion correction ultra wide advanced vignette shading corners " + distortionDetail + vignetteDetail
+    private static let fineLUTDetail = "Builds the look at 129 points a side instead of 65, about a quarter of the colour error in saturated colours, for the viewfinder and baked takes. Its cost during a take isn't measured yet. Exports always use 129."
+    private static let vignetteDetail = "Brightens the corners by Apple's own lens shading for the lens, up to about two stops on the 1x, as Apple's photos and DNG editors do. Corners get noisier with it. Off keeps the sensor's plain fall-off."
     private static let twelveBitTerms = "12-bit 12 bit prores 4444 depth color advanced " + twelveBitDetail
     private static let imageTerms = [offsetTerms, bakeTerms, gamutTerms, tagTerms].joined(separator: " ")
 
@@ -499,7 +501,10 @@ struct SettingsView: View {
 
     private var advancedPage: some View {
         Form {
-            Section("Processing") { processingRows }
+            Section("Processing") {
+                processingRows
+                switchRow("Fine look LUT", Self.fineLUTDetail, isOn: $model.fineLookLUT)
+            }
             Section("Capture") { distortionRow }
             Section("Recording") { twelveBitRow }
             Section {
@@ -559,8 +564,9 @@ struct SettingsView: View {
             .disabled(model.isRecording)
     }
 
-    private var distortionRow: some View {
+    @ViewBuilder private var distortionRow: some View {
         switchRow("Lens distortion correction", Self.distortionDetail, isOn: $model.distortionCorrection)
+        switchRow("Lens shading correction", Self.vignetteDetail, isOn: $model.processing.vignetteCorrection)
     }
 
     private var aboutSection: some View {

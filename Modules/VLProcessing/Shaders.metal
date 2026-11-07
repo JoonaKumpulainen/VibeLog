@@ -14,6 +14,10 @@ struct ProcessParams {
     float scale;
     float clip;
     float exposure;
+    float4 vignetteK;  // FixVignetteRadial's k0 to k3.
+    float2 vignetteCentre;  // The optical centre as a share of the frame.
+    float vignetteK4;
+    uint vignetteOn;
 };
 
 struct MonitorParams {
@@ -127,10 +131,23 @@ static inline float encodeLog(float x, uint curve) {
     }
 }
 
-// White-balanced camera RGB to log Rec.2020.
-static inline float3 cameraToLog(float3 rgb, constant ProcessParams &u) {
+// Apple's lens shading gain at a sensor pixel, DNG's FixVignetteRadial: r runs from the optical
+// centre to 1 at the farthest corner, and the gain is 1 + k0 r² + ... + k4 r¹⁰.
+static inline float vignetteGain(float2 p, int2 size, constant ProcessParams &u) {
+    if (u.vignetteOn == 0) return 1.0;
+    float2 frame = float2(size);
+    float2 centre = u.vignetteCentre * frame;
+    float2 farthest = max(centre, frame - centre);
+    float2 d = (p - centre) / length(farthest);
+    float r2 = dot(d, d);
+    float4 k = u.vignetteK;
+    return 1.0 + r2 * (k.x + r2 * (k.y + r2 * (k.z + r2 * (k.w + r2 * u.vignetteK4))));
+}
+
+// White-balanced camera RGB to log Rec.2020, with the lens shading gain at the pixel.
+static inline float3 cameraToLog(float3 rgb, constant ProcessParams &u, float gain) {
     float3 linear = float3(dot(u.matrixRow0.xyz, rgb), dot(u.matrixRow1.xyz, rgb),
-                           dot(u.matrixRow2.xyz, rgb)) * u.exposure;
+                           dot(u.matrixRow2.xyz, rgb)) * (u.exposure * gain);
     return float3(encodeLog(linear.r, u.curve), encodeLog(linear.g, u.curve),
                   encodeLog(linear.b, u.curve));
 }
@@ -181,7 +198,7 @@ static inline float3 logPixel(texture2d<ushort, access::read> raw, int2 p, int2 
     } else {
         rgb = float3(inColumn, center, inRow);
     }
-    return cameraToLog(min(rgb, float3(u.clip)), u);
+    return cameraToLog(min(rgb, float3(u.clip)), u, vignetteGain(float2(p) + 0.5, size, u));
 }
 
 kernel void processRaw(texture2d<ushort, access::read> raw [[texture(0)]],
@@ -205,7 +222,7 @@ kernel void processMonitor(texture2d<ushort, access::read> raw [[texture(0)]],
     float blue = balancedSample(raw, blueAt, size, u);
     float green = (balancedSample(raw, int2(redAt.x, blueAt.y), size, u) +
                    balancedSample(raw, int2(blueAt.x, redAt.y), size, u)) * 0.5;
-    output.write(float4(cameraToLog(float3(red, green, blue), u), 1.0), gid);
+    output.write(float4(cameraToLog(float3(red, green, blue), u, vignetteGain(float2(block) + 1.0, size, u)), 1.0), gid);
 }
 
 // The same decoders as LogCurve.decode, for the viewfinder.
@@ -429,26 +446,42 @@ static inline float pqNits(float code) {
     return 10000.0 * pow(max(e - c1, 0.0) / (c2 - c3 * e), 1.0 / m1);
 }
 
-// For HDR10's content light levels: one thread a row of the log image, sent through the look, which
-// gives PQ codes in Rec.2020. Each row gives its brightest pixel and the sum over its pixels, both
-// as the brightest of red, green and blue in nits, as CTA-861.3 counts them.
-kernel void lightRows(texture2d<float, access::read> image [[texture(0)]],
-                      texture3d<float> lut [[texture(2)]],
-                      constant LookParams &k [[buffer(0)]],
-                      device float2 *rows [[buffer(1)]],
-                      uint y [[thread_position_in_grid]]) {
-    uint height = image.get_height();
-    if (y >= height) return;
-    uint width = image.get_width();
-    float brightest = 0.0;
-    float total = 0.0;
-    for (uint x = 0; x < width; x++) {
-        float3 codes = lookColor(saturate(image.read(uint2(x, y)).rgb), k, lut);
-        float nits = pqNits(max(codes.r, max(codes.g, codes.b)));
-        brightest = max(brightest, nits);
-        total += nits;
+// For HDR10's content light levels: each 16 by 16 tile of the log image, sent through the look,
+// which gives PQ codes in Rec.2020, comes out as its brightest pixel and the sum over its pixels,
+// both as the brightest of red, green and blue in nits, as CTA-861.3 counts them. A thread a pixel,
+// reduced across each SIMD group and then the tile, keeps the whole GPU busy, where a thread a row
+// took 39 ms a frame on the phone.
+kernel void lightTiles(texture2d<float, access::read> image [[texture(0)]],
+                       texture3d<float> lut [[texture(2)]],
+                       constant LookParams &k [[buffer(0)]],
+                       device float2 *tiles [[buffer(1)]],
+                       uint2 gid [[thread_position_in_grid]],
+                       uint2 group [[threadgroup_position_in_grid]],
+                       uint2 groups [[threadgroups_per_grid]],
+                       uint index [[thread_index_in_threadgroup]],
+                       uint lane [[thread_index_in_simdgroup]],
+                       uint simd [[simdgroup_index_in_threadgroup]],
+                       uint simds [[simdgroups_per_threadgroup]]) {
+    float nits = 0.0;
+    if (gid.x < image.get_width() && gid.y < image.get_height()) {
+        float3 codes = lookColor(saturate(image.read(gid).rgb), k, lut);
+        nits = pqNits(max(codes.r, max(codes.g, codes.b)));
     }
-    rows[y] = float2(brightest, total);
+    float brightest = simd_max(nits);
+    float total = simd_sum(nits);
+    threadgroup float2 partial[32];
+    if (lane == 0) {
+        partial[simd] = float2(brightest, total);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (index == 0) {
+        float2 tile = float2(0.0);
+        for (uint i = 0; i < simds; i++) {
+            tile.x = max(tile.x, partial[i].x);
+            tile.y += partial[i].y;
+        }
+        tiles[group.y * groups.x + group.x] = tile;
+    }
 }
 
 // Only for tests, which compare the viewfinder's math with MonitorTransform.display.

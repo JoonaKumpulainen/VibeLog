@@ -122,6 +122,8 @@ public struct ProcessingSettings: Equatable, Sendable {
     /// Uses the cheaper debayer when the phone is hot, whichever one is chosen. Off by default:
     /// Malvar-He-Cutler held a 10-minute take at serious heat with the Efficient path.
     public var bilinearWhenHot = false
+    /// Applies Apple's lens shading correction, FixVignetteRadial, as the debayer builds each pixel.
+    public var vignetteCorrection = true
     /// Look LUTs expect Rec.709; conversion LUTs expect the log image.
     public var lutExpectsRec709 = false
     private var storedCurve = LogCurve.appleLog
@@ -233,6 +235,11 @@ private struct ProcessParams {
     var scale: Float
     var clip: Float
     var exposure: Float
+    /// FixVignetteRadial's k0 to k3, then k4, the centre as a share of the frame, and 1 when on.
+    var vignetteK: SIMD4<Float> = .zero
+    var vignetteCentre: SIMD2<Float> = SIMD2(0.5, 0.5)
+    var vignetteK4: Float = 0
+    var vignetteOn: UInt32 = 0
 }
 
 private struct MonitorParams {
@@ -408,6 +415,8 @@ public final class ProcessingPipeline: NSObject {
     /// A look only takes record, such as HDR, while the viewfinder shows the SDR one.
     private var bakeLUT: CustomLUT?
     private var customLUT: CustomLUT?
+    /// Apple's lens shading for the current lens, from its reference photo.
+    private var vignette: VignetteRadial?
     /// ACES 2.0 at 1000 nits as PQ in Rec.2020, which the HDR viewfinder shows in place of the
     /// SDR look while the view's drawable is PQ.
     private var monitorHDR: CustomLUT?
@@ -594,10 +603,11 @@ public final class ProcessingPipeline: NSObject {
         lock.unlock()
     }
 
-    public func setCalibration(_ metadata: DNGMetadata?, levels: RawLevels?) {
+    public func setCalibration(_ metadata: DNGMetadata?, levels: RawLevels?, vignette: VignetteRadial? = nil) {
         lock.lock()
         defer { lock.unlock() }
         if let metadata { calibration = CameraCalibration(metadata) }
+        if let vignette { self.vignette = vignette }
         if let levels {
             black = Float(levels.black.first ?? 0)
             clipValue = Float(levels.clipValue)
@@ -1043,12 +1053,20 @@ public final class ProcessingPipeline: NSObject {
         func row(_ index: Int) -> SIMD4<Float> {
             SIMD4(Float(matrix[0][index]), Float(matrix[1][index]), Float(matrix[2][index]), 0)
         }
-        return ProcessParams(
+        var parameters = ProcessParams(
             matrixRow0: row(0), matrixRow1: row(1), matrixRow2: row(2), cfaGain: cfaGain,
             redOffset: SIMD2(cfa.redOffset.x, cfa.redOffset.y), curve: settings.curve.rawValue,
             demosaic: (hot && settings.bilinearWhenHot ? DemosaicMethod.bilinear : settings.demosaic).rawValue,
             black: black, scale: 1 / (clipValue - black),
             clip: min(red, blue, 1), exposure: Float(pow(2, settings.exposureStops)))
+        if settings.vignetteCorrection, let vignette, vignette.k.count == 5 {
+            let k = vignette.k.map(Float.init)
+            parameters.vignetteK = SIMD4(k[0], k[1], k[2], k[3])
+            parameters.vignetteK4 = k[4]
+            parameters.vignetteCentre = SIMD2(Float(vignette.centreX), Float(vignette.centreY))
+            parameters.vignetteOn = 1
+        }
+        return parameters
     }
 
     private func takeOutput(width: Int, height: Int) -> MTLTexture? {

@@ -70,6 +70,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var exposureOffset = -0.5
     public var reduceLoadWhenHot = true
     public var bilinearWhenHot = false
+    /// Apple's lens shading correction in the debayer.
+    public var vignetteCorrection = true
     /// Stops the stream after this long with no touch. Zero never does.
     public var idlePauseMinutes = 2.0
     public var monitor = "rec709"
@@ -114,6 +116,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var haptics = true
     /// Shows ACES 2.0's HDR picture in the viewfinder when its dynamic range is HDR.
     public var hdrViewfinder = true
+    /// Builds the camera's look at 129 points a side rather than 65.
+    public var fineLookLUT = false
     /// The screen's corner the scope sits in, whatever the hold: bottomLeft, bottomRight, topLeft or topRight.
     public var scopeCorner = "bottomLeft"
     /// The scope's size against its standard one, set with its resize handle.
@@ -160,6 +164,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         exposureOffset = read(.exposureOffset, defaults.exposureOffset)
         reduceLoadWhenHot = read(.reduceLoadWhenHot, defaults.reduceLoadWhenHot)
         bilinearWhenHot = read(.bilinearWhenHot, defaults.bilinearWhenHot)
+        vignetteCorrection = read(.vignetteCorrection, defaults.vignetteCorrection)
         idlePauseMinutes = read(.idlePauseMinutes, defaults.idlePauseMinutes)
         monitor = read(.monitor, defaults.monitor)
         monitorLUT = read(.monitorLUT, defaults.monitorLUT)
@@ -187,6 +192,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         scopeOverlaid = read(.scopeOverlaid, defaults.scopeOverlaid)
         haptics = read(.haptics, defaults.haptics)
         hdrViewfinder = read(.hdrViewfinder, defaults.hdrViewfinder)
+        fineLookLUT = read(.fineLookLUT, defaults.fineLookLUT)
         scopeCorner = read(.scopeCorner, defaults.scopeCorner)
         scopeScale = read(.scopeScale, defaults.scopeScale)
         styles = read(.styles, defaults.styles)

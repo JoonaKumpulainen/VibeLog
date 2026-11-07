@@ -42,6 +42,9 @@ struct LensesView: View {
                                 format: "%ld, centre within %.1f px, focal length within %.2f%%",
                                 captures, profile.centreSpread ?? 0, (profile.focalSpread ?? 0) * 100))
                     }
+                    if let focus = profile.focusPosition {
+                        LabeledContent("Focus held at", value: String(format: "%.2f of the way to far", focus))
+                    }
                     LabeledContent("Source", value: profile.source)
                     LabeledContent("Measured", value: profile.measured)
                 }

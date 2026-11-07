@@ -2415,6 +2415,38 @@ final class LensProfileTests: XCTestCase {
     }
 }
 
+/// Apple's lens shading, as the iPhone 14 Pro's 1x reported it, and log written as another log.
+final class VignetteAndConversionTests: XCTestCase {
+    func testVignetteReadsFromMetadataAndGainsTwoStops() throws {
+        let metadata: [String: Any] = ["{DNG}": ["FixVignetteRadial": [
+            3.2396490573883057, -4.15488862991333, 11.245702743530273, -14.199689865112305, 7.030414581298828,
+            0.500174776, 0.4983130414,
+        ] as [NSNumber]] as [AnyHashable: Any]]
+        let vignette = try XCTUnwrap(VignetteRadial(photoMetadata: metadata))
+        XCTAssertEqual(vignette.gain(radius: 0), 1, accuracy: 1e-12)
+        XCTAssertEqual(vignette.gain(radius: 1), 4.161, accuracy: 0.001)
+        XCTAssertEqual(vignette.centreX, 0.5002, accuracy: 1e-4)
+        XCTAssertNil(VignetteRadial(photoMetadata: [:]))
+    }
+
+    /// The same curve and gamut give back the code, and middle gray lands at the target's own.
+    func testLogConversionKeepsGrayAndIdentity() {
+        let size = 17
+        let same = BuiltInLook.logConversion(curve: .sLog3, gamut: .sGamut3Cine, to: .sLog3, in: .sGamut3Cine, size: size)
+        for (r, g, b) in [(8, 8, 8), (4, 9, 12), (12, 6, 3)] {
+            let got = same.samples[(b * size + g) * size + r]
+            XCTAssertEqual(Double(got.x), Double(r) / Double(size - 1), accuracy: 1e-4)
+            XCTAssertEqual(Double(got.y), Double(g) / Double(size - 1), accuracy: 1e-4)
+            XCTAssertEqual(Double(got.z), Double(b) / Double(size - 1), accuracy: 1e-4)
+        }
+        let gray = LogCurve.appleLog2.encode(0.18)
+        let converted = BuiltInLook.logConversion(curve: .appleLog2, gamut: .appleWideGamut, to: .sLog3, in: .sGamut3Cine, size: 65)
+        let out = converted.sample(SIMD3<Float>(repeating: Float(gray)))
+        XCTAssertEqual(Double(out.x), LogCurve.sLog3.encode(0.18), accuracy: 0.002)
+        XCTAssertEqual(Double(out.y), LogCurve.sLog3.encode(0.18), accuracy: 0.002)
+    }
+}
+
 /// Styles: the built-in ones are distinct and each changes the look, and saved ones live beside
 /// the presets rather than in them, so applying a preset never loses them.
 final class LookStyleTests: XCTestCase {

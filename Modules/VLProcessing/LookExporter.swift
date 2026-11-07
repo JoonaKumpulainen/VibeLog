@@ -76,7 +76,7 @@ public final class LookExporter {
             let library = try? pipeline.device.makeDefaultLibrary(bundle: Bundle(for: ProcessingPipeline.self)),
             let decode = library.makeFunction(name: "decodeVideo"),
             let preview = library.makeFunction(name: "lookPreview"),
-            let light = library.makeFunction(name: "lightRows"),
+            let light = library.makeFunction(name: "lightTiles"),
             let decodeState = try? pipeline.device.makeComputePipelineState(function: decode),
             let previewState = try? pipeline.device.makeComputePipelineState(function: preview),
             let lightState = try? pipeline.device.makeComputePipelineState(function: light)
@@ -204,8 +204,30 @@ public final class LookExporter {
         from url: URL, into sink: VideoFrameSink, seconds: Double, progress: (Double) -> Void,
         cancelled: () -> Bool
     ) async throws {
-        let (reader, output) = try await makeReader(url, from: 0)
+        _ = try await export(
+            from: url, seconds: seconds, measuringLight: false, progress: progress, cancelled: cancelled,
+            makeSink: { _ in sink })
+    }
+
+    /// Writes every frame into the sink `makeSink` gives, at each frame's own time. With
+    /// `measuringLight`, an HDR10 export, every frame is first read for MaxCLL and MaxFALL, which
+    /// `makeSink` gets before any frame is written, since the encoder needs them from the start. Both
+    /// passes read through one reader, rewound between them: a second reader started slowly after the
+    /// first, at 72 ms a frame for its first 30, where the rewound one keeps its decoder and buffers.
+    /// The light pass takes the first 35% of `progress`.
+    public func export(
+        from url: URL, seconds: Double, measuringLight: Bool, progress: (Double) -> Void, cancelled: () -> Bool,
+        makeSink: ((maxCLL: Int, maxFALL: Int)?) throws -> VideoFrameSink
+    ) async throws -> (maxCLL: Int, maxFALL: Int)? {
+        let (reader, output, range) = try await makeReader(url, from: 0, randomAccess: measuringLight)
         defer { reader.cancelReading() }
+        let lightShare = measuringLight ? 0.35 : 0
+        var light: (maxCLL: Int, maxFALL: Int)?
+        if measuringLight {
+            light = try lightPass(reader: reader, output: output, seconds: seconds, share: lightShare, progress: progress, cancelled: cancelled)
+            output.resetForReading(timeRanges: [NSValue(timeRange: range)])
+        }
+        let sink = try makeSink(light)
         var first: CMTime?
         var frames = 0
         // Where each 30 frames' time went: waiting on the encoder, the GPU, and the whole batch.
@@ -258,7 +280,9 @@ public final class LookExporter {
                 let appendStart = Date()
                 sink.append(buffer, at: time)
                 appendSeconds += Date().timeIntervalSince(appendStart)
-                if seconds > 0, let first { progress(min((time - first).seconds / seconds, 1)) }
+                if seconds > 0, let first {
+                    progress(lightShare + min((time - first).seconds / seconds, 1) * (1 - lightShare))
+                }
                 return false
             }
             if finished { break }
@@ -283,21 +307,21 @@ public final class LookExporter {
         Log.shared.info("Export memory after \(frames) frames: \(Self.memoryText)")
         if reader.status == .failed { throw Failure.cannotRead(reader.error?.localizedDescription ?? "unknown") }
         progress(1)
+        return light
     }
 
     /// HDR10's MaxCLL and MaxFALL in nits, from a first pass over every frame with the look and
     /// effects, before the export writes any: the brightest pixel in the take, and the brightest
     /// frame's average, each counting a pixel's brightest channel. Only for a PQ look. It measures
     /// the whole frame, so a crop can only make the true values lower.
-    public func measureLight(
-        from url: URL, seconds: Double, progress: (Double) -> Void, cancelled: () -> Bool
-    ) async throws -> (maxCLL: Int, maxFALL: Int) {
-        let (reader, output) = try await makeReader(url, from: 0)
-        defer { reader.cancelReading() }
+    private func lightPass(
+        reader: AVAssetReader, output: AVAssetReaderTrackOutput, seconds: Double, share: Double,
+        progress: (Double) -> Void, cancelled: () -> Bool
+    ) throws -> (maxCLL: Int, maxFALL: Int) {
         var first: CMTime?
         var brightest: Float = 0
         var brightestFrame: Float = 0
-        var rowsBuffer: MTLBuffer?
+        var tilesBuffer: MTLBuffer?
         let start = Date()
         var frames = 0
         var readSeconds = 0.0
@@ -313,10 +337,13 @@ public final class LookExporter {
                 first = first ?? time
                 let height = CVPixelBufferGetHeight(frame)
                 let width = CVPixelBufferGetWidth(frame)
-                if rowsBuffer == nil || rowsBuffer!.length < height * 8 {
-                    rowsBuffer = pipeline.device.makeBuffer(length: height * 8, options: .storageModeShared)
+                let tileSize = 16
+                let across = (width + tileSize - 1) / tileSize
+                let down = (height + tileSize - 1) / tileSize
+                if tilesBuffer == nil || tilesBuffer!.length < across * down * 8 {
+                    tilesBuffer = pipeline.device.makeBuffer(length: across * down * 8, options: .storageModeShared)
                 }
-                guard let rowsBuffer, let commands = queue.makeCommandBuffer(),
+                guard let tilesBuffer, let commands = queue.makeCommandBuffer(),
                     let decoded = decode(frame, commands: commands),
                     let source = withEffects(decoded.image, commands: commands),
                     let lut = lutTexture ?? pipeline.placeholderTexture,
@@ -327,11 +354,10 @@ public final class LookExporter {
                 encoder.setTexture(source, index: 0)
                 encoder.setTexture(lut, index: 2)
                 encoder.setBytes(&parameters, length: MemoryLayout<LookParams>.stride, index: 0)
-                encoder.setBuffer(rowsBuffer, offset: 0, index: 1)
-                let threads = min(lightState.maxTotalThreadsPerThreadgroup, 64)
-                encoder.dispatchThreads(
-                    MTLSize(width: height, height: 1, depth: 1),
-                    threadsPerThreadgroup: MTLSize(width: threads, height: 1, depth: 1))
+                encoder.setBuffer(tilesBuffer, offset: 0, index: 1)
+                encoder.dispatchThreadgroups(
+                    MTLSize(width: across, height: down, depth: 1),
+                    threadsPerThreadgroup: MTLSize(width: tileSize, height: tileSize, depth: 1))
                 encoder.endEncoding()
                 let gpuStart = Date()
                 commands.commit()
@@ -340,15 +366,15 @@ public final class LookExporter {
                 withExtendedLifetime(decoded.wrapped) {}
                 if let cache { CVMetalTextureCacheFlush(cache, 0) }
                 guard commands.status == .completed else { throw Failure.gpu }
-                let rows = UnsafeBufferPointer(
-                    start: rowsBuffer.contents().assumingMemoryBound(to: SIMD2<Float>.self), count: height)
+                let tiles = UnsafeBufferPointer(
+                    start: tilesBuffer.contents().assumingMemoryBound(to: SIMD2<Float>.self), count: across * down)
                 var total: Float = 0
-                for row in rows {
-                    brightest = max(brightest, row.x)
-                    total += row.y
+                for tile in tiles {
+                    brightest = max(brightest, tile.x)
+                    total += tile.y
                 }
                 brightestFrame = max(brightestFrame, total / Float(max(width * height, 1)))
-                if seconds > 0, let first { progress(min((time - first).seconds / seconds, 1)) }
+                if seconds > 0, let first { progress(min((time - first).seconds / seconds, 1) * share) }
                 return false
             }
             if finished { break }
@@ -373,20 +399,26 @@ public final class LookExporter {
         "footprint \(SystemStatus.footprint / 1_000_000) MB, available \(SystemStatus.availableMemory / 1_000_000) MB"
     }
 
-    private func makeReader(_ url: URL, from seconds: Double) async throws -> (AVAssetReader, AVAssetReaderTrackOutput) {
+    /// A reader of the take's frames. With `randomAccess`, its output can be read through again
+    /// after reaching the end, keeping its decoder and frame buffers, over the track's time range.
+    private func makeReader(
+        _ url: URL, from seconds: Double, randomAccess: Bool = false
+    ) async throws -> (AVAssetReader, AVAssetReaderTrackOutput, CMTimeRange) {
         let asset = AVURLAsset(url: url)
         guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw Failure.noVideo }
+        let range = try await track.load(.timeRange)
         let reader = try AVAssetReader(asset: asset)
         if seconds > 0 {
             reader.timeRange = CMTimeRange(start: CMTime(seconds: seconds, preferredTimescale: 600), duration: .positiveInfinity)
         }
         let output = AVAssetReaderTrackOutput(track: track, outputSettings: Self.frameSettings)
         output.alwaysCopiesSampleData = false
+        output.supportsRandomAccess = randomAccess
         reader.add(output)
         guard reader.startReading() else {
             throw Failure.cannotRead(reader.error?.localizedDescription ?? "unknown")
         }
-        return (reader, output)
+        return (reader, output, range)
     }
 
     /// The frame back as the log image, which is reused frame to frame since each waits for the

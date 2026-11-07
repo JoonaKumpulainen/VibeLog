@@ -19,6 +19,8 @@ struct ExportView: View {
     @State private var quality = ExportQuality.master
     @State private var resolution = ExportResolution.full
     @State private var crop = ExportCrop.none
+    /// A log curve and gamut to write the take as instead of a look.
+    @State private var logTarget: ExportChoice.LogTarget?
     @State private var player = AVPlayer()
     @State private var previewReady = false
     @State private var previewFailure: String?
@@ -146,6 +148,11 @@ struct ExportView: View {
         }
         .task { takeTurns = (try? await LookExporter.describe(take.url).quarterTurns) ?? 0 }
         .onChange(of: lutName) { _, _ in refreshPreview() }
+        .onChange(of: logTarget) { _, target in
+            // Log for grading elsewhere belongs in ProRes, which keeps its detail.
+            if target != nil, codec == "hevc420" { codec = "prores422hq" }
+            refreshPreview()
+        }
         .onChange(of: lutMadeForRec709) { _, _ in refreshPreview() }
         .onChange(of: grade) { _, _ in refreshSoon() }
         .onChange(of: effects) { _, _ in refreshSoon() }
@@ -188,6 +195,13 @@ struct ExportView: View {
                 }
             }
             .aspectRatio(4 / 3, contentMode: .fit)
+            // Where the crop cuts, over the picture as it plays, since the preview shows it whole.
+            .overlay {
+                if let aspect = crop.aspect, previewReady {
+                    CropOutline(pictureAspect: takeTurns % 2 == 0 ? 4.0 / 3 : 3.0 / 4, cropAspect: aspect)
+                        .allowsHitTesting(false)
+                }
+            }
             // At the top, clear of the player's controls. A tap shows the next kind.
             .overlay(alignment: .topLeading) {
                 if let kind = scopeKind, previewReady {
@@ -224,11 +238,19 @@ struct ExportView: View {
     /// The look, codec and export button, which the grade editor replaces while it's open.
     @ViewBuilder private var settingsSections: some View {
                 Section("Look") {
+                    Picker("Write as", selection: $logTarget) {
+                        Text("A look").tag(ExportChoice.LogTarget?.none)
+                        ForEach(ExportChoice.LogTarget.all, id: \.self) { target in
+                            Text("Log: \(target.label)").tag(ExportChoice.LogTarget?.some(target))
+                        }
+                    }
+                    if logTarget == nil {
                     Picker("LUT", selection: $lutName) {
                         Text("Monitor (Rec.709)").tag("")
                         ForEach(model.lookNames, id: \.self) { Text($0).tag($0) }
                     }
-                    if !lutName.isEmpty, BuiltInLook.named(lutName) == nil {
+                    }
+                    if logTarget == nil, !lutName.isEmpty, BuiltInLook.named(lutName) == nil {
                         Picker("LUT made for", selection: $lutMadeForRec709) {
                             Text("Log").tag(false)
                             Text("Rec.709").tag(true)
@@ -241,7 +263,7 @@ struct ExportView: View {
                         LabeledContent("Grade", value: grade.isNeutral && effects.isNeutral ? "None" : "Changed")
                     }
                     .disabled(job.progress != nil)
-                    if lutName == BuiltInLook.aces20.name {
+                    if logTarget == nil, lutName == BuiltInLook.aces20.name {
                         Picker("Output", selection: $target) {
                             ForEach(BakeTarget.allCases) { Text($0.label).tag($0) }
                         }
@@ -306,7 +328,7 @@ struct ExportView: View {
     private var choice: ExportChoice {
         ExportChoice(
             lutName: lutName, lutMadeForRec709: lutMadeForRec709, grade: grade, effects: effects, target: target,
-            codec: codec, quality: quality, resolution: resolution, crop: crop)
+            codec: codec, quality: quality, resolution: resolution, crop: crop, logTarget: logTarget)
     }
 
     /// A paused player redraws only for a composition it hasn't seen, so it gets a copy of the same.
@@ -622,33 +644,43 @@ final class LookExportJob: ObservableObject {
         var metadata = take.info?.metadata ?? [:]
         metadata["look"] = lookLabel
         metadata["fileTag"] = fileTag.label
+        if let target = choice.logTarget {
+            // Written as log again, so it can be exported or graded as a take in its new curve.
+            metadata["convertedFrom"] = "\(metadata["curve"] ?? "?") in \(metadata["gamut"] ?? "?")"
+            metadata["curve"] = target.curve.label
+            metadata["gamut"] = target.gamut.label
+            metadata["look"] = "log, as recorded"
+        }
         // The take's own note says its tag is nominal, which an export's isn't.
-        metadata["note"] = "The look is baked in, and the file's tags describe it."
+        metadata["note"] = choice.logTarget == nil
+            ? "The look is baked in, and the file's tags describe it."
+            : "The file's transfer tag is nominal; decode with the curve named here."
         metadata["exportedFrom"] = take.url.lastPathComponent
         metadata["exportFormat"] = format
         let rate = take.info?.metadata["frameRate"].flatMap(Double.init) ?? 30
         // HDR10 in HEVC states its content light levels, which a first pass over the frames measures,
-        // since the encoder needs them before its first frame. It takes the first part of the bar.
-        var contentLight: (maxCLL: Int, maxFALL: Int)?
-        let lightShare = fileTag == .pq && preset.codec == .hevc ? 0.35 : 0
-        if lightShare > 0 {
-            trace.begin("measuring light levels")
-            contentLight = try await exporter.measureLight(
-                from: take.url, seconds: source.seconds, progress: { progress($0 * lightShare) },
-                cancelled: { stop.isSet })
+        // since the encoder needs them before its first frame. The exporter makes the encoder
+        // through `makeSink` once it knows them, and the light pass takes the first part of the bar.
+        let measuring = fileTag == .pq && preset.codec == .hevc
+        trace.begin(measuring ? "measuring light levels" : "starting the \(preset.id) encoder")
+        var made: VideoEncoder?
+        _ = try await exporter.export(
+            from: take.url, seconds: source.seconds, measuringLight: measuring, progress: progress,
+            cancelled: { stop.isSet }
+        ) { contentLight in
             if let contentLight {
                 metadata["contentLight"] = "MaxCLL \(contentLight.maxCLL) nits, MaxFALL \(contentLight.maxFALL) nits"
             }
+            trace.begin("starting the \(preset.id) encoder at \(size.width)x\(size.height), \(rate) fps")
+            let encoder = try VideoEncoder(config: .init(
+                url: scratch, preset: preset, size: EncoderSize(width: size.width, height: size.height),
+                frameRate: rate, audio: false, realTime: false, metadata: metadata, fileTag: fileTag,
+                contentLight: contentLight))
+            made = encoder
+            trace.begin("baking frames")
+            return encoder
         }
-        trace.begin("starting the \(preset.id) encoder at \(size.width)x\(size.height), \(rate) fps")
-        let encoder = try VideoEncoder(config: .init(
-            url: scratch, preset: preset, size: EncoderSize(width: size.width, height: size.height),
-            frameRate: rate, audio: false, realTime: false, metadata: metadata, fileTag: fileTag,
-            contentLight: contentLight))
-        trace.begin("baking frames")
-        try await exporter.export(
-            from: take.url, into: encoder, seconds: source.seconds,
-            progress: { progress(lightShare + $0 * (1 - lightShare)) }, cancelled: { stop.isSet })
+        guard let encoder = made else { throw StepFailure(description: "The encoder never started") }
         trace.begin("finishing the encoder")
         var result = await withCheckedContinuation { continuation in
             encoder.finish { continuation.resume(returning: $0) }
@@ -959,5 +991,45 @@ struct ExportGradeEditor: View {
                     from: Int((old / step).rounded()), to: Int((value.wrappedValue / step).rounded()),
                     neutral: range.contains(0) ? 0 : Int((1 / step).rounded()))
             })
+    }
+}
+
+/// The export's crop over the preview: the picture fitted in its box as the player shows it, the
+/// centred crop of the chosen shape outlined, and the part cut away dimmed.
+struct CropOutline: View {
+    let pictureAspect: Double
+    let cropAspect: Double
+
+    var body: some View {
+        GeometryReader { proxy in
+            let box = proxy.size
+            let picture = Self.fit(aspect: pictureAspect, in: box)
+            let kept = Self.fit(aspect: cropAspect, in: picture.size)
+            let cut = CGRect(
+                x: picture.midX - kept.width / 2, y: picture.midY - kept.height / 2,
+                width: kept.width, height: kept.height)
+            ZStack {
+                Path { path in
+                    path.addRect(picture)
+                    path.addRect(cut)
+                }
+                .fill(Color.black.opacity(0.45), style: FillStyle(eoFill: true))
+                Rectangle()
+                    .stroke(Color.white.opacity(0.85), lineWidth: 1)
+                    .frame(width: cut.width, height: cut.height)
+                    .position(x: cut.midX, y: cut.midY)
+            }
+        }
+    }
+
+    /// The largest rectangle of `aspect` centred in `box`.
+    static func fit(aspect: Double, in box: CGSize) -> CGRect {
+        var width = box.width
+        var height = width / aspect
+        if height > box.height {
+            height = box.height
+            width = height * aspect
+        }
+        return CGRect(x: (box.width - width) / 2, y: (box.height - height) / 2, width: width, height: height)
     }
 }

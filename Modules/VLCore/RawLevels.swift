@@ -32,6 +32,42 @@ public struct RawLevels: Codable, Equatable, Sendable {
     }
 }
 
+/// Apple's lens shading correction for the frame, the DNG opcode FixVignetteRadial that each RAW
+/// photo's {DNG} metadata carries: a gain of 1 + k0 r² + k1 r⁴ + k2 r⁶ + k3 r⁸ + k4 r¹⁰, where r is
+/// the distance from the optical centre divided by the distance to the farthest corner. On the
+/// iPhone 14 Pro's 1x it reached about 4.2 at the corners, two stops.
+public struct VignetteRadial: Codable, Equatable, Sendable {
+    public var k: [Double]
+    /// The optical centre as a share of the frame's width and height.
+    public var centreX: Double
+    public var centreY: Double
+
+    public init(k: [Double], centreX: Double, centreY: Double) {
+        self.k = k
+        self.centreX = centreX
+        self.centreY = centreY
+    }
+
+    public init?(photoMetadata: [String: Any]) {
+        guard let dng = photoMetadata["{DNG}"] as? [AnyHashable: Any],
+            let values = (dng["FixVignetteRadial"] as? [NSNumber])?.map(\.doubleValue), values.count == 7
+        else { return nil }
+        self.init(k: Array(values[0..<5]), centreX: values[5], centreY: values[6])
+    }
+
+    /// The gain at a normalised radius, 0 at the centre and 1 at the farthest corner.
+    public func gain(radius r: Double) -> Double {
+        let r2 = r * r
+        var power = r2
+        var total = 1.0
+        for coefficient in k {
+            total += coefficient * power
+            power *= r2
+        }
+        return total
+    }
+}
+
 /// A sparse look at one Bayer frame, cheap enough to run on every captured frame.
 public struct FrameSample: Codable, Equatable, Sendable {
     public var min: UInt16
