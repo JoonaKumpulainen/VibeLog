@@ -124,17 +124,32 @@ public enum BuiltInLook: String, CaseIterable, Sendable {
         let graded = GradeTransform(grade)
         let decoded = (0..<size).map { curve.decode(Double($0) / Double(size - 1)) }
         var samples = [SIMD3<Float>](repeating: .zero, count: size * size * size)
-        samples.withUnsafeMutableBufferPointer { buffer in
-            let base = buffer.baseAddress!
-            DispatchQueue.concurrentPerform(iterations: size) { blue in
-                for green in 0..<size {
-                    for red in 0..<size {
-                        let linear = toRec2020 * SIMD3(decoded[red], decoded[green], decoded[blue])
-                        let out = display(graded.apply(linear))
-                        base[(blue * size + green) * size + red] = SIMD3(Float(out.x), Float(out.y), Float(out.z))
+        // Points that came out as something other than a number, one count per slice.
+        var broken = [Int](repeating: 0, count: size)
+        broken.withUnsafeMutableBufferPointer { counts in
+            let countsBase = counts.baseAddress!
+            samples.withUnsafeMutableBufferPointer { buffer in
+                let base = buffer.baseAddress!
+                DispatchQueue.concurrentPerform(iterations: size) { blue in
+                    for green in 0..<size {
+                        for red in 0..<size {
+                            let linear = toRec2020 * SIMD3(decoded[red], decoded[green], decoded[blue])
+                            var out = display(graded.apply(linear))
+                            if !(out.x.isFinite && out.y.isFinite && out.z.isFinite) {
+                                out = SIMD3(out.x.isFinite ? out.x : 0, out.y.isFinite ? out.y : 0, out.z.isFinite ? out.z : 0)
+                                countsBase[blue] += 1
+                            }
+                            base[(blue * size + green) * size + red] = SIMD3(Float(out.x), Float(out.y), Float(out.z))
+                        }
                     }
                 }
             }
+        }
+        let total = broken.reduce(0, +)
+        if total > 0 {
+            Log.shared.warn(
+                "Look LUT for \(curve.label) in \(gamut.label) had \(total) of \(size * size * size) points that "
+                    + "weren't numbers, made black; grade \(grade.label)")
         }
         return CubeLUT(size: size, samples: samples)
     }

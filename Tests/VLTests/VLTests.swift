@@ -2179,6 +2179,85 @@ final class LookGradeTests: XCTestCase {
         }
     }
 
+    /// The export preview stopped on 2026-11-07 when a graded LUT held a point that wasn't a
+    /// number. This sends a 17-point grid of every curve through each look under each slider at
+    /// its ends and prints how many points come out that way, as `NaN sweep` lines, to find the
+    /// cause. Whatever it finds, a built LUT must hold only numbers.
+    func testGradesGiveNumbers() {
+        func grade(_ change: (inout LookGrade) -> Void) -> LookGrade {
+            var grade = LookGrade()
+            change(&grade)
+            return grade
+        }
+        let grades: [(String, LookGrade)] = [
+            ("exposure -2", grade { $0.exposure = -2 }), ("exposure +2", grade { $0.exposure = 2 }),
+            ("contrast -1", grade { $0.contrast = -1 }), ("contrast +1", grade { $0.contrast = 1 }),
+            ("temperature -1", grade { $0.temperature = -1 }), ("temperature +1", grade { $0.temperature = 1 }),
+            ("tint -1", grade { $0.tint = -1 }), ("tint +1", grade { $0.tint = 1 }),
+            ("saturation 0", grade { $0.saturation = 0 }), ("saturation 2", grade { $0.saturation = 2 }),
+            ("red hue +1 sat +1 lum +1", grade {
+                $0.bands[ColorBand.red.rawValue].hue = 1
+                $0.bands[ColorBand.red.rawValue].saturation = 1
+                $0.bands[ColorBand.red.rawValue].luminance = 1
+            }),
+            ("skin sat -1 lum -1", grade {
+                $0.bands[ColorBand.skin.rawValue].saturation = -1
+                $0.bands[ColorBand.skin.rawValue].luminance = -1
+            }),
+            ("shadows wheel full, lum -1", grade {
+                $0.wheels[ToneRange.shadows.rawValue].x = 1
+                $0.wheels[ToneRange.shadows.rawValue].luminance = -1
+            }),
+            ("highlights wheel full, lum +1", grade {
+                $0.wheels[ToneRange.highlights.rawValue].y = -1
+                $0.wheels[ToneRange.highlights.rawValue].luminance = 1
+            }),
+            ("everything at once", grade {
+                $0.exposure = 2
+                $0.contrast = 1
+                $0.temperature = 1
+                $0.tint = 1
+                $0.saturation = 2
+            }),
+        ]
+        let size = 17
+        let looks: [(String, (SIMD3<Double>) -> SIMD3<Double>)] = [
+            ("ACES 2.0", { BuiltInLook.aces20.display(linearRec2020: $0) }),
+            ("ACES 1.3", { BuiltInLook.aces13.display(linearRec2020: $0) }),
+            ("Monitor", MonitorTransform.display(linearRec2020:)),
+        ]
+        for curve in LogCurve.allCases {
+            let gamut = curve.nativeGamut
+            let toRec2020 = BuiltInLook.acesInput(gamut)
+            let decoded = (0..<size).map { curve.decode(Double($0) / Double(size - 1)) }
+            for (gradeName, chosen) in grades {
+                let transform = GradeTransform(chosen)
+                for (lookName, display) in looks {
+                    var gradeBroken = 0
+                    var lookBroken = 0
+                    for blue in decoded {
+                        for green in decoded {
+                            for red in decoded {
+                                let graded = transform.apply(toRec2020 * SIMD3(red, green, blue))
+                                if !(graded.x.isFinite && graded.y.isFinite && graded.z.isFinite) {
+                                    gradeBroken += 1
+                                    continue
+                                }
+                                let out = display(graded)
+                                if !(out.x.isFinite && out.y.isFinite && out.z.isFinite) { lookBroken += 1 }
+                            }
+                        }
+                    }
+                    if gradeBroken + lookBroken > 0 {
+                        print("NaN sweep \(curve.label), \(gradeName), \(lookName): \(gradeBroken) from the grade, \(lookBroken) from the look")
+                    }
+                }
+            }
+            let lut = BuiltInLook.aces20.lut(curve: curve, gamut: gamut, grade: grades.last!.1, size: size)
+            XCTAssertTrue(lut.samples.allSatisfy { $0.x.isFinite && $0.y.isFinite && $0.z.isFinite }, curve.label)
+        }
+    }
+
     func testOlderGradeReadsWithoutBands() throws {
         let grade = try JSONDecoder().decode(LookGrade.self, from: Data(#"{"exposure":0.5}"#.utf8))
         XCTAssertEqual(grade.exposure, 0.5)

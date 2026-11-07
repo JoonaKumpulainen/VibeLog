@@ -77,7 +77,8 @@ struct ExportView: View {
                     Form {
                         if editingGrade {
                             ExportGradeEditor(
-                                lutName: $lutName, lutMadeForRec709: $lutMadeForRec709, grade: $grade, effects: $effects)
+                                lutName: $lutName, lutMadeForRec709: $lutMadeForRec709, grade: $grade, effects: $effects,
+                                scopeKind: $scopeKind)
                         } else {
                             settingsSections
                         }
@@ -134,10 +135,9 @@ struct ExportView: View {
         }
         .onChange(of: scopeKind) { _, _ in
             configureScope()
-            // A paused preview draws no new frame by itself, so one is asked for to measure.
-            if scopeKind != nil, !scope.hasFrame, player.rate == 0, player.currentItem != nil {
-                player.seek(to: player.currentTime(), toleranceBefore: .zero, toleranceAfter: .zero)
-            }
+            // A paused preview draws no new frame by itself, and a seek to where it is reuses the
+            // last one, so it's handed the composition again to draw one to measure.
+            if scopeKind != nil, !scope.hasFrame { redrawPaused() }
         }
         .haptic(.selection, trigger: scopeKind)
         .onDisappear { player.pause() }
@@ -241,10 +241,6 @@ struct ExportView: View {
                         LabeledContent("Grade", value: grade.isNeutral && effects.isNeutral ? "None" : "Changed")
                     }
                     .disabled(job.progress != nil)
-                    Picker("Scope", selection: $scopeKind) {
-                        Text("Off").tag(ScopeKind?.none)
-                        ForEach(ScopeKind.allCases, id: \.self) { Text($0.label).tag(ScopeKind?.some($0)) }
-                    }
                     if lutName == BuiltInLook.aces20.name {
                         Picker("Output", selection: $target) {
                             ForEach(BakeTarget.allCases) { Text($0.label).tag($0) }
@@ -311,6 +307,15 @@ struct ExportView: View {
         ExportChoice(
             lutName: lutName, lutMadeForRec709: lutMadeForRec709, grade: grade, effects: effects, target: target,
             codec: codec, quality: quality, resolution: resolution, crop: crop)
+    }
+
+    /// A paused player redraws only for a composition it hasn't seen, so it gets a copy of the same.
+    private func redrawPaused() {
+        guard player.rate == 0, let item = player.currentItem, let composition = previewComposition,
+            let copy = composition.mutableCopy() as? AVVideoComposition
+        else { return }
+        item.videoComposition = copy
+        player.seek(to: player.currentTime(), toleranceBefore: .zero, toleranceAfter: .zero)
     }
 
     private func configureScope() {
@@ -698,6 +703,8 @@ struct ExportGradeEditor: View {
     @Binding var lutMadeForRec709: Bool
     @Binding var grade: LookGrade
     @Binding var effects: LookEffects
+    /// The scope over the preview while grading, or nil for none.
+    @Binding var scopeKind: ScopeKind?
     @State private var tab = Tab.adjust
     @State private var haptics = DetentHaptics()
     @State private var naming = false
@@ -714,6 +721,12 @@ struct ExportGradeEditor: View {
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets())
             .haptic(.selection, trigger: tab)
+            Picker("Scope", selection: $scopeKind) {
+                Text("Off").tag(ScopeKind?.none)
+                ForEach(ScopeKind.allCases, id: \.self) { Text($0.label).tag(ScopeKind?.some($0)) }
+            }
+        } footer: {
+            Text("The scope sits over the preview's top left and measures what the export writes. A tap on it shows the next one.")
         }
         switch tab {
         case .looks: looks

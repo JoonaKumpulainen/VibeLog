@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import MachO
 
 private var crashFD: Int32 = -1
 
@@ -8,12 +9,21 @@ private func writeCrash(_ text: StaticString) {
     _ = write(crashFD, text.utf8Start, text.utf8CodeUnitCount)
 }
 
+/// Made before any crash, since a signal handler mustn't allocate.
+private let crashFrames = UnsafeMutablePointer<UnsafeMutableRawPointer?>.allocate(capacity: 64)
+private let crashDigits = UnsafeMutablePointer<UInt8>.allocate(capacity: 3)
+
 private func crashSignalHandler(_ signalNumber: Int32) {
     writeCrash("\n*** FATAL SIGNAL ")
-    var digits: [UInt8] = [
-        UInt8(48 + (signalNumber / 10) % 10), UInt8(48 + signalNumber % 10), 10,
-    ]
-    _ = write(crashFD, &digits, 3)
+    crashDigits[0] = UInt8(48 + (signalNumber / 10) % 10)
+    crashDigits[1] = UInt8(48 + signalNumber % 10)
+    crashDigits[2] = 10
+    _ = write(crashFD, crashDigits, 3)
+    // Each frame as image, address and symbol, which a Swift trap otherwise leaves out.
+    if crashFD >= 0 {
+        let count = backtrace(crashFrames, 64)
+        backtrace_symbols_fd(crashFrames, count, crashFD)
+    }
     signal(signalNumber, SIG_DFL)
     raise(signalNumber)
 }
@@ -58,9 +68,21 @@ public final class Log: ObservableObject {
                 + exception.callStackSymbols.prefix(30).joined(separator: "\n") + "\n"
             _ = text.withCString { write(crashFD, $0, strlen($0)) }
         }
+        // Globals start on first use, which a signal handler mustn't be.
+        _ = crashFrames
+        _ = crashDigits
         for number in [SIGABRT, SIGSEGV, SIGBUS, SIGILL, SIGTRAP, SIGFPE] {
             signal(number, crashSignalHandler)
         }
+        // Where the app's own images loaded, so a crash's addresses can be matched to the build.
+        var images: [String] = []
+        for index in 0..<_dyld_image_count() {
+            guard let name = _dyld_get_image_name(index).map({ String(cString: $0) }),
+                name.contains("VibeLog.app"), let header = _dyld_get_image_header(index)
+            else { continue }
+            images.append("\((name as NSString).lastPathComponent) at \(String(format: "0x%lx", UInt(bitPattern: header)))")
+        }
+        info("Images: " + images.joined(separator: ", "))
     }
 
     public func info(_ message: String) { add(.info, message) }

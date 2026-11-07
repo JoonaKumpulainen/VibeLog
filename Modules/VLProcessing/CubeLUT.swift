@@ -83,6 +83,8 @@ public struct CubeLUT: Sendable {
     /// texture lookup does. For building a LUT from this one on the CPU.
     public func sample(_ input: SIMD3<Float>) -> SIMD3<Float> {
         let last = Float(size - 1)
+        // A value that isn't a number would stop the app when it's made an index.
+        let input = SIMD3(input.x.isFinite ? input.x : 0, input.y.isFinite ? input.y : 0, input.z.isFinite ? input.z : 0)
         let unit = simd_clamp((input - domainMin) / (domainMax - domainMin), SIMD3(repeating: 0), SIMD3(repeating: 1))
         let position = unit * last
         let low = SIMD3<Int>(Int(position.x), Int(position.y), Int(position.z))
@@ -98,13 +100,15 @@ public struct CubeLUT: Sendable {
         return simd_mix(c0, c1, SIMD3(repeating: t.z))
     }
 
-    /// RGBA samples for a cubic rgba16Unorm texture.
+    /// RGBA samples for a cubic rgba16Unorm texture. A value that isn't a number becomes black:
+    /// converting one to an integer stops the app, as a graded export preview did on 2026-11-07.
     public var textureSamples: [UInt16] {
         var output = [UInt16]()
         output.reserveCapacity(samples.count * 4)
         for sample in samples {
             for channel in 0..<3 {
-                output.append(UInt16((min(max(sample[channel], 0), 1) * 65535).rounded()))
+                let value = sample[channel]
+                output.append(value.isFinite ? UInt16((min(max(value, 0), 1) * 65535).rounded()) : 0)
             }
             output.append(65535)
         }
