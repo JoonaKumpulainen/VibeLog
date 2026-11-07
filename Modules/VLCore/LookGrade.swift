@@ -16,6 +16,8 @@ public struct LookGrade: Codable, Equatable, Sendable {
     public var saturation = 1.0
     /// Hue, saturation and luminance for each colour, in `ColorBand` order.
     public var bands = [BandAdjust](repeating: BandAdjust(), count: ColorBand.allCases.count)
+    /// Colour and luminance for shadows, midtones and highlights, in `ToneRange` order.
+    public var wheels = [ToneWheel](repeating: ToneWheel(), count: ToneRange.allCases.count)
 
     public init() {}
 
@@ -29,6 +31,9 @@ public struct LookGrade: Codable, Equatable, Sendable {
         if temperature != 0 { parts.append(String(format: "temperature %+.0f", temperature * 100)) }
         if tint != 0 { parts.append(String(format: "tint %+.0f", tint * 100)) }
         if saturation != 1 { parts.append(String(format: "saturation %.0f%%", saturation * 100)) }
+        for range in ToneRange.allCases where !wheels[range.rawValue].isNeutral {
+            parts.append("\(range.name) \(wheels[range.rawValue].label)")
+        }
         for band in ColorBand.allCases where !bands[band.rawValue].isNeutral {
             parts.append("\(band.name) \(bands[band.rawValue].label)")
         }
@@ -48,6 +53,52 @@ public struct LookGrade: Codable, Equatable, Sendable {
         saturation = read(.saturation, 1)
         let saved = (try? values.decodeIfPresent([BandAdjust].self, forKey: .bands)) ?? nil
         if let saved, saved.count == ColorBand.allCases.count { bands = saved }
+        let savedWheels = (try? values.decodeIfPresent([ToneWheel].self, forKey: .wheels)) ?? nil
+        if let savedWheels, savedWheels.count == ToneRange.allCases.count { wheels = savedWheels }
+    }
+}
+
+/// The parts of the picture the wheels work on, by brightness against middle gray. They overlap
+/// softly and always add up to the whole picture.
+public enum ToneRange: Int, CaseIterable, Identifiable, Sendable {
+    case shadows, midtones, highlights
+
+    public var id: Int { rawValue }
+
+    public var name: String {
+        switch self {
+        case .shadows: return "shadows"
+        case .midtones: return "midtones"
+        case .highlights: return "highlights"
+        }
+    }
+}
+
+/// One wheel: a colour push, where `x` and `y` are a point in the wheel's disc, along Oklab's
+/// a and b axes, and a luminance change, -1 to 1, of up to a stop.
+public struct ToneWheel: Codable, Equatable, Sendable {
+    public var x = 0.0
+    public var y = 0.0
+    public var luminance = 0.0
+
+    public init() {}
+
+    public var isNeutral: Bool { self == ToneWheel() }
+
+    /// How far the puck is from the middle, 0 to 1.
+    public var amount: Double { min((x * x + y * y).squareRoot(), 1) }
+
+    /// The push's direction in Oklab hue degrees, 0 to 360.
+    public var hue: Double {
+        let degrees = atan2(y, x) * 180 / .pi
+        return degrees < 0 ? degrees + 360 : degrees
+    }
+
+    var label: String {
+        var parts: [String] = []
+        if amount > 0 { parts.append(String(format: "colour %.0f at hue %.0f", amount * 100, hue)) }
+        if luminance != 0 { parts.append(String(format: "luminance %+.0f", luminance * 100)) }
+        return parts.joined(separator: " ")
     }
 }
 

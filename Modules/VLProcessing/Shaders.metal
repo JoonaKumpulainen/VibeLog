@@ -417,6 +417,39 @@ kernel void lookPreview(texture2d<float, access::sample> image [[texture(0)]],
     output.write(float4(lookColor(saturate(logSample(image, uv)), k, lut), 1.0), gid);
 }
 
+// SMPTE ST 2084: a PQ code back to nits.
+static inline float pqNits(float code) {
+    const float m1 = 2610.0 / 16384.0;
+    const float m2 = 2523.0 / 4096.0 * 128.0;
+    const float c1 = 3424.0 / 4096.0;
+    const float c2 = 2413.0 / 4096.0 * 32.0;
+    const float c3 = 2392.0 / 4096.0 * 32.0;
+    float e = pow(saturate(code), 1.0 / m2);
+    return 10000.0 * pow(max(e - c1, 0.0) / (c2 - c3 * e), 1.0 / m1);
+}
+
+// For HDR10's content light levels: one thread a row of the log image, sent through the look, which
+// gives PQ codes in Rec.2020. Each row gives its brightest pixel and the sum over its pixels, both
+// as the brightest of red, green and blue in nits, as CTA-861.3 counts them.
+kernel void lightRows(texture2d<float, access::read> image [[texture(0)]],
+                      texture3d<float> lut [[texture(2)]],
+                      constant LookParams &k [[buffer(0)]],
+                      device float2 *rows [[buffer(1)]],
+                      uint y [[thread_position_in_grid]]) {
+    uint height = image.get_height();
+    if (y >= height) return;
+    uint width = image.get_width();
+    float brightest = 0.0;
+    float total = 0.0;
+    for (uint x = 0; x < width; x++) {
+        float3 codes = lookColor(saturate(image.read(uint2(x, y)).rgb), k, lut);
+        float nits = pqNits(max(codes.r, max(codes.g, codes.b)));
+        brightest = max(brightest, nits);
+        total += nits;
+    }
+    rows[y] = float2(brightest, total);
+}
+
 // Only for tests, which compare the viewfinder's math with MonitorTransform.display.
 kernel void monitorTransformTest(texture2d<float, access::read> image [[texture(0)]],
                                  texture2d<float, access::write> output [[texture(1)]],

@@ -24,6 +24,17 @@ struct ExportView: View {
     @State private var previewFailure: String?
     /// Only the newest look reaches the player, however the builds finish.
     @State private var previewGeneration = 0
+    /// The scope over the preview, measuring what plays, as the export will write it. Off is nil.
+    @State private var scopeKind: ScopeKind?
+    @State private var scope = PictureScope()
+    @State private var scopeLayer: CALayer = {
+        let layer = CALayer()
+        layer.contentsGravity = .resize
+        layer.magnificationFilter = .linear
+        return layer
+    }()
+    /// Where the preview was when an export took its item away, to return to after.
+    @State private var resumeAt = CMTime.zero
     /// The export's own grade, starting neutral, so a take isn't graded until the owner grades it,
     /// and changing it here leaves the camera's alone.
     @State private var grade = LookGrade()
@@ -113,10 +124,23 @@ struct ExportView: View {
             lutName = model.isAvailableLook(cameraLook) || cameraLook.isEmpty ? cameraLook : BuiltInLook.aces20.name
             lutMadeForRec709 = model.processing.lutExpectsRec709
             target = model.bakeTarget
+            scopeKind = model.isOn(.scope) ? model.scopeKind : nil
+            configureScope()
             player.replaceCurrentItem(with: AVPlayerItem(url: take.url))
             refreshPreview()
         }
+        .onChange(of: scopeKind) { _, _ in
+            configureScope()
+            // A paused preview draws no new frame by itself, so one is asked for to measure.
+            if scopeKind != nil, !scope.hasFrame, player.rate == 0, player.currentItem != nil {
+                player.seek(to: player.currentTime(), toleranceBefore: .zero, toleranceAfter: .zero)
+            }
+        }
+        .haptic(.selection, trigger: scopeKind)
         .onDisappear { player.pause() }
+        .onChange(of: job.progress == nil) { _, idle in
+            if idle { restorePreview() }
+        }
         .task { takeTurns = (try? await LookExporter.describe(take.url).quarterTurns) ?? 0 }
         .onChange(of: lutName) { _, _ in refreshPreview() }
         .onChange(of: lutMadeForRec709) { _, _ in refreshPreview() }
@@ -155,12 +179,33 @@ struct ExportView: View {
                     // needs, so the preview holds still until the export ends.
                     .allowsHitTesting(job.progress == nil)
                 if !previewReady {
-                    Text(previewFailure ?? "Loading preview")
+                    Text(job.progress != nil ? "Preview resumes after the export" : previewFailure ?? "Loading preview")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
             .aspectRatio(4 / 3, contentMode: .fit)
+            // At the top, clear of the player's controls. A tap shows the next kind.
+            .overlay(alignment: .topLeading) {
+                if let kind = scopeKind, previewReady {
+                    ZStack(alignment: .topLeading) {
+                        LayerHost(layer: scopeLayer)
+                        Text(kind.label)
+                            .font(Tokens.markFont)
+                            .foregroundStyle(Tokens.label)
+                            .padding(3)
+                    }
+                    .frame(
+                        width: kind == .vectorscope ? 110 : 176,
+                        height: kind == .vectorscope ? 110 : 104)
+                    .clipShape(RoundedRectangle(cornerRadius: Tokens.panelRadius))
+                    .contentShape(Rectangle())
+                    .onTapGesture { scopeKind = kind.next }
+                    .padding(8)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityLabel("Scope, \(kind.label)")
+                }
+            }
             Text("\(curve.label) in \(gamut.label). Plays with the look, as the export will write it"
                 + (grade.isNeutral ? "." : ", graded."))
                 .font(.caption2)
@@ -193,6 +238,10 @@ struct ExportView: View {
                         LabeledContent("Grade", value: grade.isNeutral && effects.isNeutral ? "None" : "Changed")
                     }
                     .disabled(job.progress != nil)
+                    Picker("Scope", selection: $scopeKind) {
+                        Text("Off").tag(ScopeKind?.none)
+                        ForEach(ScopeKind.allCases, id: \.self) { Text($0.label).tag(ScopeKind?.some($0)) }
+                    }
                     if lutName == BuiltInLook.aces20.name {
                         Picker("Output", selection: $target) {
                             ForEach(BakeTarget.allCases) { Text($0.label).tag($0) }
@@ -261,9 +310,21 @@ struct ExportView: View {
             codec: codec, quality: quality, resolution: resolution, crop: crop)
     }
 
+    private func configureScope() {
+        let layer = scopeLayer
+        scope.configure(kind: scopeKind, overlaid: model.scopeOverlaid) { image in
+            DispatchQueue.main.async {
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                layer.contents = image
+                CATransaction.commit()
+            }
+        }
+    }
+
     /// Gives the player the chosen look. The item keeps its place, and a paused one redraws.
     private func refreshPreview() {
-        let (chosen, takeCurve, takeGamut) = (choice, curve, gamut)
+        let (chosen, takeCurve, takeGamut, scope) = (choice, curve, gamut, scope)
         let sourceRec709 = ExportChoice.sourceRec709(take)
         let url = take.url
         previewGeneration += 1
@@ -272,7 +333,7 @@ struct ExportView: View {
             do {
                 let look = chosen.previewLook(curve: takeCurve, gamut: takeGamut, sourceRec709: sourceRec709)
                 guard let exporter = LookExporter(look: look) else { throw LookExporter.Failure.gpu }
-                let composition = try await LookPlayback.composition(for: AVURLAsset(url: url), exporter: exporter)
+                let composition = try await LookPlayback.composition(for: AVURLAsset(url: url), exporter: exporter, scope: scope)
                 await MainActor.run {
                     guard generation == previewGeneration, let item = player.currentItem else { return }
                     item.videoComposition = composition
@@ -292,9 +353,23 @@ struct ExportView: View {
         }
     }
 
+    /// A paused player still holds its decoded 16-bit frames and can render the look ahead, on the
+    /// GPU and memory the export needs, so the export runs with no item in the player at all.
     private func startExport() {
         player.pause()
+        resumeAt = player.currentTime()
+        previewGeneration += 1
+        previewReady = false
+        player.replaceCurrentItem(with: nil)
         job.start(take: take, choice: choice)
+    }
+
+    /// Gives the preview its take back where it was once an export ends, however it ends.
+    private func restorePreview() {
+        guard player.currentItem == nil else { return }
+        player.replaceCurrentItem(with: AVPlayerItem(url: take.url))
+        player.seek(to: resumeAt, toleranceBefore: .zero, toleranceAfter: .zero)
+        refreshPreview()
     }
 }
 
@@ -485,8 +560,8 @@ final class LookExportJob: ObservableObject {
         Log.shared.info("Export of \(take.url.lastPathComponent) writes \(format), from \(source.width)x\(source.height)")
         let scratch = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
         defer { try? FileManager.default.removeItem(at: scratch) }
-        let name = take.url.deletingPathExtension().lastPathComponent + "_look.mov"
-        let destination = Storage.videos.appendingPathComponent(name)
+        let destination = TakeLibrary.exportURL(for: take.url, in: Storage.videos)
+        let name = destination.lastPathComponent
 
         var metadata = take.info?.metadata ?? [:]
         metadata["look"] = lookLabel
@@ -494,13 +569,28 @@ final class LookExportJob: ObservableObject {
         metadata["exportedFrom"] = take.url.lastPathComponent
         metadata["exportFormat"] = format
         let rate = take.info?.metadata["frameRate"].flatMap(Double.init) ?? 30
+        // HDR10 in HEVC states its content light levels, which a first pass over the frames measures,
+        // since the encoder needs them before its first frame. It takes the first part of the bar.
+        var contentLight: (maxCLL: Int, maxFALL: Int)?
+        let lightShare = fileTag == .pq && preset.codec == .hevc ? 0.35 : 0
+        if lightShare > 0 {
+            trace.begin("measuring light levels")
+            contentLight = try await exporter.measureLight(
+                from: take.url, seconds: source.seconds, progress: { progress($0 * lightShare) },
+                cancelled: { stop.isSet })
+            if let contentLight {
+                metadata["contentLight"] = "MaxCLL \(contentLight.maxCLL) nits, MaxFALL \(contentLight.maxFALL) nits"
+            }
+        }
         trace.begin("starting the \(preset.id) encoder at \(size.width)x\(size.height), \(rate) fps")
         let encoder = try VideoEncoder(config: .init(
             url: scratch, preset: preset, size: EncoderSize(width: size.width, height: size.height),
-            frameRate: rate, audio: false, realTime: false, metadata: metadata, fileTag: fileTag))
+            frameRate: rate, audio: false, realTime: false, metadata: metadata, fileTag: fileTag,
+            contentLight: contentLight))
         trace.begin("baking frames")
         try await exporter.export(
-            from: take.url, into: encoder, seconds: source.seconds, progress: progress, cancelled: { stop.isSet })
+            from: take.url, into: encoder, seconds: source.seconds,
+            progress: { progress(lightShare + $0 * (1 - lightShare)) }, cancelled: { stop.isSet })
         trace.begin("finishing the encoder")
         var result = await withCheckedContinuation { continuation in
             encoder.finish { continuation.resume(returning: $0) }
@@ -578,7 +668,7 @@ struct ExportGradeEditor: View {
     @State private var naming = false
     @State private var styleName = ""
 
-    enum Tab: String, CaseIterable { case looks = "Looks", adjust = "Adjust", color = "Color", fx = "FX" }
+    enum Tab: String, CaseIterable { case looks = "Looks", adjust = "Adjust", color = "Color", wheels = "Wheels", fx = "FX" }
 
     var body: some View {
         Section {
@@ -594,6 +684,7 @@ struct ExportGradeEditor: View {
         case .looks: looks
         case .adjust: adjust
         case .color: colors
+        case .wheels: wheels
         case .fx: fx
         }
         Section {
@@ -665,9 +756,46 @@ struct ExportGradeEditor: View {
                     range: control.range)
             }
             Button("Reset Adjustments", role: .destructive) {
-                let bands = grade.bands
+                let (bands, wheels) = (grade.bands, grade.wheels)
                 grade = LookGrade()
                 grade.bands = bands
+                grade.wheels = wheels
+            }
+        }
+    }
+
+    @ViewBuilder private var wheels: some View {
+        ForEach(ToneRange.allCases) { range in
+            Section {
+                HStack {
+                    Spacer()
+                    ToneWheelPad(
+                        wheel: grade.wheels[range.rawValue], diameter: 150,
+                        change: { x, y in
+                            let old = grade.wheels[range.rawValue].amount
+                            grade.wheels[range.rawValue].x = x
+                            grade.wheels[range.rawValue].y = y
+                            haptics.moved(
+                                from: Int((old * 20).rounded()),
+                                to: Int((grade.wheels[range.rawValue].amount * 20).rounded()), neutral: 0)
+                        },
+                        end: {})
+                    Spacer()
+                }
+                .padding(.vertical, 6)
+                sliderRow(
+                    "Luminance", text: String(format: "%+.0f", grade.wheels[range.rawValue].luminance * 100),
+                    value: Binding(
+                        get: { grade.wheels[range.rawValue].luminance },
+                        set: { grade.wheels[range.rawValue].luminance = ($0 * 100).rounded() / 100 }),
+                    range: -1...1)
+                if !grade.wheels[range.rawValue].isNeutral {
+                    Button("Reset \(range.name.capitalized)", role: .destructive) {
+                        grade.wheels[range.rawValue] = ToneWheel()
+                    }
+                }
+            } header: {
+                Text(range.name.capitalized)
             }
         }
     }

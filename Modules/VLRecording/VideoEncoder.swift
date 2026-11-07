@@ -22,12 +22,15 @@ public final class VideoEncoder: VideoFrameSink {
         /// Clockwise turn for playback, in degrees. The pixels stay as the sensor recorded them.
         public var rotationDegrees: Int
         public var fileTag: FileTag
+        /// HDR10's MaxCLL and MaxFALL in nits, for a PQ HEVC file whose frames were measured first.
+        public var contentLight: (maxCLL: Int, maxFALL: Int)?
 
         public init(
             url: URL, preset: EncoderPreset, size: EncoderSize, frameRate: Double = 30, audio: Bool,
             pcmAudio: Bool = false, audioChannels: Int = 1, realTime: Bool = true, metadata: [String: String] = [:], rotationDegrees: Int = 0,
-            fileTag: FileTag = .rec2020
+            fileTag: FileTag = .rec2020, contentLight: (maxCLL: Int, maxFALL: Int)? = nil
         ) {
+            self.contentLight = contentLight
             self.url = url
             self.preset = preset
             self.size = size
@@ -109,7 +112,7 @@ public final class VideoEncoder: VideoFrameSink {
 
         var settings = config.preset.outputSettings(
             width: config.size.width, height: config.size.height, frameRate: config.frameRate,
-            tag: config.fileTag)
+            tag: config.fileTag, contentLight: config.contentLight)
         if !writer.canApply(outputSettings: settings, forMediaType: .video), config.fileTag == .pq {
             // Without the mastering display, if this encoder won't take it: PQ still plays as HDR.
             Log.shared.warn("HDR10 mastering metadata refused, writing PQ without it")

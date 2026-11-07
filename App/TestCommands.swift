@@ -121,7 +121,7 @@ extension AppModel {
         let wanted = command.name.flatMap(TestLinkAddress.safeName) ?? "newest"
         let takes = TakeLibrary.takes()
         let found = wanted == "newest"
-            ? takes.first { ExportChoice.isLog($0) && !$0.url.deletingPathExtension().lastPathComponent.hasSuffix("_look") }
+            ? takes.first { ExportChoice.isLog($0) && !TakeLibrary.isExport($0.url) }
             : takes.first { $0.url.lastPathComponent == wanted }
         guard let take = found else { return wanted == "newest" ? "No take in log to export" : "No take named \(wanted)" }
         guard ExportChoice.isLog(take) else { return "\(take.url.lastPathComponent) already has its look baked in" }
@@ -374,11 +374,22 @@ extension AppModel {
             previewStyle(style)
             return nil
         case "grade":
-            // "none", or names and values such as exposure=0.5,saturation=1.2, from the slider ranges.
+            // "none", or names and values such as exposure=0.5,saturation=1.2, from the slider ranges,
+            // and wheels as shadows=x:y:luminance, each -1 to 1.
             guard !isRecording else { return "grade can't change during a take" }
             var grade = LookGrade()
             for part in value.split(separator: ",") where value != "none" {
                 let pair = part.split(separator: "=")
+                if pair.count == 2, let range = ToneRange.allCases.first(where: { $0.name == String(pair[0]) }) {
+                    let numbers = pair[1].split(separator: ":").compactMap { Double($0) }
+                    guard numbers.count == 3, numbers.allSatisfy({ (-1...1).contains($0) }) else {
+                        return "a wheel takes shadows, midtones or highlights as name=x:y:luminance, each -1 to 1"
+                    }
+                    grade.wheels[range.rawValue].x = numbers[0]
+                    grade.wheels[range.rawValue].y = numbers[1]
+                    grade.wheels[range.rawValue].luminance = numbers[2]
+                    continue
+                }
                 guard pair.count == 2, let number = Double(pair[1]),
                     let control = GradeControl.allCases.first(where: { "\($0)" == String(pair[0]) }),
                     control.range.contains(number)

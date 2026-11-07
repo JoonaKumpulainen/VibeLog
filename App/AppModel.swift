@@ -561,8 +561,10 @@ final class AppModel: ObservableObject {
 
     /// Haptic ticks across the app, from Settings.
     @Published var hapticsOn = true { didSet { Haptics.isOn = hapticsOn } }
-    /// Where the scope sits, as held, after the owner drags it to a corner.
-    @Published var scopeCorner = HeldCorner.bottomLeft
+    /// The screen corner the scope sits in, after the owner drags it there, in every hold.
+    @Published var scopeCorner = ScreenCorner.bottomLeft
+    /// The scope's size against its standard one, from its resize handle.
+    @Published var scopeScale = 1.0
 
     /// RGB and YRGB draw their channels in one panel, mixing toward white where they agree.
     @Published var scopeOverlaid = true { didSet { updateScope() } }
@@ -662,6 +664,7 @@ final class AppModel: ObservableObject {
         config.scopeOverlaid = scopeOverlaid
         config.haptics = hapticsOn
         config.scopeCorner = scopeCorner.rawValue
+        config.scopeScale = scopeScale
         config.testServer = testServer
         config.testToken = testToken
         return config
@@ -744,7 +747,8 @@ final class AppModel: ObservableObject {
         lookEffects = saved.lookEffects
         scopeOverlaid = saved.scopeOverlaid
         hapticsOn = saved.haptics
-        scopeCorner = HeldCorner(rawValue: saved.scopeCorner) ?? .bottomLeft
+        scopeCorner = ScreenCorner(rawValue: saved.scopeCorner) ?? .bottomLeft
+        scopeScale = saved.scopeScale
     }
 
     /// What a preset keeps. Zebras and false color only ever reach the file through here.
@@ -1678,7 +1682,8 @@ final class AppModel: ObservableObject {
             "hotDebayer": processing.bilinearWhenHot ? "Bilinear when hot" : "stays on the chosen debayer",
             "gyroLog": saveGyroLog ? "on" : "off",
             "thermalAtStart": SystemStatus.thermalName,
-            "note": "The file's transfer tag is nominal; decode with the curve named here.",
+            "note": bakeLook ? "The look is baked in, and the file's tags describe it."
+                : "The file's transfer tag is nominal; decode with the curve named here.",
         ]
         do {
             let encoder = try VideoEncoder(config: .init(

@@ -112,8 +112,10 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var scopeOverlaid = true
     /// Haptic ticks across the app.
     public var haptics = true
-    /// The picture's corner the scope sits in, as held: bottomLeft, bottomRight, topLeft or topRight.
+    /// The screen's corner the scope sits in, whatever the hold: bottomLeft, bottomRight, topLeft or topRight.
     public var scopeCorner = "bottomLeft"
+    /// The scope's size against its standard one, set with its resize handle.
+    public var scopeScale = 1.0
     /// Styles the owner saved, kept on the device apart from presets, as the presets are.
     public var styles: [LookStyle] = []
     /// Moves to the Efficient path while the phone is hot.
@@ -183,6 +185,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         scopeOverlaid = read(.scopeOverlaid, defaults.scopeOverlaid)
         haptics = read(.haptics, defaults.haptics)
         scopeCorner = read(.scopeCorner, defaults.scopeCorner)
+        scopeScale = read(.scopeScale, defaults.scopeScale)
         styles = read(.styles, defaults.styles)
         efficientWhenHot = read(.efficientWhenHot, defaults.efficientWhenHot)
         frameGuide = read(.frameGuide, defaults.frameGuide)

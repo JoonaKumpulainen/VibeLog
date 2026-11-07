@@ -2,6 +2,7 @@ import AVFoundation
 import CoreGraphics
 import CoreVideo
 import Metal
+import VideoToolbox
 import XCTest
 import VLCore
 @testable import VLProcessing
@@ -2118,6 +2119,36 @@ final class LookGradeTests: XCTestCase {
         XCTAssertEqual(grade.exposure, 0.5)
         XCTAssertEqual(grade.bands.count, ColorBand.allCases.count)
         XCTAssertTrue(grade.bands.allSatisfy(\.isNeutral))
+        XCTAssertEqual(grade.wheels.count, ToneRange.allCases.count)
+        XCTAssertTrue(grade.wheels.allSatisfy(\.isNeutral))
+    }
+
+    /// The three ranges share every brightness between them, and each owns its own end.
+    func testToneWeightsAddUpToOne() {
+        for stops in stride(from: -10.0, through: 10.0, by: 0.25) {
+            let weights = GradeTransform.toneWeights(luminance: 0.18 * pow(2, stops))
+            XCTAssertEqual(weights.sum(), 1, accuracy: 1e-9, "at \(stops) stops")
+        }
+        XCTAssertEqual(GradeTransform.toneWeights(luminance: 0.18).y, 1, accuracy: 1e-9)
+        XCTAssertEqual(GradeTransform.toneWeights(luminance: 0.18 / 64).x, 1, accuracy: 1e-9)
+        XCTAssertEqual(GradeTransform.toneWeights(luminance: 0.18 * 64).z, 1, accuracy: 1e-9)
+    }
+
+    /// A shadows push tints a dark gray toward its colour and leaves highlights and middle gray
+    /// alone; shadow luminance lifts the dark gray a stop.
+    func testShadowWheelWorksOnShadowsOnly() {
+        var grade = LookGrade()
+        grade.wheels[ToneRange.shadows.rawValue].x = 0.7
+        grade.wheels[ToneRange.shadows.rawValue].luminance = 1
+        let transform = GradeTransform(grade)
+        let dark = SIMD3<Double>(repeating: 0.18 / 64)
+        let out = transform.apply(dark)
+        // Oklab's +a is toward red and magenta, away from green.
+        XCTAssertGreaterThan(out.x, out.y)
+        XCTAssertEqual(simd_dot(out, GradeTransform.luma) / simd_dot(dark, GradeTransform.luma), 2, accuracy: 0.15)
+        let bright = SIMD3<Double>(repeating: 0.18 * 64)
+        XCTAssertEqual(simd_length(transform.apply(bright) - bright), 0, accuracy: 1e-9)
+        XCTAssertEqual(simd_length(transform.apply(gray) - gray), 0, accuracy: 1e-9)
     }
 
     /// An identity cube over the unit range, red fastest.
@@ -2235,6 +2266,44 @@ final class ScopeTests: XCTestCase {
         }
         XCTAssertEqual(kind, .waveform)
         XCTAssertEqual(Set(seen.map(\.rawValue)).count, ScopeKind.allCases.count)
+    }
+
+    /// The export screen's scope counts a picture as the kernel does: a gray left half and a red
+    /// right half land at their levels, in their columns, and red sits off the vectorscope's middle.
+    func testPictureScopeCountsAPicture() throws {
+        var made: CVPixelBuffer?
+        CVPixelBufferCreate(nil, 320, 240, kCVPixelFormatType_32BGRA, nil, &made)
+        let buffer = try XCTUnwrap(made)
+        CVPixelBufferLockBaseAddress(buffer, [])
+        let base = try XCTUnwrap(CVPixelBufferGetBaseAddress(buffer)).assumingMemoryBound(to: UInt8.self)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
+        for y in 0..<240 {
+            for x in 0..<320 {
+                let pixel = base + y * bytesPerRow + x * 4
+                let (b, g, r): (UInt8, UInt8, UInt8) = x < 160 ? (128, 128, 128) : (0, 0, 255)
+                pixel[0] = b
+                pixel[1] = g
+                pixel[2] = r
+                pixel[3] = 255
+            }
+        }
+        CVPixelBufferUnlockBaseAddress(buffer, [])
+
+        let counts = try XCTUnwrap(PictureScope.count(buffer))
+        XCTAssertEqual(counts.columns, 256)
+        XCTAssertEqual(counts.rows, 192)
+        let levels = ScopeMeter.levels
+        let top = Double(levels - 1)
+        let gray = Int((128.0 / 255 * top).rounded())
+        // Luma of the left column is all at gray, and the right column's red channel is all at the top.
+        XCTAssertEqual(counts.wave[(0 * levels + gray) * 256 + 10], 192)
+        XCTAssertEqual(counts.wave[(1 * levels + levels - 1) * 256 + 250], 192)
+        XCTAssertEqual(counts.histogram.reduce(0, +), UInt32(4 * 256 * 192))
+        // Gray falls in the middle, within rounding of the half-way level.
+        let grayBin = try XCTUnwrap(counts.vector.firstIndex(of: 128 * 192))
+        XCTAssertLessThanOrEqual(abs(Double(grayBin / levels) - top / 2), 1)
+        XCTAssertLessThanOrEqual(abs(Double(grayBin % levels) - top / 2), 1)
+        XCTAssertEqual(counts.vector.reduce(0, +), UInt32(256 * 192))
     }
 }
 
@@ -2388,5 +2457,32 @@ final class HDRTests: XCTestCase {
 
     func testMasteringDisplayIsTwentyFourBytes() {
         XCTAssertEqual(EncoderPreset.hdr10MasteringDisplay.count, 24)
+    }
+
+    /// MaxCLL then MaxFALL, big-endian, and only a PQ HEVC file asks for them.
+    func testContentLightLevelBytes() throws {
+        XCTAssertEqual([UInt8](EncoderPreset.contentLightLevel(maxCLL: 1000, maxFALL: 400)), [0x03, 0xE8, 0x01, 0x90])
+        let hevc = try XCTUnwrap(EncoderPreset.all.first { $0.codec == .hevc })
+        let key = kVTCompressionPropertyKey_ContentLightLevelInfo as String
+        let pq = hevc.outputSettings(width: 8, height: 8, tag: .pq, contentLight: (1000, 400))
+        XCTAssertNotNil((pq[AVVideoCompressionPropertiesKey] as? [String: Any])?[key])
+        let hlg = hevc.outputSettings(width: 8, height: 8, tag: .hlg, contentLight: (1000, 400))
+        XCTAssertNil((hlg[AVVideoCompressionPropertiesKey] as? [String: Any])?[key])
+    }
+
+    /// A second export of a take gets the next number instead of replacing the first.
+    func testExportsAreNumbered() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let take = folder.appendingPathComponent("video_1.mov")
+        let first = TakeLibrary.exportURL(for: take, in: folder)
+        XCTAssertEqual(first.lastPathComponent, "video_1_look.mov")
+        FileManager.default.createFile(atPath: first.path, contents: Data())
+        let second = TakeLibrary.exportURL(for: take, in: folder)
+        XCTAssertEqual(second.lastPathComponent, "video_1_look2.mov")
+        XCTAssertTrue(TakeLibrary.isExport(first))
+        XCTAssertTrue(TakeLibrary.isExport(second))
+        XCTAssertFalse(TakeLibrary.isExport(take))
     }
 }

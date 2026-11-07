@@ -7,8 +7,11 @@ public enum LookPlayback {
     /// Playback is drawn at most this wide, which is plenty for the screen and keeps it at the take's rate.
     static let maximumWidth = 1920
 
-    /// A composition for `asset` that draws every frame through `exporter`'s look.
-    public static func composition(for asset: AVAsset, exporter: LookExporter) async throws -> AVVideoComposition {
+    /// A composition for `asset` that draws every frame through `exporter`'s look, and hands the
+    /// frames it draws to `scope` to measure.
+    public static func composition(
+        for asset: AVAsset, exporter: LookExporter, scope: PictureScope? = nil
+    ) async throws -> AVVideoComposition {
         guard let track = try await asset.loadTracks(withMediaType: .video).first else {
             throw LookExporter.Failure.noVideo
         }
@@ -30,7 +33,7 @@ public enum LookPlayback {
         composition.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
         composition.instructions = [LookInstruction(
             timeRange: CMTimeRange(start: .zero, duration: duration), trackID: track.trackID, exporter: exporter,
-            quarterTurns: turns)]
+            quarterTurns: turns, scope: scope)]
         return composition
     }
 
@@ -51,9 +54,14 @@ final class LookInstruction: NSObject, AVVideoCompositionInstructionProtocol {
     let trackID: CMPersistentTrackID
     let exporter: LookExporter
     let quarterTurns: Int
+    let scope: PictureScope?
 
-    init(timeRange: CMTimeRange, trackID: CMPersistentTrackID, exporter: LookExporter, quarterTurns: Int) {
+    init(
+        timeRange: CMTimeRange, trackID: CMPersistentTrackID, exporter: LookExporter, quarterTurns: Int,
+        scope: PictureScope?
+    ) {
         self.timeRange = timeRange
+        self.scope = scope
         self.trackID = trackID
         self.exporter = exporter
         self.quarterTurns = quarterTurns
@@ -92,6 +100,7 @@ final class LookCompositor: NSObject, AVVideoCompositing {
             }
             do {
                 try instruction.exporter.render(frame, into: output, quarterTurns: instruction.quarterTurns)
+                instruction.scope?.measure(output)
                 request.finish(withComposedVideoFrame: output)
             } catch {
                 request.finish(with: error)

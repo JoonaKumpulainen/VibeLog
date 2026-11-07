@@ -125,8 +125,20 @@ public struct EncoderPreset: Identifiable, Hashable, Sendable {
         return bytes
     }()
 
+    /// HDR10's content light levels as SEI's content_light_level_info: MaxCLL then MaxFALL in
+    /// whole nits, each a big-endian 16-bit value.
+    static func contentLightLevel(maxCLL: Int, maxFALL: Int) -> Data {
+        var bytes = Data()
+        for value in [maxCLL, maxFALL] {
+            var v = UInt16(clamping: max(value, 0)).bigEndian
+            withUnsafeBytes(of: &v) { bytes.append(contentsOf: $0) }
+        }
+        return bytes
+    }
+
     func outputSettings(
-        width: Int, height: Int, frameRate: Double = 30, tag: FileTag = .rec2020, hdrMetadata: Bool = true
+        width: Int, height: Int, frameRate: Double = 30, tag: FileTag = .rec2020, hdrMetadata: Bool = true,
+        contentLight: (maxCLL: Int, maxFALL: Int)? = nil
     ) -> [String: Any] {
         var settings: [String: Any] = [
             AVVideoCodecKey: codec,
@@ -144,6 +156,11 @@ public struct EncoderPreset: Identifiable, Hashable, Sendable {
             if let profile { compression[AVVideoProfileLevelKey] = profile }
             if tag == .pq, codec == .hevc, hdrMetadata {
                 compression[kVTCompressionPropertyKey_MasteringDisplayColorVolume as String] = Self.hdr10MasteringDisplay
+                // Only export knows them, from a first pass over the take; live takes can't.
+                if let contentLight {
+                    compression[kVTCompressionPropertyKey_ContentLightLevelInfo as String] =
+                        Self.contentLightLevel(maxCLL: contentLight.maxCLL, maxFALL: contentLight.maxFALL)
+                }
             }
             // An HLG take failed on its first frame with -12902, a parameter the encoder refused,
             // where PQ wrote. Left to itself, the encoder makes its own HDR metadata for HLG,

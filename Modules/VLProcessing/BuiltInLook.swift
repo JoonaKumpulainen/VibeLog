@@ -108,6 +108,7 @@ public struct GradeTransform: Sendable {
     public let grade: LookGrade
     private let whiteBalance: simd_double3x3
     private let hasBands: Bool
+    private let hasWheels: Bool
 
     /// Rec.2020's luminance weights.
     static let luma = SIMD3<Double>(0.2627, 0.6780, 0.0593)
@@ -117,6 +118,7 @@ public struct GradeTransform: Sendable {
         self.grade = grade
         whiteBalance = Self.whiteBalance(temperature: grade.temperature, tint: grade.tint)
         hasBands = grade.bands.contains { !$0.isNeutral }
+        hasWheels = grade.wheels.contains { !$0.isNeutral }
     }
 
     public func apply(_ input: SIMD3<Double>) -> SIMD3<Double> {
@@ -132,8 +134,48 @@ public struct GradeTransform: Sendable {
             let graded = simd_dot(rgb, Self.luma)
             rgb = graded + grade.saturation * (rgb - graded)
         }
+        if hasWheels { rgb = applyWheels(rgb) }
         if hasBands { rgb = applyBands(rgb) }
         return rgb
+    }
+
+    /// How much of each range a brightness belongs to, from its stops against middle gray:
+    /// shadows fade out from 4 stops under to half a stop under, highlights fade in from half a
+    /// stop over to 4 over, and midtones take the rest, so the three always add up to one.
+    static func toneWeights(luminance y: Double) -> SIMD3<Double> {
+        let stops = y > 0 ? log2(y / middleGray) : -20
+        let shadows = 1 - smoothstep(-4, -0.5, stops)
+        let highlights = smoothstep(0.5, 4, stops)
+        return SIMD3(shadows, max(1 - shadows - highlights, 0), highlights)
+    }
+
+    /// The most a wheel pushes Oklab's a and b, against the colour's own lightness, so dark
+    /// colours move in proportion and black stays black.
+    static let wheelReach = 0.1
+
+    /// Each wheel adds colour along its direction in Oklab, keeping the lightness, so a push
+    /// tints neutrals too, as a colourist's wheels do. Then each range's luminance scales the
+    /// light, up to a stop. The ranges blend softly, so a push has no edge.
+    private func applyWheels(_ rgb: SIMD3<Double>) -> SIMD3<Double> {
+        let y = simd_dot(rgb, Self.luma)
+        guard y > 0 else { return rgb }
+        let weights = Self.toneWeights(luminance: y)
+        var push = SIMD2<Double>()
+        var stops = 0.0
+        for range in ToneRange.allCases {
+            let wheel = grade.wheels[range.rawValue]
+            let weight = weights[range.rawValue]
+            push += weight * SIMD2(wheel.x, wheel.y)
+            stops += weight * wheel.luminance
+        }
+        var result = rgb
+        if push != .zero {
+            let lab = Self.oklab(rgb)
+            let moved = SIMD3(lab.x, lab.y + push.x * Self.wheelReach * lab.x, lab.z + push.y * Self.wheelReach * lab.x)
+            let lms = Self.labToLMS * moved
+            result = Self.lmsToRec2020 * (lms * lms * lms)
+        }
+        return stops == 0 ? result : result * pow(2, stops)
     }
 
 

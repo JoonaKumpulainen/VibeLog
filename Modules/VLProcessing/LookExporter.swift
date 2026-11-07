@@ -54,6 +54,7 @@ public final class LookExporter {
     private let queue: MTLCommandQueue
     private let decodeState: MTLComputePipelineState
     private let previewState: MTLComputePipelineState
+    private let lightState: MTLComputePipelineState
     private var cache: CVMetalTextureCache?
     private let look: LookParams
     private let lutTexture: MTLTexture?
@@ -70,9 +71,12 @@ public final class LookExporter {
             let library = try? pipeline.device.makeDefaultLibrary(bundle: Bundle(for: ProcessingPipeline.self)),
             let decode = library.makeFunction(name: "decodeVideo"),
             let preview = library.makeFunction(name: "lookPreview"),
+            let light = library.makeFunction(name: "lightRows"),
             let decodeState = try? pipeline.device.makeComputePipelineState(function: decode),
-            let previewState = try? pipeline.device.makeComputePipelineState(function: preview)
+            let previewState = try? pipeline.device.makeComputePipelineState(function: preview),
+            let lightState = try? pipeline.device.makeComputePipelineState(function: light)
         else { return nil }
+        self.lightState = lightState
         self.pipeline = pipeline
         self.queue = queue
         self.decodeState = decodeState
@@ -231,6 +235,82 @@ public final class LookExporter {
         Log.shared.info("Export memory after \(frames) frames: \(Self.memoryText)")
         if reader.status == .failed { throw Failure.cannotRead(reader.error?.localizedDescription ?? "unknown") }
         progress(1)
+    }
+
+    /// HDR10's MaxCLL and MaxFALL in nits, from a first pass over every frame with the look and
+    /// effects, before the export writes any: the brightest pixel in the take, and the brightest
+    /// frame's average, each counting a pixel's brightest channel. Only for a PQ look. It measures
+    /// the whole frame, so a crop can only make the true values lower.
+    public func measureLight(
+        from url: URL, seconds: Double, progress: (Double) -> Void, cancelled: () -> Bool
+    ) async throws -> (maxCLL: Int, maxFALL: Int) {
+        let (reader, output) = try await makeReader(url, from: 0)
+        defer { reader.cancelReading() }
+        var first: CMTime?
+        var brightest: Float = 0
+        var brightestFrame: Float = 0
+        var rowsBuffer: MTLBuffer?
+        let start = Date()
+        var frames = 0
+        while true {
+            if cancelled() { throw Failure.cancelled }
+            let finished: Bool = try autoreleasepool {
+                guard let sample = output.copyNextSampleBuffer() else { return true }
+                guard let frame = CMSampleBufferGetImageBuffer(sample) else { return false }
+                let time = CMSampleBufferGetPresentationTimeStamp(sample)
+                first = first ?? time
+                let height = CVPixelBufferGetHeight(frame)
+                let width = CVPixelBufferGetWidth(frame)
+                if rowsBuffer == nil || rowsBuffer!.length < height * 8 {
+                    rowsBuffer = pipeline.device.makeBuffer(length: height * 8, options: .storageModeShared)
+                }
+                guard let rowsBuffer, let commands = queue.makeCommandBuffer(),
+                    let decoded = decode(frame, commands: commands),
+                    let source = withEffects(decoded.image, commands: commands),
+                    let lut = lutTexture ?? pipeline.placeholderTexture,
+                    let encoder = commands.makeComputeCommandEncoder()
+                else { throw Failure.gpu }
+                var parameters = look
+                encoder.setComputePipelineState(lightState)
+                encoder.setTexture(source, index: 0)
+                encoder.setTexture(lut, index: 2)
+                encoder.setBytes(&parameters, length: MemoryLayout<LookParams>.stride, index: 0)
+                encoder.setBuffer(rowsBuffer, offset: 0, index: 1)
+                let threads = min(lightState.maxTotalThreadsPerThreadgroup, 64)
+                encoder.dispatchThreads(
+                    MTLSize(width: height, height: 1, depth: 1),
+                    threadsPerThreadgroup: MTLSize(width: threads, height: 1, depth: 1))
+                encoder.endEncoding()
+                commands.commit()
+                commands.waitUntilCompleted()
+                withExtendedLifetime(decoded.wrapped) {}
+                if let cache { CVMetalTextureCacheFlush(cache, 0) }
+                guard commands.status == .completed else { throw Failure.gpu }
+                let rows = UnsafeBufferPointer(
+                    start: rowsBuffer.contents().assumingMemoryBound(to: SIMD2<Float>.self), count: height)
+                var total: Float = 0
+                for row in rows {
+                    brightest = max(brightest, row.x)
+                    total += row.y
+                }
+                brightestFrame = max(brightestFrame, total / Float(max(width * height, 1)))
+                if seconds > 0, let first { progress(min((time - first).seconds / seconds, 1)) }
+                return false
+            }
+            if finished { break }
+            frames += 1
+        }
+        if reader.status == .failed { throw Failure.cannotRead(reader.error?.localizedDescription ?? "unknown") }
+        // Grain then starts the export from the same frame it would without the pass.
+        effectsFrame = 0
+        // MaxFALL can't exceed MaxCLL; rounding up keeps the brightest pixel inside the stated level.
+        let maxCLL = Int(brightest.rounded(.up))
+        let maxFALL = min(Int(brightestFrame.rounded(.up)), maxCLL)
+        Log.shared.info(
+            "Export light levels over \(frames) frames in "
+                + String(format: "%.1f s", Date().timeIntervalSince(start))
+                + ": MaxCLL \(maxCLL) nits, MaxFALL \(maxFALL) nits")
+        return (maxCLL, maxFALL)
     }
 
     /// The app's footprint and what it may still allocate, the two numbers that say how near the

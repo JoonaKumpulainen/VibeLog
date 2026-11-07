@@ -124,7 +124,12 @@ final class ScopeMeter: @unchecked Sendable {
         encoder.endEncoding()
         commands.addCompletedHandler { [self] _ in
             queue.async { [self] in
-                if let image = render(kind, overlaid: overlaid, params: params) { deliver(image) }
+                let columns = Int(params.columns)
+                let image = Self.render(
+                    kind, overlaid: overlaid, columns: columns, rows: Int(params.rows),
+                    wave: counts(wave, 4 * Self.levels * columns), vector: counts(vector, Self.levels * Self.levels),
+                    histogram: counts(histogram, 4 * Self.levels))
+                if let image { deliver(image) }
                 finish()
             }
         }
@@ -138,7 +143,7 @@ final class ScopeMeter: @unchecked Sendable {
 
     // MARK: Drawing
 
-    private struct Canvas {
+    struct Canvas {
         let width: Int
         let height: Int
         var pixels: [UInt8]
@@ -188,10 +193,13 @@ final class ScopeMeter: @unchecked Sendable {
         count == 0 ? 0 : min(0.25 + 0.75 * log(1 + Double(count)) / log(1 + top), 1)
     }
 
-    private func render(_ kind: ScopeKind, overlaid: Bool, params: ScopeParams) -> CGImage? {
+    /// Draws the chosen scope from counts laid out as the scope kernel lays them out, from the GPU
+    /// or from `PictureScope`.
+    static func render(
+        _ kind: ScopeKind, overlaid: Bool, columns: Int, rows: Int, wave: [UInt32], vector: [UInt32], histogram: [UInt32]
+    ) -> CGImage? {
         let levels = Self.levels
-        let columns = Int(params.columns)
-        let rows = Double(params.rows)
+        let rows = Double(rows)
         switch kind {
         case .waveform, .parade, .yrgbParade:
             let channels: [Int] = kind == .waveform ? [0] : kind == .parade ? [1, 2, 3] : [0, 1, 2, 3]
@@ -199,7 +207,7 @@ final class ScopeMeter: @unchecked Sendable {
             let panels = overlaid ? 1 : channels.count
             let gap = 2
             var canvas = Canvas(width: panels * columns + (panels - 1) * gap, height: levels)
-            let bins = counts(wave, 4 * levels * columns)
+            let bins = wave
             for (panel, channel) in channels.enumerated() {
                 let left = overlaid ? 0 : panel * (columns + gap)
                 for quarter in 0...4 where !overlaid || panel == 0 {
@@ -239,7 +247,7 @@ final class ScopeMeter: @unchecked Sendable {
                     }
                 }
             }
-            let bins = counts(vector, levels * levels)
+            let bins = vector
             let top = Double(bins.max() ?? 1)
             for up in 0..<levels {
                 for across in 0..<levels {
@@ -250,7 +258,7 @@ final class ScopeMeter: @unchecked Sendable {
         case .histogram:
             let height = 64
             var canvas = Canvas(width: levels, height: height)
-            let bins = counts(histogram, 4 * levels)
+            let bins = histogram
             let top = Double(bins[levels...].max() ?? 1)
             for channel in 1...3 {
                 for level in 0..<levels {

@@ -139,7 +139,7 @@ struct CameraScreen: View {
         // The Metal monitor punches in by itself, with real pixels.
         .scaleEffect(model.isOn(.punchIn) && !model.monitorIsProcessed ? 3 : 1)
         .frame(width: size.width, height: size.height)
-        .overlay(alignment: model.scopeCorner.alignment(hold.hold)) {
+        .overlay(alignment: model.scopeCorner.alignment) {
             if model.isOn(.scope), model.monitorIsProcessed {
                 ScopeOverlay(hold: hold.hold, picture: size)
                     .padding(8)
@@ -939,59 +939,129 @@ struct StatGauges: View {
     }
 }
 
-/// The scope in a corner of the picture, drawn on its own layer. A tap moves to the next kind.
+/// The scope in a corner of the screen, drawn on its own layer. It stays in that corner in every
+/// hold, turned to read, with even margins. A tap moves to the next kind, a drag moves it to
+/// another corner, and the handle at its inner corner resizes it.
 struct ScopeOverlay: View {
     @EnvironmentObject private var model: AppModel
     let hold: Hold
     /// The picture's size, which the scope snaps to the corners of.
     let picture: CGSize
     @State private var drag = CGSize.zero
+    /// Set once a touch has moved far enough to be a drag, so letting go doesn't count as a tap.
+    @State private var moving = false
+    /// The scale while the handle is held, kept here so the camera screen doesn't redraw per tick.
+    @State private var liveScale: Double?
+    @State private var scaleAtStart = 1.0
+
+    static let minimumScale = 0.6
+    static let maximumScale = 2.5
+    /// How far a touch moves before it's a drag rather than a tap.
+    private static let slop: CGFloat = 10
 
     /// A vectorscope is round, so it's square; the others are wide.
-    private var size: CGSize {
+    private var standard: CGSize {
         model.scopeKind == .vectorscope ? CGSize(width: 110, height: 110) : CGSize(width: 176, height: 104)
     }
 
+    /// The scope's size on the screen, sideways when the phone is.
+    private func onScreen(_ size: CGSize) -> CGSize {
+        hold.isLandscape ? CGSize(width: size.height, height: size.width) : size
+    }
+
+    /// The largest scale that still fits inside the picture with its margins.
+    private var largest: Double {
+        let turned = onScreen(standard)
+        let fits = min((picture.width - 16) / turned.width, (picture.height - 16) / turned.height)
+        return max(min(Self.maximumScale, fits), Self.minimumScale)
+    }
+
+    private var scale: Double { min(max(liveScale ?? model.scopeScale, Self.minimumScale), largest) }
+
+    private var size: CGSize { CGSize(width: standard.width * scale, height: standard.height * scale) }
+
     var body: some View {
-        Button {
-            model.scopeKind = model.scopeKind.next
-        } label: {
-            ZStack(alignment: .topLeading) {
-                LayerHost(layer: model.scopeLayer)
-                Text(model.scopeKind.label)
-                    .font(Tokens.markFont)
-                    .foregroundStyle(Tokens.label)
-                    .padding(3)
-            }
-            .frame(width: size.width, height: size.height)
-            .clipShape(RoundedRectangle(cornerRadius: Tokens.panelRadius))
-            .turnedToHold()
-            // Laid out at its turned size, so a sideways scope stays inside the picture.
-            .frame(
-                width: hold.isLandscape ? size.height : size.width,
-                height: hold.isLandscape ? size.width : size.height)
-            .contentShape(Rectangle())
+        let turned = onScreen(size)
+        ZStack(alignment: .topLeading) {
+            LayerHost(layer: model.scopeLayer)
+            Text(model.scopeKind.label)
+                .font(Tokens.markFont)
+                .foregroundStyle(Tokens.label)
+                .padding(3)
         }
+        .frame(width: size.width, height: size.height)
+        .clipShape(RoundedRectangle(cornerRadius: Tokens.panelRadius))
+        .turnedToHold()
+        // Laid out at its turned size, so a sideways scope keeps the same margins in its corner.
+        .frame(width: turned.width, height: turned.height)
+        .contentShape(Rectangle())
+        .overlay(alignment: model.scopeCorner.opposite.alignment) { resizeHandle }
         .offset(drag)
-        // A drag carries it, and it snaps to whichever corner it was let go nearest, which it
-        // keeps, as held, in every hold and across launches.
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 12, coordinateSpace: .named(ScopeOverlay.space))
-                .onChanged { drag = $0.translation }
-                .onEnded { value in
-                    let end = value.predictedEndLocation
-                    let corner = HeldCorner(
-                        screenRight: end.x > picture.width / 2, screenBottom: end.y > picture.height / 2, hold: hold)
-                    withAnimation(.spring(duration: 0.35, bounce: 0.2)) {
-                        model.scopeCorner = corner
-                        drag = .zero
-                    }
-                })
+        .gesture(move)
         .haptic(.impact(weight: .light), trigger: model.scopeCorner)
-        .buttonStyle(.plain)
         .haptic(.selection, trigger: model.scopeKind)
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
         .accessibilityLabel("Scope, \(model.scopeKind.label)")
         .accessibilityHint("Shows the next scope")
+        .accessibilityAction { model.scopeKind = model.scopeKind.next }
+    }
+
+    /// One gesture for both, so a drag never also counts as a tap: a touch that stays within a
+    /// few points is a tap, and one that moves further carries the scope and snaps it, with a
+    /// spring and a light tick, to the screen corner nearest where it was let go.
+    private var move: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(ScopeOverlay.space))
+            .onChanged { value in
+                if !moving, hypot(value.translation.width, value.translation.height) < Self.slop { return }
+                moving = true
+                drag = value.translation
+            }
+            .onEnded { value in
+                guard moving else {
+                    model.scopeKind = model.scopeKind.next
+                    return
+                }
+                moving = false
+                let end = value.predictedEndLocation
+                let corner = ScreenCorner(right: end.x > picture.width / 2, bottom: end.y > picture.height / 2)
+                withAnimation(.spring(duration: 0.35, bounce: 0.2)) {
+                    model.scopeCorner = corner
+                    drag = .zero
+                }
+            }
+    }
+
+    /// At the corner facing the picture's middle, since the scope's own corner stays put. Dragging
+    /// it away from the scope's corner grows the scope, and toward it shrinks it.
+    private var resizeHandle: some View {
+        let corner = model.scopeCorner
+        let (x, y) = corner.signs
+        let resize = DragGesture(minimumDistance: 0, coordinateSpace: .named(ScopeOverlay.space))
+            .onChanged { value in
+                if liveScale == nil { scaleAtStart = scale }
+                let start = onScreen(CGSize(width: standard.width * scaleAtStart, height: standard.height * scaleAtStart))
+                // The free corner moves away from the scope's corner, which is -x, -y.
+                let grow = (-CGFloat(x) * value.translation.width / start.width
+                    - CGFloat(y) * value.translation.height / start.height) / 2
+                liveScale = min(max(scaleAtStart * (1 + Double(grow)), Self.minimumScale), largest)
+            }
+            .onEnded { _ in
+                if let liveScale { model.scopeScale = liveScale }
+                liveScale = nil
+            }
+        // The arrows point along the diagonal the handle moves on.
+        let symbol = x == y ? "arrow.up.left.and.arrow.down.right" : "arrow.up.right.and.arrow.down.left"
+        return Image(systemName: symbol)
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(Tokens.label)
+            .frame(width: 20, height: 20)
+            .background(Circle().fill(Color.black.opacity(0.6)))
+            .frame(width: 36, height: 36)
+            .contentShape(Rectangle())
+            .highPriorityGesture(resize)
+            .haptic(.impact(weight: .light), trigger: model.scopeScale)
+            .accessibilityHidden(true)
     }
 }
 
@@ -999,13 +1069,13 @@ extension ScopeOverlay {
     static let space = "picture"
 }
 
-/// A corner of the picture as the phone is held, so the scope stays where it was put however the
-/// phone turns.
-enum HeldCorner: String {
+/// A corner of the portrait screen. The scope stays in the one it was put in however the phone
+/// turns, and only turns in place to read.
+enum ScreenCorner: String {
     case bottomLeft, bottomRight, topLeft, topRight
 
-    /// Right and down as held, each -1 or 1.
-    private var held: (x: Int, y: Int) {
+    /// Right and down on the screen, each -1 or 1.
+    var signs: (x: Int, y: Int) {
         switch self {
         case .bottomLeft: return (-1, 1)
         case .bottomRight: return (1, 1)
@@ -1014,40 +1084,31 @@ enum HeldCorner: String {
         }
     }
 
-    /// The same corner on the portrait screen, for the hold.
-    func alignment(_ hold: Hold) -> Alignment {
-        let (x, y) = held
-        let screen: (Int, Int)
-        switch hold {
-        case .portrait: screen = (x, y)
-        case .landscapeLeft: screen = (y, -x)
-        case .landscapeRight: screen = (-y, x)
-        case .upsideDown: screen = (-x, -y)
-        }
-        switch screen {
-        case (-1, -1): return .topLeading
-        case (1, -1): return .topTrailing
-        case (-1, 1): return .bottomLeading
-        default: return .bottomTrailing
+    var alignment: Alignment {
+        switch self {
+        case .topLeft: return .topLeading
+        case .topRight: return .topTrailing
+        case .bottomLeft: return .bottomLeading
+        case .bottomRight: return .bottomTrailing
         }
     }
 
-    /// The held corner at a corner of the portrait screen.
-    init(screenRight: Bool, screenBottom: Bool, hold: Hold) {
-        let sx = screenRight ? 1 : -1
-        let sy = screenBottom ? 1 : -1
-        let held: (Int, Int)
-        switch hold {
-        case .portrait: held = (sx, sy)
-        case .landscapeLeft: held = (-sy, sx)
-        case .landscapeRight: held = (sy, -sx)
-        case .upsideDown: held = (-sx, -sy)
+    /// The corner across from this one.
+    var opposite: ScreenCorner {
+        switch self {
+        case .bottomLeft: return .topRight
+        case .bottomRight: return .topLeft
+        case .topLeft: return .bottomRight
+        case .topRight: return .bottomLeft
         }
-        switch held {
-        case (-1, 1): self = .bottomLeft
-        case (1, 1): self = .bottomRight
-        case (-1, -1): self = .topLeft
-        default: self = .topRight
+    }
+
+    init(right: Bool, bottom: Bool) {
+        switch (right, bottom) {
+        case (false, true): self = .bottomLeft
+        case (true, true): self = .bottomRight
+        case (false, false): self = .topLeft
+        case (true, false): self = .topRight
         }
     }
 }
@@ -1291,12 +1352,13 @@ struct LookPanel: View {
         }
     }
 
-    enum Page { case looks, adjust, color, fx }
+    enum Page { case looks, adjust, color, wheels, fx }
 
     @ViewBuilder private var gradePage: some View {
         switch page {
         case .adjust: GradePanel(hold: hold)
         case .color: ColorPanel(hold: hold)
+        case .wheels: WheelsPanel(hold: hold)
         case .fx: FXPanel(hold: hold)
         case .looks: EmptyView()
         }
@@ -1314,6 +1376,7 @@ struct LookPanel: View {
                 Group {
                     pageTab("ADJUST", on: page == .adjust) { page = .adjust }
                     pageTab("COLOR", on: page == .color) { page = .color }
+                    pageTab("WHEELS", on: page == .wheels) { page = .wheels }
                     pageTab("FX", on: page == .fx) { page = .fx }
                 }
                 .disabled(model.isRecording)
@@ -1479,10 +1542,11 @@ struct GradePanel: View {
 
     private var shown: LookGrade { draft ?? model.lookGrade }
 
-    /// The grade with these five at neutral and the colours kept.
+    /// The grade with these five at neutral and the colours and wheels kept.
     private var cleared: LookGrade {
         var grade = LookGrade()
         grade.bands = shown.bands
+        grade.wheels = shown.wheels
         return grade
     }
 
@@ -1811,6 +1875,260 @@ struct ColorPanel: View {
         .buttonStyle(.plain)
         .accessibilityLabel(item.name)
         .accessibilityValue(text(value))
+    }
+}
+
+extension ToneRange {
+    var title: String {
+        switch self {
+        case .shadows: return "SHAD"
+        case .midtones: return "MID"
+        case .highlights: return "HIGH"
+        }
+    }
+}
+
+/// A colour wheel with a puck, for one range's colour push. It's laid out as the vectorscope is,
+/// red toward the top left, so the picture moves on the scope the way the puck moves. A drag
+/// moves the puck from where it is, at a fine rate, rather than jumping it to the finger. The
+/// wheel stays as it is in every hold, as sliders do, since a turned wheel would move the wrong
+/// way under a finger.
+struct ToneWheelPad: View {
+    let wheel: ToneWheel
+    let diameter: CGFloat
+    let change: (_ x: Double, _ y: Double) -> Void
+    let end: () -> Void
+    @State private var start: SIMD2<Double>?
+
+    /// Oklab's hue turned this far counter-clockwise lands where the vectorscope puts that colour:
+    /// red at Oklab 29 degrees sits at the scope's 103.
+    static let screenTurn = 74.0
+    /// A finger's travel across the whole wheel moves the puck this far, so small pushes are easy.
+    private static let rate = 0.6
+
+    /// The puck's place on the screen, up being positive y.
+    static func screenPoint(_ wheel: ToneWheel) -> CGPoint {
+        let angle = (wheel.hue + screenTurn) * .pi / 180
+        return CGPoint(x: wheel.amount * cos(angle), y: wheel.amount * sin(angle))
+    }
+
+    /// A screen point in the disc back to the wheel's x and y.
+    static func wheelPoint(_ point: CGPoint) -> SIMD2<Double> {
+        let (px, py) = (Double(point.x), Double(point.y))
+        var length = min(hypot(px, py), 1)
+        // A small dead zone, so the middle is easy to find again.
+        if length < 0.03 { length = 0 }
+        let hue = atan2(py, px) - screenTurn * .pi / 180
+        return SIMD2((length * cos(hue) * 100).rounded() / 100, (length * sin(hue) * 100).rounded() / 100)
+    }
+
+    /// The ring's colours by Oklab hue, at each COLOR band's centre.
+    private static let anchors: [(hue: Double, rgb: SIMD3<Double>)] = [
+        (29, SIMD3(0.92, 0.22, 0.2)), (56, SIMD3(0.96, 0.56, 0.16)), (110, SIMD3(0.95, 0.85, 0.2)),
+        (142, SIMD3(0.3, 0.78, 0.3)), (195, SIMD3(0.2, 0.8, 0.85)), (264, SIMD3(0.25, 0.42, 0.95)),
+        (328, SIMD3(0.85, 0.3, 0.8)),
+    ]
+
+    static func colour(hue: Double) -> Color {
+        let h = (hue.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360)
+        let count = anchors.count
+        var index = anchors.lastIndex { $0.hue <= h } ?? count - 1
+        if h < anchors[0].hue { index = count - 1 }
+        let low = anchors[index]
+        let high = anchors[(index + 1) % count]
+        var span = high.hue - low.hue
+        if span <= 0 { span += 360 }
+        var along = h - low.hue
+        if along < 0 { along += 360 }
+        let rgb = low.rgb + (high.rgb - low.rgb) * (along / span)
+        return Color(red: rgb.x, green: rgb.y, blue: rgb.z)
+    }
+
+    /// SwiftUI's angular gradient runs clockwise on the screen, so each stop's hue is worked back.
+    private static let ring: Gradient = {
+        let steps = 36
+        return Gradient(stops: (0...steps).map { step in
+            let clockwise = Double(step) / Double(steps) * 360
+            return .init(color: colour(hue: -clockwise - screenTurn), location: Double(step) / Double(steps))
+        })
+    }()
+
+    var body: some View {
+        let radius = diameter / 2
+        let point = Self.screenPoint(wheel)
+        ZStack {
+            Circle().fill(AngularGradient(gradient: Self.ring, center: .center))
+            Circle().fill(RadialGradient(
+                colors: [Color(white: 0.3), Color(white: 0.3).opacity(0)], center: .center,
+                startRadius: 0, endRadius: radius))
+            Rectangle().fill(Color.white.opacity(0.25)).frame(width: 1, height: diameter * 0.3)
+            Rectangle().fill(Color.white.opacity(0.25)).frame(width: diameter * 0.3, height: 1)
+            Circle()
+                .stroke(Color.white, lineWidth: 2)
+                .background(Circle().fill(Color.black.opacity(0.4)))
+                .frame(width: 12, height: 12)
+                .offset(x: point.x * radius, y: -point.y * radius)
+        }
+        .frame(width: diameter, height: diameter)
+        .contentShape(Circle())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    let origin = start ?? SIMD2(Double(point.x), Double(point.y))
+                    start = origin
+                    let moved = CGPoint(
+                        x: origin.x + Double(value.translation.width / radius) * Self.rate,
+                        y: origin.y - Double(value.translation.height / radius) * Self.rate)
+                    let next = Self.wheelPoint(moved)
+                    if next != SIMD2(wheel.x, wheel.y) { change(next.x, next.y) }
+                }
+                .onEnded { _ in
+                    start = nil
+                    end()
+                })
+    }
+}
+
+/// Shadows, midtones and highlights, each a colour wheel and a luminance slider: tap a range,
+/// push its puck toward a colour and drag LUM. Tapping the chosen range again, or the arrow,
+/// puts it back, and RESET below puts every wheel back. It keeps a draft while dragging, as
+/// ADJUST does.
+struct WheelsPanel: View {
+    @EnvironmentObject private var model: AppModel
+    let hold: Hold
+    @State private var range = ToneRange.shadows
+    @State private var draft: LookGrade?
+    @State private var haptics = DetentHaptics()
+
+    private var shown: LookGrade { draft ?? model.lookGrade }
+    private var wheel: ToneWheel { shown.wheels[range.rawValue] }
+
+    var body: some View {
+        VStack(spacing: 2) {
+            HStack(spacing: 0) {
+                ForEach(ToneRange.allCases) { cell($0) }
+            }
+            .frame(height: 40)
+            HStack(spacing: 8) {
+                ToneWheelPad(
+                    wheel: wheel, diameter: 60,
+                    change: { x, y in
+                        var grade = shown
+                        let old = grade.wheels[range.rawValue]
+                        grade.wheels[range.rawValue].x = x
+                        grade.wheels[range.rawValue].y = y
+                        haptics.moved(
+                            from: Int((old.amount * 20).rounded()),
+                            to: Int((grade.wheels[range.rawValue].amount * 20).rounded()), neutral: 0)
+                        update(grade)
+                    },
+                    end: commit)
+                    .id(range)
+                    .accessibilityLabel("\(range.name) colour")
+                    .accessibilityValue(String(format: "%.0f at hue %.0f", wheel.amount * 100, wheel.hue))
+                VStack(spacing: 0) {
+                    Text("LUM " + String(format: "%+.0f", wheel.luminance * 100))
+                        .font(Tokens.labelFont)
+                        .foregroundStyle(wheel.luminance != 0 ? Tokens.held : Tokens.label)
+                        .fixedSize()
+                        .turnedToHold()
+                    Slider(value: luminance, in: -1...1) { editing in
+                        if editing { haptics.prepare() } else { commit() }
+                    }
+                    // A new slider for each range, so momentum from the last one can't carry into it.
+                    .id("\(range.rawValue)-luminance")
+                    .tint(Tokens.held)
+                    .accessibilityLabel("\(range.name) luminance")
+                }
+                Button {
+                    commit()
+                    model.lookGrade.wheels[range.rawValue] = ToneWheel()
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(Tokens.statusFont)
+                        .foregroundStyle(wheel.isNeutral ? Tokens.label : Tokens.held)
+                        .turnedToHold()
+                        .frame(width: 32, height: 40)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(wheel.isNeutral)
+                .accessibilityLabel("Reset \(range.name)")
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 64)
+            Spacer(minLength: 0)
+            GradeActions(
+                hold: hold, canSave: !shown.isNeutral, canReset: !shown.wheels.allSatisfy(\.isNeutral),
+                reset: {
+                    commit()
+                    model.lookGrade.wheels = LookGrade().wheels
+                })
+        }
+        .disabled(model.isRecording)
+        .haptic(.selection, trigger: range)
+        .onChange(of: range) { _, _ in commit() }
+    }
+
+    private func update(_ grade: LookGrade) {
+        draft = grade
+        model.previewGrade(grade)
+    }
+
+    private func commit() {
+        guard let draft else { return }
+        model.commitGrade(draft)
+        self.draft = nil
+    }
+
+    private var luminance: Binding<Double> {
+        Binding(
+            get: { wheel.luminance },
+            set: { value in
+                var grade = shown
+                let old = grade.wheels[range.rawValue].luminance
+                let new = (value * 100).rounded() / 100
+                guard new != old else { return }
+                grade.wheels[range.rawValue].luminance = new
+                haptics.moved(from: Int((old * 100).rounded()), to: Int((new * 100).rounded()), neutral: 0)
+                update(grade)
+            })
+    }
+
+    private func cell(_ item: ToneRange) -> some View {
+        let isOn = item == range
+        let value = shown.wheels[item.rawValue]
+        return Button {
+            if isOn {
+                commit()
+                model.lookGrade.wheels[item.rawValue] = ToneWheel()
+            } else {
+                range = item
+            }
+        } label: {
+            VStack(spacing: 2) {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(value.amount > 0 ? ToneWheelPad.colour(hue: value.hue) : Tokens.label.opacity(0.4))
+                        .frame(width: 8, height: 8)
+                    Text(item.title)
+                        .font(Tokens.labelFont)
+                        .foregroundStyle(isOn ? Tokens.held : Tokens.label)
+                }
+                Text(String(format: "%+.0f", value.luminance * 100))
+                    .font(Tokens.statusFont)
+                    .foregroundStyle(value.isNeutral ? Tokens.value : Tokens.held)
+            }
+            .fixedSize()
+            .turnedToHold()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(isOn ? Tokens.surface : .clear, in: RoundedRectangle(cornerRadius: Tokens.panelRadius))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(item.name)
+        .accessibilityValue(value.isNeutral ? "unchanged" : "changed")
+        .accessibilityHint(isOn ? "Tap again to reset" : "")
     }
 }
 

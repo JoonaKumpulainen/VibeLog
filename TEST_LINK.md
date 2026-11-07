@@ -20,7 +20,7 @@ The phone connects out to the server, and the app opens no port of its own. Once
 | Change capture, format, exposure, white balance, focus and viewfinder settings | Change settings during a take, other than tools, look and punch-in |
 | Start and stop takes and the stream, including RAW clips | Turn the link on, or stay connected after the app restarts |
 | Run the control test, the encoder test and both probes, some of which capture test pictures | Reach files outside `videos/`, `logs/`, `probes/`, `clips/` and `stills/` |
-| Export a take with a look, which writes a new `_look.mov` beside it | Export during a take |
+| Export a take with a look, which writes a new `_look.mov`, or `_look2.mov` and on, beside it | Export during a take |
 | List files in those folders and fetch them | Watch the viewfinder live |
 | Apply and save presets, and set the default | Delete presets |
 | Take a picture of what the camera sees while no take is running, and fetch it | Fetch a picture during a take |

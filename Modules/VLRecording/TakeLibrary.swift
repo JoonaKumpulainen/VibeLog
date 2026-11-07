@@ -21,6 +21,23 @@ public struct Take: Identifiable, Sendable {
 public enum TakeLibrary {
     public static func sidecar(for url: URL) -> URL { url.appendingPathExtension("json") }
 
+    /// The first free name for an export of `take` in `folder`: `<take>_look.mov`, then
+    /// `<take>_look2.mov` and on, so a new export never replaces an earlier one.
+    public static func exportURL(for take: URL, in folder: URL) -> URL {
+        let base = take.deletingPathExtension().lastPathComponent + "_look"
+        var number = 1
+        while true {
+            let url = folder.appendingPathComponent(base + (number == 1 ? "" : String(number)) + ".mov")
+            if !FileManager.default.fileExists(atPath: url.path) { return url }
+            number += 1
+        }
+    }
+
+    /// Whether a file is an export rather than a take, from its name.
+    public static func isExport(_ url: URL) -> Bool {
+        url.deletingPathExtension().lastPathComponent.range(of: #"_look\d*$"#, options: .regularExpression) != nil
+    }
+
     /// Gyroflow finds a log with the video's name by itself.
     public static func gyroLog(for url: URL) -> URL {
         url.deletingPathExtension().appendingPathExtension("gcsv")
