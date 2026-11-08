@@ -113,7 +113,7 @@ The rule for this phase: anything that adds to real-time GPU load must prove it 
 - Look adjustments: ADJUST and COLOR grade any look but LOG live in the viewfinder, in scene-linear before the look, and bake in with it. Built, with styles, built-in and saved, under each look.
 - Baked HDR: ACES 2.0 at 1000 nits recorded as PQ with HDR10 metadata or as HLG, as Bake does for SDR. Built and working on the phone, both PQ and HLG. The HDR viewfinder shows it through the screen's extended range, at no measurable draw cost.
 - Shadow, midtone and highlight wheels: built, in WHEELS and in export's grade editor.
-- Halation, bloom, diffusion, vignette and grain: built for the viewfinder and export. Baking them waits on a frame-cost take.
+- Halation, bloom, diffusion, vignette and grain: built for the viewfinder, export and baked takes. Baked into takes, they fell behind at about 2 minutes in both long takes so far; the viewfinder now shares the take's glow during such takes instead of making its own, untested.
 - Looks baked into recordings: built and proven, at no measurable GPU cost in a 60-second take, to HEVC or ProRes.
 - Timecode and Apple Watch control, if they prove useful.
 

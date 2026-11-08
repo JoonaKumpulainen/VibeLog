@@ -421,6 +421,8 @@ public final class ProcessingPipeline: NSObject {
     private var takeEffects: LookEffects?
     private var takeEffectsKit: EffectsKit?
     private var takeEffectsFrame = 0
+    /// The glow the take's last frame made, which the viewfinder samples instead of making its own.
+    private var takeGlow: MTLTexture?
     /// A look only takes record, such as HDR, while the viewfinder shows the SDR one.
     private var bakeLUT: CustomLUT?
     private var customLUT: CustomLUT?
@@ -598,6 +600,7 @@ public final class ProcessingPipeline: NSObject {
         takeEffects = baking ? effects : nil
         if baking, takeEffectsKit == nil { takeEffectsKit = EffectsKit(device: device) }
         takeEffectsFrame = 0
+        takeGlow = nil
         lock.unlock()
     }
 
@@ -760,6 +763,7 @@ public final class ProcessingPipeline: NSObject {
                 if let effectsParams, let effectsKit,
                     let glow = effectsKit.glow(for: monitor, params: effectsParams, commands: commands, reduction: 4) {
                     effects = (glow, effectsParams)
+                    shareTakeGlow(glow)
                 }
             }
             encoded = encoded && (sinkFrame.map { frame -> Bool in
@@ -783,6 +787,7 @@ public final class ProcessingPipeline: NSObject {
                 if let effectsParams, let effectsKit,
                     let glow = effectsKit.glow(for: output, params: effectsParams, commands: commands) {
                     effects = (glow, effectsParams)
+                    shareTakeGlow(glow)
                 }
                 switch sinkFrame.planes {
                 case .biplanar(let luma, let chroma):
@@ -1279,6 +1284,14 @@ public final class ProcessingPipeline: NSObject {
         return true
     }
 
+    /// Hands the take's glow to the viewfinder. Both run on one command queue, so a draw reads
+    /// the glow of the last frame committed before it.
+    private func shareTakeGlow(_ glow: MTLTexture) {
+        lock.lock()
+        if takeEffects != nil { takeGlow = glow }
+        lock.unlock()
+    }
+
     private func logOnce(_ message: String) {
         lock.lock()
         defer { lock.unlock() }
@@ -1308,7 +1321,11 @@ extension ProcessingPipeline: MTKViewDelegate {
         let viewScale = monitorScale
         let peaking = monitorPeaking
         let scopeMeter = scopeOn ? scopes : nil
-        let shownEffects = effects
+        // While a take bakes FX, the viewfinder shows the take's own FX and samples the glow the
+        // take just made, rather than making a second one: fx_baked on 947b90e fell behind with
+        // both running.
+        let bakedGlow = takeEffects != nil ? takeGlow : nil
+        let shownEffects = bakedGlow != nil ? (takeEffects ?? effects) : effects
         let kit = effectsKit
         effectsFrame += 1
         let frame = effectsFrame
@@ -1319,8 +1336,8 @@ extension ProcessingPipeline: MTKViewDelegate {
         else { return }
         // The glow comes first, in the same command buffer, so the draw can sample it.
         var effectParams = EffectsParams(shownEffects, curve: current.curve, frame: frame)
-        var glow = kit?.placeholder
-        if effectParams.enabled != 0, let kit {
+        var glow = bakedGlow ?? kit?.placeholder
+        if bakedGlow == nil, effectParams.enabled != 0, let kit {
             glow = kit.glow(for: image, params: effectParams, commands: commands)
             if glow == nil { effectParams.enabled = 0 }
         }
