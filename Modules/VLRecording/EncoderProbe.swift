@@ -58,27 +58,37 @@ public enum EncoderProbe {
         return lines
     }
 
-    private static func measure(_ preset: EncoderPreset, _ size: EncoderSize) -> String {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("encoder_test.mov")
+    /// One timed encode of synthetic frames, with nothing else asked of the encoder.
+    struct Trial {
+        var fps = 0.0
+        var megabytesPerSecond = 0.0
+        var written = 0
+        /// Why the encoder wouldn't start or failed, or nil when it wrote.
+        var problem: String?
+        var depth = ""
+    }
+
+    static func trial(_ preset: EncoderPreset, _ size: EncoderSize, frames frameCount: Int, readDepth: Bool = false) -> Trial {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("encoder_test_\(UUID().uuidString).mov")
         defer { try? FileManager.default.removeItem(at: url) }
         let encoder: VideoEncoder
         do {
             encoder = try VideoEncoder(config: .init(
                 url: url, preset: preset, size: size, audio: false, realTime: false))
         } catch {
-            return "0, 0, rejected: \(error)"
+            return Trial(problem: "rejected: \(error)")
         }
 
-        var frames: [CVPixelBuffer] = []
+        var buffers: [CVPixelBuffer] = []
         for index in 0..<3 {
-            guard let buffer = encoder.nextPixelBuffer() else { return "0, 0, no pixel buffer" }
+            guard let buffer = encoder.nextPixelBuffer() else { return Trial(problem: "no pixel buffer") }
             fill(buffer, seed: index)
-            frames.append(buffer)
+            buffers.append(buffer)
         }
 
         let start = Date()
         for index in 0..<frameCount {
-            encoder.append(frames[index % frames.count], at: CMTime(value: Int64(index), timescale: 30))
+            encoder.append(buffers[index % buffers.count], at: CMTime(value: Int64(index), timescale: 30))
         }
         let done = DispatchSemaphore(value: 0)
         var result: VideoEncoder.Result?
@@ -87,15 +97,29 @@ public enum EncoderProbe {
             done.signal()
         }
         guard done.wait(timeout: .now() + 120) == .success, let result else {
-            return "0, 0, timed out"
+            return Trial(problem: "timed out")
         }
         let elapsed = Date().timeIntervalSince(start)
+        var trial = Trial(
+            fps: Double(result.framesWritten) / elapsed,
+            megabytesPerSecond: result.megabytes / (Double(frameCount) / 30),
+            written: result.framesWritten,
+            problem: result.failure.map { "failed: \($0)" })
+        if trial.problem == nil, result.framesWritten == 0 { trial.problem = "wrote no frames" }
+        if readDepth, trial.problem == nil { trial.depth = keptDepth(url) }
+        return trial
+    }
+
+    private static func measure(_ preset: EncoderPreset, _ size: EncoderSize) -> String {
         let packed = preset.pixelFormat == kCVPixelFormatType_4444AYpCbCr16
-        let depth = packed && result.failure == nil ? ", \(keptDepth(url))" : ""
+        let result = trial(preset, size, frames: frameCount, readDepth: packed)
+        if let problem = result.problem, result.written == 0, problem.hasPrefix("rejected") || problem == "no pixel buffer" {
+            return "0, 0, \(problem)"
+        }
+        let depth = result.depth.isEmpty ? "" : ", \(result.depth)"
         return String(
-            format: "%.1f, %.0f, %@%@", Double(result.framesWritten) / elapsed,
-            result.megabytes / (Double(frameCount) / 30),
-            result.failure.map { "failed: \($0)" } ?? "ok \(result.framesWritten) frames", depth)
+            format: "%.1f, %.0f, %@%@", result.fps, result.megabytesPerSecond,
+            result.problem ?? "ok \(result.written) frames", depth)
     }
 
     /// Reads the first frame back as 16-bit and looks for luma steps finer than 10 bits, which
@@ -146,7 +170,7 @@ public enum EncoderProbe {
     }
 
     /// Writes a moving gradient with light noise, in-range for 10-bit video.
-    private static func fill(_ buffer: CVPixelBuffer, seed: Int) {
+    static func fill(_ buffer: CVPixelBuffer, seed: Int) {
         CVPixelBufferLockBaseAddress(buffer, [])
         defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
         var noise = UInt32(truncatingIfNeeded: seed &* 2_654_435_761 &+ 1)

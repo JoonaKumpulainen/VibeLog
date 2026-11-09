@@ -1,6 +1,7 @@
 import AVFoundation
 import Combine
 import Foundation
+import Metal
 import UIKit
 import VLCapture
 import VLCore
@@ -259,9 +260,20 @@ final class AppModel: ObservableObject {
     @Published var recordEncoded = true
     /// Saves when each photo was requested and arrived, beside each encoded take.
     @Published var logCaptureTiming = false
-    /// The best preset proven at full size on an iPhone 14 Pro at 30 fps.
+    /// The best preset proven at full size on an iPhone 14 Pro at 30 fps. A phone without ProRes
+    /// moves off it at launch, in `fitToPhone`.
     @Published var encoderPreset = EncoderPreset.all.first { $0.id == "prores422hq" } ?? EncoderPreset.all[0]
     @Published var encoderSize = EncoderSize.all[0]
+    /// What this phone's encoders can do: the codec list at once, then trial encodes, measured
+    /// once per phone and iOS version.
+    @Published private(set) var encoderSupport = EncoderSupport.saved() ?? EncoderSupport.codecList()
+    /// The presets this phone can record with.
+    var recordPresets: [EncoderPreset] { EncoderPreset.all.filter(encoderSupport.supports) }
+    /// There was no settings file, so the phone's own defaults may be chosen.
+    private var firstLaunch = false
+    /// A15 and later, from the 13 Pro on, run Maximum quality. The 12's A14 starts on Efficient,
+    /// since the 14 Pro's A16 already needs about 26 of a frame's 33 ms for it.
+    static let gpuKeepsMaximum = MTLCreateSystemDefaultDevice()?.supportsFamily(.apple8) ?? false
     @Published var widescreen = false {
         didSet {
             updateCrop()
@@ -438,6 +450,12 @@ final class AppModel: ObservableObject {
         SystemStatus.enableBatteryMonitoring()
         refreshLUTs()
         loadConfig()
+        if firstLaunch, !Self.gpuKeepsMaximum {
+            processing.pipeline = .efficient
+            Log.shared.info("Starting on the Efficient path: this GPU is older than the A15")
+        }
+        fitToPhone(choosingDefaults: firstLaunch)
+        if !encoderSupport.measured { measureEncoders() }
         loadLastTake()
         router.onRecordingElapsed = { [weak self] in
             DispatchQueue.main.async { self?.stopRecording() }
@@ -696,6 +714,7 @@ final class AppModel: ObservableObject {
     /// A file that can't be read is kept beside the new one, so hand edits aren't lost.
     private func loadConfig() {
         var loaded = AppConfig()
+        firstLaunch = !FileManager.default.fileExists(atPath: Storage.config.path)
         if FileManager.default.fileExists(atPath: Storage.config.path) {
             do {
                 loaded = try AppConfig.load(from: Storage.config)
@@ -776,6 +795,8 @@ final class AppModel: ObservableObject {
         fineLookLUT = saved.fineLookLUT
         scopeCorner = ScreenCorner(rawValue: saved.scopeCorner) ?? .bottomLeft
         scopeScale = saved.scopeScale
+        // A preset made on another phone may name a codec this one hasn't got.
+        fitToPhone(choosingDefaults: false)
     }
 
     /// What a preset keeps. Zebras and false color only ever reach the file through here.
@@ -1021,6 +1042,61 @@ final class AppModel: ObservableObject {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in
                 if isStreaming, method.isPhoto, !hasReference { camera.requestReference() }
             }
+        }
+    }
+
+    /// A take started while the encoders were being timed, which slows both.
+    private var takeDuringEncoderCheck = false
+    private var checkingEncoders = false
+
+    /// Times each encoder once, then moves off anything this phone can't record. Its answer is
+    /// kept unless a take ran alongside it, which would have slowed the trials; the next launch
+    /// measures again then.
+    private func measureEncoders() {
+        let before = (encoderPreset, encoderSize)
+        checkingEncoders = true
+        takeDuringEncoderCheck = false
+        EncoderSupport.measure { [weak self] support in
+            guard let self else { return }
+            checkingEncoders = false
+            // Whether a preset works doesn't depend on load, so that part is used either way.
+            encoderSupport = support
+            if takeDuringEncoderCheck || isRecording {
+                Log.shared.warn("Encoder check overlapped a take, so it runs again at the next launch")
+            } else {
+                support.save()
+            }
+            // Only a choice nobody has touched since launch moves to the phone's best size.
+            fitToPhone(choosingDefaults: firstLaunch && !takeDuringEncoderCheck && (encoderPreset, encoderSize) == before)
+        }
+    }
+
+    /// Moves off a codec or setting this phone can't record, and on the first launch picks the
+    /// largest size the codec encodes at 30 fps. Never during a take, whose encoder is working.
+    private func fitToPhone(choosingDefaults: Bool) {
+        guard !isRecording else { return }
+        let support = encoderSupport
+        var changes: [String] = []
+        if twelveBitProRes, !support.supportsTwelveBit {
+            twelveBitProRes = false
+            changes.append("12-bit ProRes off")
+        }
+        // Turned off first, so a baked take's codec follows it to HEVC.
+        if bakeToProRes, !support.hasProRes {
+            bakeToProRes = false
+            changes.append("baking to HEVC")
+        }
+        if !support.supports(encoderPreset) {
+            let replacement = support.replacement(for: encoderPreset)
+            changes.append("\(encoderPreset.label) to \(replacement.label)")
+            encoderPreset = replacement
+            if let size = support.bestSize(for: replacement) { encoderSize = size }
+        } else if choosingDefaults, let size = support.bestSize(for: encoderPreset), size != encoderSize {
+            changes.append("size \(size.label)")
+            encoderSize = size
+        }
+        if !changes.isEmpty {
+            Log.shared.info("Fitted to \(SystemStatus.deviceModel): " + changes.joined(separator: ", "))
         }
     }
 
@@ -1640,6 +1716,7 @@ final class AppModel: ObservableObject {
     }
 
     private func startRecording() {
+        if checkingEncoders { takeDuringEncoderCheck = true }
         guard !isRecording, !recordStarting, pendingRateChange == nil else { return }
         takeReadings = TakeReadings()
         idlePaused = false

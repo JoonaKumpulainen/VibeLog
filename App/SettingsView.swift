@@ -43,7 +43,7 @@ struct SettingsView: View {
                 if matches(Self.distortionTerms), !search.isEmpty {
                     Section("Advanced") { distortionRow }
                 }
-                if matches(Self.twelveBitTerms), !search.isEmpty {
+                if matches(Self.twelveBitTerms), !search.isEmpty, model.encoderSupport.supportsTwelveBit {
                     Section("Advanced") { twelveBitRow }
                 }
                 if matches("about version saved config file legal license licenses trademark") {
@@ -506,7 +506,10 @@ struct SettingsView: View {
                 switchRow("Fine look LUT", Self.fineLUTDetail, isOn: $model.fineLookLUT)
             }
             Section("Capture") { distortionRow }
-            Section("Recording") { twelveBitRow }
+            // 12-bit needs ProRes 4444, which only the Pro phones from the 13 Pro on have.
+            if model.encoderSupport.supportsTwelveBit {
+                Section("Recording") { twelveBitRow }
+            }
             Section {
                 NavigationLink("Color spaces and LUTs") { PairingView() }
             } footer: {
@@ -555,8 +558,10 @@ struct SettingsView: View {
     }
 
     @ViewBuilder private var bakeToProResRow: some View {
-        switchRow("Bake to ProRes", Self.proResDetail, isOn: $model.bakeToProRes)
-            .disabled(model.isRecording)
+        if model.encoderSupport.hasProRes {
+            switchRow("Bake to ProRes", Self.proResDetail, isOn: $model.bakeToProRes)
+                .disabled(model.isRecording)
+        }
         switchRow("FX in baked takes", Self.bakeEffectsDetail, isOn: $model.processing.bakeEffects)
             .disabled(model.isRecording)
     }

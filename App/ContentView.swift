@@ -2536,7 +2536,7 @@ struct FormatPanel: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 0) {
-            FormatWheel(title: "CODEC", options: ["PRORES", "HEVC"], selection: family, hold: hold, rowDepth: rowDepth) { $0 }
+            FormatWheel(title: "CODEC", options: families, selection: family, hold: hold, rowDepth: rowDepth) { $0 }
             FormatWheel(
                 title: Self.isHEVC(model.encoderPreset) ? "CHROMA" : "PROFILE", options: chromaChoices, selection: $model.encoderPreset, hold: hold,
                 rowDepth: rowDepth, label: Self.chromaLabel
@@ -2571,9 +2571,14 @@ struct FormatPanel: View {
         .background(Tokens.opaquePanel)
     }
 
+    /// Only the codecs this phone has: ProRes from the 13 Pro on.
+    private var families: [String] {
+        model.recordPresets.contains { !Self.isHEVC($0) } ? ["PRORES", "HEVC"] : ["HEVC"]
+    }
+
     private var chromaChoices: [EncoderPreset] {
         let hevc = Self.isHEVC(model.encoderPreset)
-        return EncoderPreset.all.filter { Self.isHEVC($0) == hevc }
+        return model.recordPresets.filter { Self.isHEVC($0) == hevc }
     }
 
     /// Switching codec keeps the chroma where the other codec has it.
@@ -2586,7 +2591,8 @@ struct FormatPanel: View {
                 let keepsFull = current.id.hasSuffix("444")
                 let target = name == "HEVC"
                     ? (keepsFull ? "hevc444" : "hevc422") : (keepsFull ? "prores4444" : "prores422hq")
-                model.encoderPreset = EncoderPreset.all.first { $0.id == target } ?? current
+                let choices = model.recordPresets.filter { Self.isHEVC($0) == (name == "HEVC") }
+                model.encoderPreset = choices.first { $0.id == target } ?? choices.first ?? current
             })
     }
 }

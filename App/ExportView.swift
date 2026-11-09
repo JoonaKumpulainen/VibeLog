@@ -63,6 +63,13 @@ struct ExportView: View {
         return "About \(shown) as it plays\(rate). Crop centers on the picture as it plays."
     }
 
+    /// The ProRes exports this phone can encode, smallest first.
+    private var proResCodecs: [EncoderPreset] {
+        ["prores422lt", "prores422", "prores422hq"].compactMap { id in
+            EncoderSupport.presets.first { $0.id == id && model.encoderSupport.supports($0) }
+        }
+    }
+
     private var curve: LogCurve { ExportChoice.curve(of: take) }
 
     private var gamut: Gamut { ExportChoice.gamut(of: take) }
@@ -275,9 +282,8 @@ struct ExportView: View {
                 Section {
                     Picker("Codec", selection: $codec) {
                         Text("HEVC 4:2:0").tag("hevc420")
-                        Text("ProRes 422 LT").tag("prores422lt")
-                        Text("ProRes 422").tag("prores422")
-                        Text("ProRes 422 HQ").tag("prores422hq")
+                        // ProRes only where the phone has its encoder.
+                        ForEach(proResCodecs, id: \.id) { Text($0.label).tag($0.id) }
                     }
                     if codec == "hevc420" {
                         Picker("Size", selection: $quality) {

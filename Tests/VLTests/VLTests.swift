@@ -916,6 +916,65 @@ final class VideoEncoderTests: XCTestCase {
         }
     }
 
+    private func support(_ fps: [String: [String: Double]], codecs: Set<String>? = nil, measured: Bool = true) -> EncoderSupport {
+        EncoderSupport(
+            device: "test", system: "test", codecs: codecs ?? Set(EncoderSupport.presets.map(\.id)), fps: fps, measured: measured)
+    }
+
+    private func preset(_ id: String) throws -> EncoderPreset {
+        try XCTUnwrap(EncoderSupport.presets.first { $0.id == id })
+    }
+
+    /// A phone without ProRes, such as the iPhone 12, moves to HEVC of the same chroma.
+    func testPhoneWithoutProResMovesToHEVC() throws {
+        let hevcOnly = support(
+            ["hevc420": ["4032x3024": 40], "hevc422": ["4032x3024": 31], "hevc444": ["2880x2160": 33]],
+            codecs: ["hevc420", "hevc422", "hevc444"])
+        XCTAssertFalse(hevcOnly.hasProRes)
+        XCTAssertFalse(hevcOnly.supportsTwelveBit)
+        XCTAssertFalse(hevcOnly.supports(try preset("prores422hq")))
+        XCTAssertEqual(hevcOnly.replacement(for: try preset("prores422hq")).id, "hevc422")
+        XCTAssertEqual(hevcOnly.replacement(for: try preset("prores4444")).id, "hevc444")
+        XCTAssertEqual(hevcOnly.bestSize(for: try preset("hevc444"))?.label, "2880x2160")
+    }
+
+    /// A chroma the encoder refused falls to the next with the most detail, and to HEVC 4:2:0 when
+    /// nothing is known to work.
+    func testReplacementWhenChromaIsMissing() throws {
+        let only420 = support(["hevc420": ["4032x3024": 30]], codecs: ["hevc420", "hevc422", "hevc444"])
+        XCTAssertFalse(only420.supports(try preset("hevc422")))
+        XCTAssertEqual(only420.replacement(for: try preset("hevc444")).id, "hevc420")
+        let nothing = support([:], codecs: [])
+        XCTAssertEqual(nothing.replacement(for: try preset("prores422hq")).id, "hevc420")
+    }
+
+    /// Before the trials, the codec list alone decides, and no size is suggested.
+    func testUnmeasuredSupportTrustsTheCodecList() throws {
+        let listed = support([:], codecs: ["hevc420", "prores422hq"], measured: false)
+        XCTAssertTrue(listed.supports(try preset("prores422hq")))
+        XCTAssertFalse(listed.supports(try preset("prores4444")))
+        XCTAssertNil(listed.bestSize(for: try preset("prores422hq")))
+    }
+
+    /// The largest size that keeps 30 fps, or the fastest when none does.
+    func testBestSizeKeepsRealTime() throws {
+        let slow = support(["hevc444": ["4032x3024": 21, "2880x2160": 29, "1920x1440": 28]])
+        XCTAssertEqual(slow.bestSize(for: try preset("hevc444"))?.label, "2880x2160")
+        let fast = support(["prores422hq": ["4032x3024": 90]])
+        XCTAssertEqual(fast.bestSize(for: try preset("prores422hq"))?.label, "4032x3024")
+        XCTAssertFalse(fast.supportsTwelveBit)
+    }
+
+    /// The codec list runs on the simulator, where HEVC should be listed.
+    func testCodecListFindsHEVC() throws {
+        XCTAssertEqual(EncoderSupport.codecType(.proRes422HQ), kCMVideoCodecType_AppleProRes422HQ)
+        XCTAssertEqual(EncoderSupport.codecType(.hevc), kCMVideoCodecType_HEVC)
+        let listed = EncoderSupport.codecList()
+        XCTAssertFalse(listed.measured)
+        guard listed.codecs.contains("hevc420") else { throw XCTSkip("This simulator lists no HEVC encoder") }
+        XCTAssertTrue(listed.supports(try preset("hevc420")))
+    }
+
     /// A gradient finer than 10 bits must come back from a ProRes 4444 file with its in-between steps.
     func testProRes4444FileKeepsTwelveBits() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")

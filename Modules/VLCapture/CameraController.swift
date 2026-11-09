@@ -47,11 +47,27 @@ public final class CameraController: NSObject {
         observers.forEach { NotificationCenter.default.removeObserver($0) }
     }
 
+    /// The tele's zoom against the main lens: 2x on the 12 Pro, 2.5x on the 12 Pro Max, 3x on the
+    /// 13 to 15 Pro, 5x on the 15 Pro Max and later Pros. The camera gives it as the zooms where
+    /// the virtual camera switches lens, counted from the widest one.
+    static var teleZoomLabel: String {
+        var zoom = 3.0
+        if let factors = AVCaptureDevice.default(.builtInTripleCamera, for: .video, position: .back)?
+            .virtualDeviceSwitchOverVideoZoomFactors, factors.count >= 2, factors[0].doubleValue > 0 {
+            zoom = factors[1].doubleValue / factors[0].doubleValue
+        } else if let first = AVCaptureDevice.default(.builtInDualCamera, for: .video, position: .back)?
+            .virtualDeviceSwitchOverVideoZoomFactors.first {
+            zoom = first.doubleValue
+        }
+        let half = (zoom * 2).rounded() / 2
+        return half == half.rounded() ? "\(Int(half))x" : "\(half)x"
+    }
+
     public static func lenses() -> [LensInfo] {
         let wanted: [(AVCaptureDevice.DeviceType, String)] = [
             (.builtInWideAngleCamera, "1x Main"),
             (.builtInUltraWideCamera, "0.5x Ultra Wide"),
-            (.builtInTelephotoCamera, "3x Tele"),
+            (.builtInTelephotoCamera, "\(teleZoomLabel) Tele"),
         ]
         return wanted.compactMap { type, name in
             AVCaptureDevice.default(type, for: .video, position: .back).map {
