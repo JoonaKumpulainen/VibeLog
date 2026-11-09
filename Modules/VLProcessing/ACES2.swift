@@ -6,10 +6,10 @@
 //
 // The full BSD 3-Clause terms are in LICENSES/OpenColorIO-BSD-3-Clause.txt. The algorithm is the
 // Academy's ACES 2.0 Output Transform, under the Apache License 2.0 in LICENSES/ACES-Apache-2.0.txt.
-// Changes from the original: translated to Swift, with only the forward SDR path kept, and
-// lineBoundaryIntersectionM holds its normalised J at zero or above, where float rounding at the
-// peak made a NaN. Names
-// follow the original so the two can be compared line by line.
+// Changes from the original: translated to Swift, with only the forward path kept, used for the
+// Rec.709 100-nit and P3-D65 1000-nit outputs, and lineBoundaryIntersectionM holds its normalised
+// J at zero or above, where float rounding at the peak made a NaN. Names follow the original so
+// the two can be compared line by line.
 
 import Foundation
 

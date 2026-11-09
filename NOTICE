@@ -12,8 +12,9 @@ LICENSES folder, and the app shows them under Settings > About > Legal.
    Copyright Contributors to the OpenColorIO Project.
    License: BSD 3-Clause, LICENSES/OpenColorIO-BSD-3-Clause.txt
    Changes: translated from C++ to Swift in Modules/VLProcessing/ACES2.swift, keeping only the
-   forward path, with the built-in Rec.709 view's clamps and display encoding from
-   transforms/builtins/ACES.cpp and Displays.cpp added in Modules/VLProcessing/BuiltInLook.swift.
+   forward path, with the built-in Rec.709 and P3-D65 1000-nit views' clamps and display
+   encoding from transforms/builtins/ACES.cpp and Displays.cpp added in
+   Modules/VLProcessing/BuiltInLook.swift.
 
 2. Academy Color Encoding System (ACES) 2.0
    Source: https://github.com/ampas/aces-core

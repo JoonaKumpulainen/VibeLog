@@ -1,3 +1,13 @@
+// ACES2Renderer below follows OpenColorIO's built-in ACES 2.0 views, from
+// src/OpenColorIO/transforms/builtins/ACES.cpp and Displays.cpp at commit 22dd9c4faa, which carry:
+//
+//   SPDX-License-Identifier: BSD-3-Clause
+//   Copyright Contributors to the OpenColorIO Project.
+//
+// The full BSD 3-Clause terms are in LICENSES/OpenColorIO-BSD-3-Clause.txt. Changes from the
+// original: translated from C++ to Swift, with only the forward Rec.709 100-nit and P3-D65
+// 1000-nit views kept. The rest of this file is VibeLog's own, under the GPL in LICENSE.
+
 import Foundation
 import VLCore
 import simd
