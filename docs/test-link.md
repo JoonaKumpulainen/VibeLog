@@ -1,18 +1,24 @@
 # Test link: privacy, the server and removing it
 
-The test link lets a computer you control run tests on the phone: change settings, start takes and collect logs. It's a developer tool. You don't need it to record, and nothing in the camera depends on it.
+The test link lets a computer you control run tests on the phone: change settings, start takes and
+collect logs. It's a developer tool. You don't need it to record, and nothing in the camera depends
+on it.
 
-This guide covers what it sends, how to run the server, how to keep it private, and how to remove it from the app completely.
+This guide covers what it sends, how to run the server, how to keep it private, and how to remove it
+from the app completely.
 
 ## The short version
 
-- The link is off at every launch, and only you can turn it on, in Diagnostics. The server can't turn it on.
-- If you never turn it on, the app sends nothing. There are no accounts, analytics or cloud services, and the test link is the only network code in the app.
+- The link is off at every launch, and only you can turn it on, in Diagnostics. The server can't
+  turn it on.
+- If you never turn it on, the app sends nothing. There are no accounts, analytics or cloud
+  services, and the test link is the only network code in the app.
 - For full privacy, you can leave it off, deny Local Network permission or build the app without it.
 
 ## What the link can do
 
-The phone connects out to the server, and the app opens no port of its own. Once connected, the server can use only the commands in `App/TestCommands.swift`:
+The phone connects out to the server, and the app opens no port of its own. Once connected, the
+server can use only the commands in `App/TestCommands.swift`:
 
 | It can | It can't |
 |---|---|
@@ -25,7 +31,9 @@ The phone connects out to the server, and the app opens no port of its own. Once
 | Apply and save presets, and set the default | Delete presets |
 | Take a picture of what the camera sees while no take is running, and fetch it | Fetch a picture during a take |
 
-A take started by the server records video and sound like any other, and the server can then fetch it. It can also ask for a still of the scene at any moment outside a take, without any sign on the phone. Only turn the link on when you're happy for your computer to do that.
+A take started by the server records video and sound like any other, and the server can then fetch
+it. It can also ask for a still of the scene at any moment outside a take, without any sign on the
+phone. Only turn the link on when you're happy for your computer to do that.
 
 ## What leaves the phone
 
@@ -43,16 +51,23 @@ Data only goes to the server you entered, and only while **Connect** is on.
 | RAW clip references | Only when the server asks | One RAW frame of the newest clip, and its metadata |
 | Videos and any other listed file | Only when the server asks for one by name | The full video and its sound |
 
-No location is sent, because the app doesn't record it. Video files can still hold whatever the camera saw and the microphone heard.
+No location is sent, because the app doesn't record it. Video files can still hold whatever the
+camera saw and the microphone heard.
 
-Turning off the two **Send** switches stops the automatic files. It doesn't stop the server asking for a file by name, or for a log, preview or status, so turn off **Connect** if you don't want that.
+Turning off the two **Send** switches stops the automatic files. It doesn't stop the server asking
+for a file by name, or for a log, preview or status, so turn off **Connect** if you don't want that.
 
-Traffic is **plain HTTP**. The token controls who may connect, but nothing is encrypted, so anyone able to watch your network could read the token and the data. That's why it belongs on a network you trust.
+Traffic is **plain HTTP**. The token controls who may connect, but nothing is encrypted, so anyone
+able to watch your network could read the token and the data. That's why it belongs on a network you
+trust.
 
 ## What stays on each device
 
-- **Phone:** the server address and token stay in `VibeLog.config.json` in the VibeLog folder, as plain text. They can be read in the Files app, and they go into any phone backup.
-- **Computer:** the results folder holds everything received, including previews and any fetched videos, plus the token, `replies.jsonl`, which is a log of every reply, including status, and each suite's `suite_*.csv` and `heat_*.csv`. It stays there until you delete it.
+- **Phone:** the server address and token stay in `VibeLog.config.json` in the VibeLog folder, as
+  plain text. They can be read in the Files app, and they go into any phone backup.
+- **Computer:** the results folder holds everything received, including previews and any fetched
+  videos, plus the token, `replies.jsonl`, which is a log of every reply, including status, and each
+  suite's `suite_*.csv` and `heat_*.csv`. It stays there until you delete it.
 
 Nothing is sent to the VibeLog project or to anyone else.
 
@@ -66,7 +81,11 @@ It needs Python 3 and nothing else. These commands run from the repository's fol
 python3 tools/test_server.py serve
 ```
 
-It prints the address and token to enter in the app, and where files go. The token is six random digits, kept in a `token` file in the results folder. That folder is `~/VibeLogTest` unless you set another: put its path in `~/.vibelog_test_folder`, set `VIBELOG_TEST_FOLDER`, or pass `--folder` before `serve`. Videos are large, so choose a drive with room. The server refuses a file that would leave under 2 GB free.
+It prints the address and token to enter in the app, and where files go. The token is six random
+digits, kept in a `token` file in the results folder. That folder is `~/VibeLogTest` unless you set
+another: put its path in `~/.vibelog_test_folder`, set `VIBELOG_TEST_FOLDER`, or pass `--folder`
+before `serve`. Videos are large, so choose a drive with room. The server refuses a file that would
+leave under 2 GB free.
 
 ### Connect the phone
 
@@ -83,9 +102,11 @@ The state line shows what happened:
 | **Token refused** | The token is wrong. Retype it, then turn **Connect** off and on |
 | **Needs a server and a token** | A field is empty or the address is invalid |
 
-The server prints `phone connected` when the phone reaches it, and `refused a wrong token` on a bad token.
+The server prints `phone connected` when the phone reaches it, and `refused a wrong token` on a bad
+token.
 
-If a firewall blocks the phone on Linux with `ufw`, allow only your own network, changing the range to match yours:
+If a firewall blocks the phone on Linux with `ufw`, allow only your own network, changing the range
+to match yours:
 
 ```bash
 sudo ufw allow from 192.168.1.0/24 to any port 8765 proto tcp
@@ -105,7 +126,8 @@ python3 tools/test_server.py send set lens 0.5x
 python3 tools/test_server.py send set tools peaking,grid
 ```
 
-A setting's name and value go as two arguments. Settings added in November 2026 include `hdrViewfinder`, `fineLookLUT`, `vignetteCorrection` and `bakeEffects`, all `true` or `false`.
+A setting's name and value go as two arguments. Settings added in November 2026 include
+`hdrViewfinder`, `fineLookLUT`, `vignetteCorrection` and `bakeEffects`, all `true` or `false`.
 
 ```bash
 python3 tools/test_server.py send record 20 --wait
@@ -129,15 +151,22 @@ Other commands:
 | `export [file] [look=ACES 2.0;target=sdr;codec=hevc420]` | Bakes a take, the newest in log unless named. `look` is `monitor` or a look's name, `target` is `sdr`, `pq` or `hlg`, `codec` is `hevc420`, `prores422lt`, `prores422` or `prores422hq`, `size` is HEVC's `master`, `high` or `share`, `resolution` is `full`, `medium` (2880 wide) or `small` (1920 wide), `crop` is `none`, `wide` (16:9) or `tall` (9:16) as the take plays, and `effects` is `none` or names and values such as `halation:1,bloom:0.5`. `log` writes log instead of a look, as `S-Log3` or `S-Log3/S-Gamut3`, and `shift` moves a crop, -1 to 1 across what it leaves out. Status reports `exporting`, `exports` and `lastExport` |
 | `cancelExport` | Stops that export |
 
-Every export, from the screen or the link, logs which step it stopped in and adds a row to `logs/exports.csv`, which `sendFile exports.csv` fetches.
+Every export, from the screen or the link, logs which step it stopped in and adds a row to
+`logs/exports.csv`, which `sendFile exports.csv` fetches.
 
-A suite runs a list of takes and cooling breaks from a JSON file, and writes `suite_*.csv` and `heat_*.csv` to the results folder. It refuses to start unless the phone is on the camera screen with room for its takes:
+A suite runs a list of takes and cooling breaks from a JSON file, and writes `suite_*.csv` and
+`heat_*.csv` to the results folder. It refuses to start unless the phone is on the camera screen
+with room for its takes:
 
 ```bash
 python3 tools/test_server.py suite tools/suites/ultra_wide.json
 ```
 
-The export matrix records 2 seconds in every curve and gamut the app allows, 43 in all, and exports each take with ACES 2.0 on its own. It comes in two parts, so neither fills the phone or runs too long. Each part first cools the phone to nominal heat, and a failed export is written to `exports_*.csv` and the suite moves on. At the end the phone sends its session log and `exports.csv`:
+The export matrix records 2 seconds in every curve and gamut the app allows, 43 in all, and exports
+each take with ACES 2.0 on its own. It comes in two parts, so neither fills the phone or runs too
+long. Each part first cools the phone to nominal heat, and a failed export is written to
+`exports_*.csv` and the suite moves on. At the end the phone sends its session log and
+`exports.csv`:
 
 ```bash
 python3 tools/test_server.py suite tools/suites/export_matrix_1.json
@@ -147,41 +176,54 @@ python3 tools/test_server.py suite tools/suites/export_matrix_1.json
 python3 tools/test_server.py suite tools/suites/export_matrix_2.json
 ```
 
-Part 1 covers Apple Log, Apple Log 2, S-Log3 and S-Log2, and part 2 covers LogC3, LogC4 and Canon Log 3. Between parts, delete the takes in the library if the phone is short of room.
+Part 1 covers Apple Log, Apple Log 2, S-Log3 and S-Log2, and part 2 covers LogC3, LogC4 and Canon
+Log 3. Between parts, delete the takes in the library if the phone is short of room.
 
-`send status` also reports which screen is open and why the camera is busy. A wrong setting replies with the values it accepts. `send` and `suite` only work from the computer running the server.
+`send status` also reports which screen is open and why the camera is busy. A wrong setting replies
+with the values it accepts. `send` and `suite` only work from the computer running the server.
 
 ### Stop it
 
-Press Ctrl+C in its terminal. The phone then shows **Waiting for the server** until you turn off **Connect**.
+Press Ctrl+C in its terminal. The phone then shows **Waiting for the server** until you turn off
+**Connect**.
 
 ## Keeping it private
 
 From least to most effort:
 
-1. **Connect only when testing.** Turn **Connect** off and stop the server when you finish. Restarting the app also turns it off.
-2. **Never expose the server to the internet.** Don't forward port 8765 on your router, and don't run it on public or shared Wi-Fi.
-3. **Listen on one address only.** By default the server listens on every network the computer has. Name the one you want:
+1. **Connect only when testing.** Turn **Connect** off and stop the server when you finish.
+   Restarting the app also turns it off.
+2. **Never expose the server to the internet.** Don't forward port 8765 on your router, and don't
+   run it on public or shared Wi-Fi.
+3. **Listen on one address only.** By default the server listens on every network the computer has.
+   Name the one you want:
 
    ```bash
    python3 tools/test_server.py serve --bind 192.168.1.20
    ```
 
-4. **Replace the token.** Six digits are easy to type and easy to guess, so they only suit a network you trust. For a longer one, stop the server, write your own to the file and restart it:
+4. **Replace the token.** Six digits are easy to type and easy to guess, so they only suit a network
+   you trust. For a longer one, stop the server, write your own to the file and restart it:
 
    ```bash
    python3 -c "import secrets; print(secrets.token_urlsafe(24))" > ~/VibeLogTest/token
    ```
 
 5. **Send less.** Turn off both **Send** switches, and leave **Log capture timing** off.
-6. **Encrypt the connection.** Plain HTTP can't be made private on an untrusted network. A private VPN between the phone and computer encrypts the traffic: run the server with `--bind` on the computer's VPN address and enter that address in the app. This setup hasn't been tested.
-7. **Deny the permission.** iOS Settings > Privacy & Security > Local Network > VibeLog, turned off, stops the app reaching local devices at all. It hasn't been tested on a VPN address.
+6. **Encrypt the connection.** Plain HTTP can't be made private on an untrusted network. A private
+   VPN between the phone and computer encrypts the traffic: run the server with `--bind` on the
+   computer's VPN address and enter that address in the app. This setup hasn't been tested.
+7. **Deny the permission.** iOS Settings > Privacy & Security > Local Network > VibeLog, turned off,
+   stops the app reaching local devices at all. It hasn't been tested on a VPN address.
 
 ## Erasing what it left behind
 
-**On the phone:** clear the server and token fields in Diagnostics, or edit `VibeLog.config.json` in the Files app and empty `testServer` and `testToken`. Use a new token afterward if you ever reuse the server.
+**On the phone:** clear the server and token fields in Diagnostics, or edit `VibeLog.config.json` in
+the Files app and empty `testServer` and `testToken`. Use a new token afterward if you ever reuse
+the server.
 
-**On the computer:** stop the server, then delete its folder. If you chose another one, delete that too:
+**On the computer:** stop the server, then delete its folder. If you chose another one, delete that
+too:
 
 ```bash
 rm -rf ~/VibeLogTest ~/.vibelog_test_folder
@@ -195,7 +237,8 @@ sudo ufw delete allow from 192.168.1.0/24 to any port 8765 proto tcp
 
 ## Removing it from the app completely
 
-This builds an app with no network code and no Local Network permission. Recording doesn't use any of it. Line numbers change, so find each item by name.
+This builds an app with no network code and no Local Network permission. Recording doesn't use any
+of it. Line numbers change, so find each item by name.
 
 ### 1. Delete these files
 
@@ -228,7 +271,8 @@ testServer = read(.testServer, defaults.testServer)
 testToken = read(.testToken, defaults.testToken)
 ```
 
-An older config file that still has these keys keeps working, and they're dropped the next time the app saves.
+An older config file that still has these keys keeps working, and they're dropped the next time the
+app saves.
 
 ### 4. Remove it from `App/AppModel.swift`
 
@@ -269,13 +313,16 @@ testServer = loaded.testServer
 testToken = loaded.testToken
 ```
 
-Delete the whole `record(seconds:)` function, `diagnosticsClosed()` and `sendPreview()`, each with its comment.
+Delete the whole `record(seconds:)` function, `diagnosticsClosed()` and `sendPreview()`, each with
+its comment.
 
-Delete the `openScreen` property, with its comment, and the three lines that set it in `settingsOpened()`, `settingsClosed()` and `diagnosticsOpened()`.
+Delete the `openScreen` property, with its comment, and the three lines that set it in
+`settingsOpened()`, `settingsClosed()` and `diagnosticsOpened()`.
 
 In `saveCaptureTiming(for:)`, delete `self.sendTimingFile(url)`.
 
-Delete `takeSeconds = nil` after the `Recording ... for ...` log line in `startRecording()`, and restore `rawDumpSeconds`:
+Delete `takeSeconds = nil` after the `Recording ... for ...` log line in `startRecording()`, and
+restore `rawDumpSeconds`:
 
 ```swift
 private var rawDumpSeconds: Double { recordSeconds > 0 ? recordSeconds : 3600 }
@@ -318,13 +365,16 @@ guard result.framesWritten > 0 else { return }
 
 ### 5. Remove the screen
 
-In `App/DiagnosticsView.swift`, delete the whole `Section` whose header is `Text("Test link")`, and the `.onDisappear { model.diagnosticsClosed() }` line.
+In `App/DiagnosticsView.swift`, delete the whole `Section` whose header is `Text("Test link")`, and
+the `.onDisappear { model.diagnosticsClosed() }` line.
 
-In `Modules/VLProcessing/StillExporter.swift`, delete the `preview` function, which nothing uses once the link is gone.
+In `Modules/VLProcessing/StillExporter.swift`, delete the `preview` function, which nothing uses
+once the link is gone.
 
 ### 6. Remove its tests
 
-In `Tests/VLTests/VLTests.swift`, delete the `TestLinkTests` class, and this line in `testOlderFilesKeepThirtyFramesAndNoPresets`:
+In `Tests/VLTests/VLTests.swift`, delete the `TestLinkTests` class, and this line in
+`testOlderFilesKeepThirtyFramesAndNoPresets`:
 
 ```swift
 XCTAssertEqual(config.testServer, "")
@@ -332,7 +382,10 @@ XCTAssertEqual(config.testServer, "")
 
 ### 7. Update the docs
 
-Delete this file, and the **Test link** row in `README.md`. In `HANDOFF.md`, delete the `tools/test_server.py` row, the **Test link** section, its item in the new-build list and its phone test.
+Delete this file, and the **Test link** row in `docs/using.md`. In `AGENTS.md`, delete the
+`tools/test_server.py` row and the test link's row in the docs table. In `docs/how-it-works.md`,
+delete **Test link, for test sessions** and the **Test link** row under **What presets keep**, and
+in `docs/status.md`, any test that needs the link.
 
 ### 8. Check nothing is left
 
@@ -348,10 +401,13 @@ This should print nothing too, which confirms the app has no network code left:
 grep -rlE 'URLSession|URLRequest|NWConnection|NWListener|WebSocket' App Modules
 ```
 
-Then build as usual. CI should pass, with 5 fewer tests. To check a finished build, this should print `0`:
+Then build as usual. CI should pass, with 5 fewer tests. To check a finished build, this should
+print `0`:
 
 ```bash
 unzip -p VibeLog-unsigned.ipa 'Payload/*.app/Info.plist' | grep -ac NSLocalNetworkUsageDescription
 ```
 
-The app's own **Share** button and the Files app still work, because iOS handles those, and they only send what you choose. After installing, also clear the old server and token as described under **Erasing what it left behind**.
+The app's own **Share** button and the Files app still work, because iOS handles those, and they
+only send what you choose. After installing, also clear the old server and token as described under
+**Erasing what it left behind**.
