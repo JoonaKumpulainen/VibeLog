@@ -279,7 +279,28 @@ an item from **Not verified** once it is.
   and P3-D65 mastering at 0.0001 to 1000 nits on the stream and every frame. Details are under
   **Session on 2026-11-07** in [history/2026-11.md](history/2026-11.md).
 
+- **iPhone 16 (`iPhone17,3`, iOS 26.6.2), from a second tester's logs on `d2958aa`, 2026-11-10:**
+  - **The formats match the 14 Pro's:** 4032x3024 Bayer RAW on both lenses, `bgg4` on the 1x and
+    `rgg4` on the 0.5x, black 2112, white 16383, clip 14271, zero shutter lag and responsive capture
+    supported. There's no tele.
+  - **The photo loop hangs.** Each stream start gave one `-12686`, one good frame, then `Photo loop
+    stalled with 1 in flight` every 2 to 3 seconds, on both lenses. Each restart fired a request
+    that also hung, and after about ten the camera refused with `-11830`, too many still requests,
+    and the loop sat at 0 in flight. Once, the 0.5x ran 11 seconds with no stall line, so the phone
+    can deliver.
+  - **Both takes wrote nothing:** `133524`, ProRes 422 HQ at 1920x1440, and `134217`, HEVC 4:2:2 at
+    4032x3024, ran with `n=0` and ended "No frames were written". The encoder never got a frame.
+  - **Encoder check, frames a second at 4032x3024, 2880x2160, 1920x1440:** HEVC 4:2:0 28.0, 51.2;
+    4:2:2 26.6, 48.5; 4:4:4 26.4, 45.3; ProRes 422 17.0, 33.4; 422 HQ 14.9, 27.6, 58.0; 4444 9.4,
+    20.7, 42.6; 422 LT 24.2, 42.6; 12-bit 4444 8.5 at full size. So ProRes is far below real time
+    at full size on this phone. The check ran while the stalled stream was open.
+
 ## Not verified
+
+- **iPhone 16:** why its photo requests hang. Suspects, none tested: the session has no preview
+  since `fa15863`, the fast capture options, or the reference DNG request at each start. Whether
+  any step of `CaptureSetup.ladder` streams there, and at what frame rate. Whether the encoder
+  trial's 20 frames understate full-size HEVC, since it includes the encoder's start and finish.
 
 - **From Batches 1 to 10:** what SCOPE and FX each cost the GPU in a long hot take; that grading
   sliders don't cost capture while dragging;

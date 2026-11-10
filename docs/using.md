@@ -194,6 +194,19 @@ up to size 129 work; 1D LUTs do not. The built-in **ACES 2.0** and **ACES 1.3** 
 Academy's Rec.709 output transforms, built on the phone for the curve and color space recorded, and
 always work on log.
 
+## On other iPhones
+
+VibeLog is built on the iPhone 14 Pro and fits itself to other models from the 12 on.
+
+- **Codec and size:** at the first launch it times each encoder for a few seconds, then starts on
+  the largest picture the phone records at 30 fps. Phones with a slow ProRes encoder start on HEVC.
+  You can still pick any codec and size, and a choice that measured under 30 fps warns when you
+  press record.
+- **Camera:** if the picture freezes just after opening, the app says **Camera stalled, trying
+  another setup** and restarts the camera a different way. It remembers the one that works.
+- **Record:** it won't start while the camera delivers no frames, and a take stops with a message
+  if the frames stop.
+
 ## Files (Files app > On My iPhone > VibeLog)
 
 ```

@@ -267,6 +267,10 @@ final class AppModel: ObservableObject {
     /// What this phone's encoders can do: the codec list at once, then trial encodes, measured
     /// once per phone and iOS version.
     @Published private(set) var encoderSupport = EncoderSupport.saved() ?? EncoderSupport.codecList()
+    /// How this phone's RAW stream is set up: the standard way until its own stream stalls.
+    @Published private(set) var captureSupport = CaptureSupport.saved()
+    /// The current step was reached after a stall and hasn't streamed long enough to keep.
+    private var captureOnTrial = false
     /// The presets this phone can record with.
     var recordPresets: [EncoderPreset] { EncoderPreset.all.filter(encoderSupport.supports) }
     /// There was no settings file, so the phone's own defaults may be chosen.
@@ -455,7 +459,11 @@ final class AppModel: ObservableObject {
             Log.shared.info("Starting on the Efficient path: this GPU is older than the A15")
         }
         fitToPhone(choosingDefaults: firstLaunch)
+        refitOldDefault()
         if !encoderSupport.measured { measureEncoders() }
+        if captureSupport.step > 0 {
+            Log.shared.info("Capture setup for \(captureSupport.device): \(captureSupport.setup.label)")
+        }
         loadLastTake()
         router.onRecordingElapsed = { [weak self] in
             DispatchQueue.main.async { self?.stopRecording() }
@@ -466,6 +474,7 @@ final class AppModel: ObservableObject {
         camera.onCaptureFailure = { [router] _ in router.handleFailure() }
         camera.onReference = { [weak self] data, metadata in self?.handleReference(data, metadata) }
         camera.onOptionsChanged = { [weak self] options in self?.adopt(options) }
+        camera.onCaptureStalled = { [weak self] in self?.captureStalled() }
 
         thermalObserver = NotificationCenter.default.addObserver(
             forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: nil
@@ -530,7 +539,8 @@ final class AppModel: ObservableObject {
 
     /// Apple's preview is only on the session for the ISP preview look. Hidden behind the Metal
     /// monitor it costs heat: take `180159` ran 10 minutes with nothing lost without it.
-    var appPreviewConnected: Bool { !monitorIsProcessed }
+    /// A phone whose stream stalled without it keeps it connected: see `CaptureSetup`.
+    var appPreviewConnected: Bool { !monitorIsProcessed || captureSupport.setup.keepsPreview }
 
     /// The Metal monitor is on screen, rather than the ISP preview.
     var monitorIsProcessed: Bool {
@@ -842,6 +852,10 @@ final class AppModel: ObservableObject {
     /// Returns every setting and manual control to the app's own, keeping presets and the test link.
     func resetSettings() {
         guard !isRecording else { return }
+        // The phone finds its capture setup again by itself, if it still needs one.
+        CaptureSupport.forget()
+        captureSupport = CaptureSupport.current()
+        captureOnTrial = false
         adoptSettings(AppConfig())
         exposureBias = 0
         exposureLocked = false
@@ -985,6 +999,10 @@ final class AppModel: ObservableObject {
         }
         if isStorageLow { return "\(timeLeftLabel) of storage left" }
         if isBatteryLow { return "Battery at \(batteryLabel), so the take may stall" }
+        if !bakeLook, let rate = encoderSupport.fps[twelveBitProRes ? EncoderSupport.twelveBitID : encoderPreset.id]?[encoderSize.label],
+            rate < EncoderSupport.realTimeFPS {
+            return String(format: "This codec and size encoded at %.0f fps on this phone, so frames may drop", rate)
+        }
         return nil
     }
 
@@ -1091,13 +1109,67 @@ final class AppModel: ObservableObject {
             changes.append("\(encoderPreset.label) to \(replacement.label)")
             encoderPreset = replacement
             if let size = support.bestSize(for: replacement) { encoderSize = size }
-        } else if choosingDefaults, let size = support.bestSize(for: encoderPreset), size != encoderSize {
-            changes.append("size \(size.label)")
-            encoderSize = size
+        } else if choosingDefaults, let best = support.bestDefault(for: encoderPreset) {
+            if best.preset != encoderPreset {
+                changes.append("\(encoderPreset.label) to \(best.preset.label)")
+                encoderPreset = best.preset
+            }
+            if best.size != encoderSize {
+                changes.append("size \(best.size.label)")
+                encoderSize = best.size
+            }
         }
         if !changes.isEmpty {
             Log.shared.info("Fitted to \(SystemStatus.deviceModel): " + changes.joined(separator: ", "))
         }
+    }
+
+    /// Builds before this one kept the codec and only shrank the size, which left a phone with a
+    /// slow ProRes encoder on a small ProRes picture. A choice that still matches what that rule
+    /// made is fitted once more. Anything the owner chose since stays.
+    private func refitOldDefault() {
+        let version = 2
+        let defaults = UserDefaults.standard
+        defer { defaults.set(version, forKey: "fitVersion") }
+        guard !firstLaunch, defaults.integer(forKey: "fitVersion") < version, encoderSupport.measured,
+            encoderSize != EncoderSize.all[0], encoderSupport.bestSize(for: encoderPreset) == encoderSize
+        else { return }
+        fitToPhone(choosingDefaults: true)
+    }
+
+    /// The photo loop gave up: its requests stopped finishing. The next setup on the ladder is
+    /// tried, and kept for this phone once it streams. Phones that never stall never get here.
+    private func captureStalled() {
+        guard isStreaming, method == .photoReadiness else { return }
+        if isRecording {
+            takeStopped("The camera stopped delivering frames.")
+            stopRecording()
+        }
+        guard let next = captureSupport.next else {
+            Log.shared.error("The camera stalled in every capture setup on \(captureSupport.device)")
+            captureSupport = CaptureSupport.current()
+            captureOnTrial = false
+            camera.stop()
+            isStreaming = false
+            idlePaused = true
+            takeAlert = TakeAlert(
+                title: "Camera stopped",
+                detail: "The camera stopped delivering frames in every setup. Tap the picture to try again, and send the session log.")
+            return
+        }
+        Log.shared.warn("Capture stalled on \(captureSupport.setup.label), trying \(next.setup.label)")
+        captureSupport = next
+        captureOnTrial = true
+        showNotice("Camera stalled, trying another setup", seconds: 4)
+        reconfigure()
+    }
+
+    /// A setup tried after a stall is kept once it has streamed for a few seconds.
+    private func keepCaptureSetupIfProven(frames: Int) {
+        guard captureOnTrial, isStreaming, frames >= 90 else { return }
+        captureOnTrial = false
+        captureSupport.save()
+        Log.shared.info("Capture setup kept for \(captureSupport.device): \(captureSupport.setup.label)")
     }
 
     func runEncoderTest() {
@@ -1622,12 +1694,17 @@ final class AppModel: ObservableObject {
         startStreamAfterConfigure = false
         if isRecording { stopRecording() }
         isStreaming = false
+        let setup = captureSupport.setup
+        // Only the default method follows the phone's setup. One picked in Diagnostics stays.
+        camera.reportsStalls = method == .photoReadiness
         let config = CaptureConfig(
-            lensID: lensID, formatIndex: formatIndex, method: method,
+            lensID: lensID, formatIndex: formatIndex,
+            method: method == .photoReadiness && setup.sequential ? .photoSequential : method,
             rawPixelFormat: rawFormat == 0 ? nil : rawFormat, photoSize: photoSize,
             videoPixelFormat: videoFormat == 0 ? nil : videoFormat, videoFPS: videoFPS,
             frameRate: frameRate, bracketCount: bracketCount, usePhotoPreset: usePhotoPreset,
-            fixedFrameTime: fixedFrameTime, distortionCorrection: distortionCorrection)
+            fixedFrameTime: fixedFrameTime, distortionCorrection: distortionCorrection,
+            fastCapture: setup.fastCapture)
         camera.configure(config) { [self] options in
             guard let options else { return }
             adopt(options)
@@ -1718,6 +1795,13 @@ final class AppModel: ObservableObject {
     private func startRecording() {
         if checkingEncoders { takeDuringEncoderCheck = true }
         guard !isRecording, !recordStarting, pendingRateChange == nil else { return }
+        // A stream that delivers nothing would record an empty file and only say so at the end.
+        if isStreaming, Date().timeIntervalSince(streamStart) > 3, (router.stats.secondsSinceFrame() ?? .infinity) > 2 {
+            Log.shared.warn("Record refused: no frame has arrived for over 2 seconds")
+            showNotice("The camera isn't delivering frames, so nothing would be recorded", seconds: 4)
+            takeSeconds = nil
+            return
+        }
         takeReadings = TakeReadings()
         idlePaused = false
         lastTouch = Date()
@@ -1806,6 +1890,7 @@ final class AppModel: ObservableObject {
             "effects": bakeLook && processing.bakeEffects && !lookEffects.isNeutral ? "baked in: \(lookEffects.label)" : "none in the file",
             "bitDepth": String(takePreset.bitDepth),
             "appPreview": appPreviewConnected ? "connected" : "disconnected",
+            "captureSetup": captureSupport.setup.label,
             "fileTag": takeFileTag.label,
             "look": bakedLookLabel,
             "desqueeze": processing.desqueeze == 1 ? "off" : String(processing.desqueeze),
@@ -2030,12 +2115,17 @@ final class AppModel: ObservableObject {
     private func show(_ snapshot: FrameStats.Snapshot, _ gpu: PipelineStats, _ line: SystemLine) {
         stats = snapshot
         pipelineStats = gpu
+        keepCaptureSetupIfProven(frames: snapshot.frames)
         if isRecording {
             recordElapsed = Int(Date().timeIntervalSince(recordStart))
             audioPeak = audio.takePeak()
             if line.thermal == "CRITICAL" {
                 Log.shared.warn("Stopping at \(recordElapsed)s: thermal state is critical")
                 takeStopped("The phone is too hot.")
+                stopRecording()
+            } else if recordElapsed >= 3, (router.stats.secondsSinceFrame() ?? .infinity) > 3 {
+                Log.shared.warn("Stopping at \(recordElapsed)s: no frame has arrived for over 3 seconds")
+                takeStopped("The camera stopped delivering frames.")
                 stopRecording()
             } else if line.freeDiskGB < 10 {
                 // Encoder drops began at about 8 GB free in a 10-minute test.

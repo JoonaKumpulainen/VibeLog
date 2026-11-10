@@ -965,6 +965,116 @@ final class VideoEncoderTests: XCTestCase {
         XCTAssertFalse(fast.supportsTwelveBit)
     }
 
+    /// The iPhone 16's own trial results, from its log of 2026-11-10: ProRes is far below real
+    /// time at full size, so the default moves to HEVC of the same chroma at the largest size
+    /// with room to spare, instead of a small ProRes picture.
+    func testSlowProResPhoneDefaultsToLargerHEVC() throws {
+        let sixteen = support([
+            "hevc420": ["4032x3024": 28.0, "2880x2160": 51.2],
+            "hevc422": ["4032x3024": 26.6, "2880x2160": 48.5],
+            "hevc444": ["4032x3024": 26.4, "2880x2160": 45.3],
+            "prores422": ["4032x3024": 17.0, "2880x2160": 33.4],
+            "prores422hq": ["4032x3024": 14.9, "2880x2160": 27.6, "1920x1440": 58.0],
+            "prores4444": ["4032x3024": 9.4, "2880x2160": 20.7, "1920x1440": 42.6],
+            "prores422lt": ["4032x3024": 24.2, "2880x2160": 42.6],
+        ])
+        let best = try XCTUnwrap(sixteen.bestDefault(for: try preset("prores422hq")))
+        XCTAssertEqual(best.preset.id, "hevc422")
+        XCTAssertEqual(best.size.label, "2880x2160")
+        let fourFour = try XCTUnwrap(sixteen.bestDefault(for: try preset("prores4444")))
+        XCTAssertEqual(fourFour.preset.id, "hevc444")
+        XCTAssertEqual(fourFour.size.label, "2880x2160")
+    }
+
+    /// A phone with a fast ProRes encoder, like the 14 Pro, keeps ProRes at full size whatever
+    /// its other codecs measured, so another phone's fallback never reaches it.
+    func testFastProResPhoneKeepsItsDefault() throws {
+        let pro = support([
+            "hevc420": ["4032x3024": 31], "hevc422": ["4032x3024": 29, "2880x2160": 55],
+            "prores422hq": ["4032x3024": 130], "prores4444": ["4032x3024": 132],
+        ])
+        let best = try XCTUnwrap(pro.bestDefault(for: try preset("prores422hq")))
+        XCTAssertEqual(best.preset.id, "prores422hq")
+        XCTAssertEqual(best.size.label, "4032x3024")
+        // Full size at a bare 30 fps still beats a smaller picture with room to spare.
+        let bare = support(
+            ["hevc420": ["4032x3024": 31], "hevc422": ["4032x3024": 24, "2880x2160": 55]],
+            codecs: ["hevc420", "hevc422"])
+        let hevc = try XCTUnwrap(bare.bestDefault(for: try preset("hevc422")))
+        XCTAssertEqual(hevc.preset.id, "hevc420")
+        XCTAssertEqual(hevc.size.label, "4032x3024")
+        XCTAssertNil(support([:], measured: false).bestDefault(for: try preset("prores422hq")))
+    }
+
+    /// One stall is retried in place, as on every phone so far. Two with no frame between them,
+    /// or four in a short while, give up so the session can be rebuilt another way.
+    func testStallCounterGivesUpOnlyWhenRequestsHang() {
+        var counter = StallCounter()
+        XCTAssertEqual(counter.stalled(at: 0), .retry)
+        counter.frameArrived()
+        XCTAssertEqual(counter.stalled(at: 100), .retry)
+        XCTAssertEqual(counter.stalled(at: 102), .giveUp)
+
+        var trickle = StallCounter()
+        for time in [0.0, 3, 6] {
+            XCTAssertEqual(trickle.stalled(at: time), .retry)
+            trickle.frameArrived()
+        }
+        XCTAssertEqual(trickle.stalled(at: 9), .giveUp)
+
+        var rare = StallCounter()
+        for time in [0.0, 30, 60, 90, 120] {
+            XCTAssertEqual(rare.stalled(at: time), .retry)
+            rare.frameArrived()
+        }
+    }
+
+    /// Every phone starts on the standard setup, and the ladder only ever adds a workaround.
+    func testCaptureLadderStartsStandardAndEnds() {
+        XCTAssertEqual(CaptureSetup.ladder.first, .standard)
+        XCTAssertEqual(Set(CaptureSetup.ladder.map(\.label)).count, CaptureSetup.ladder.count)
+        var phone = CaptureSupport(device: "test", system: "test")
+        XCTAssertEqual(phone.setup, .standard)
+        XCTAssertFalse(phone.setup.keepsPreview)
+        XCTAssertTrue(phone.setup.fastCapture)
+        var steps = 0
+        while let next = phone.next {
+            phone = next
+            steps += 1
+        }
+        XCTAssertEqual(steps, CaptureSetup.ladder.count - 1)
+        XCTAssertTrue(phone.setup.sequential)
+        XCTAssertEqual(CaptureSupport(device: "test", system: "test", step: 99).setup, CaptureSetup.ladder.last)
+    }
+
+    /// A saved step only applies to the phone model and iOS version it was found on.
+    func testCaptureSupportIsKeptPerPhone() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("capture_\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        XCTAssertEqual(CaptureSupport.saved(from: file).step, 0)
+        var mine = CaptureSupport.current()
+        mine.step = 1
+        mine.save(to: file)
+        XCTAssertEqual(CaptureSupport.saved(from: file), mine)
+        CaptureSupport(device: "another phone", system: mine.system, step: 2).save(to: file)
+        XCTAssertEqual(CaptureSupport.saved(from: file).step, 0)
+        CaptureSupport(device: mine.device, system: "another iOS", step: 2).save(to: file)
+        XCTAssertEqual(CaptureSupport.saved(from: file).step, 0)
+        CaptureSupport.forget(at: file)
+        XCTAssertEqual(CaptureSupport.saved(from: file).step, 0)
+    }
+
+    /// Record is refused while no frame arrives, which needs the time since the last one.
+    func testFrameStatsKnowsWhenFramesStop() {
+        let stats = FrameStats()
+        XCTAssertNil(stats.secondsSinceFrame())
+        let start = Date()
+        stats.recordFrame(pts: 1, arrival: start)
+        XCTAssertEqual(try XCTUnwrap(stats.secondsSinceFrame(now: start.addingTimeInterval(2.5))), 2.5, accuracy: 0.001)
+        stats.reset()
+        XCTAssertNil(stats.secondsSinceFrame())
+    }
+
     /// The codec list runs on the simulator, where HEVC should be listed.
     func testCodecListFindsHEVC() throws {
         XCTAssertEqual(EncoderSupport.codecType(.proRes422HQ), kCMVideoCodecType_AppleProRes422HQ)

@@ -65,12 +65,15 @@ public struct CaptureConfig: Sendable {
     public var fixedFrameTime: Bool
     /// Photo methods only: on lets the camera correct lens distortion, where it can.
     public var distortionCorrection: Bool
+    /// Readiness method only: zero shutter lag, responsive capture and fast prioritization. Off
+    /// is a fallback for phones whose requests hang with them on.
+    public var fastCapture: Bool
 
     public init(
         lensID: String, formatIndex: Int, method: CaptureMethod, rawPixelFormat: OSType? = nil,
         photoSize: PhotoSize? = nil, videoPixelFormat: OSType? = nil, videoFPS: Double = 30,
         frameRate: Double = 30, bracketCount: Int = 3, usePhotoPreset: Bool = true,
-        fixedFrameTime: Bool = true, distortionCorrection: Bool = false
+        fixedFrameTime: Bool = true, distortionCorrection: Bool = false, fastCapture: Bool = true
     ) {
         self.lensID = lensID
         self.formatIndex = formatIndex
@@ -84,6 +87,7 @@ public struct CaptureConfig: Sendable {
         self.usePhotoPreset = usePhotoPreset
         self.fixedFrameTime = fixedFrameTime
         self.distortionCorrection = distortionCorrection
+        self.fastCapture = fastCapture
     }
 }
 

@@ -31,6 +31,7 @@ public final class FrameStats {
     private var writerDrops = 0
     private var duplicates = 0
     private var expectedRate = 0.0
+    private var lastArrival: Date?
 
     /// Two photos can come from one sensor frame. Their times can differ by rounding alone.
     private static let duplicateGap = 0.001
@@ -48,6 +49,15 @@ public final class FrameStats {
         captureFailures = 0
         writerDrops = 0
         duplicates = 0
+        lastArrival = nil
+    }
+
+    /// How long ago the last frame arrived, or nil if none has since the last reset. A stream
+    /// that looks alive can still be delivering nothing.
+    public func secondsSinceFrame(now: Date = Date()) -> Double? {
+        lock.lock()
+        defer { lock.unlock() }
+        return lastArrival.map { now.timeIntervalSince($0) }
     }
 
     /// With a rate, `estimatedMissed` counts against it. Without one it can only compare gaps with
@@ -60,9 +70,10 @@ public final class FrameStats {
 
     /// Returns false for a frame the camera already delivered, which should go no further.
     @discardableResult
-    public func recordFrame(pts: Double) -> Bool {
+    public func recordFrame(pts: Double, arrival: Date = Date()) -> Bool {
         lock.lock()
         defer { lock.unlock() }
+        lastArrival = arrival
         if let last = timestamps.last, abs(pts - last) < Self.duplicateGap {
             duplicates += 1
             return false

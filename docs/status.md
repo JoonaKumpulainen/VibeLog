@@ -19,7 +19,31 @@ conversion in export, the faster PQ export, the Fine look LUT switch and the cro
 tested over the link. Earlier sessions' work is in [history/2026-11.md](history/2026-11.md), from
 **Session on 2026-11-07, on `88728c4`** onward.
 
-## Last session: 2026-11-08, on `947b90e`
+## This session: 2026-11-10, written but not built
+
+A second tester's iPhone 16 (`iPhone17,3`, iOS 26.6.2) sent three logs from `d2958aa`. What they
+show is in [findings.md](findings.md) under **iPhone 16**: the RAW photo loop hangs after its first
+frame, so both takes wrote 0 frames, and the fit left it on ProRes 422 HQ at 1920x1440. The plan
+the owner agreed is [decisions/per-phone-fitting.md](decisions/per-phone-fitting.md). Written, not
+committed or built:
+
+- **Capture ladder:** `CaptureSupport` in VLCore. A phone stays on the standard setup until its
+  loop stalls twice with no frame between, or four times in 20 seconds. Then the loop stops instead
+  of piling requests up to `-11830`, and the app rebuilds the session on the next step: Apple's
+  preview connected, fast capture off, both, then sequential requests. A step that streams 90
+  frames is saved in `capture_support.json` for that phone model and iOS version. An interrupted
+  session never escalates. The cause of the hang isn't known; the ladder's order is a guess, with
+  the missing preview first.
+- **Stall log:** each stall line names the last photo callback reached, the frames since start and
+  the output's readiness.
+- **Record guard:** record is refused with a notice when no frame has arrived for 2 seconds, and a
+  take with none for 3 seconds stops with a card.
+- **Codec default:** `EncoderSupport.bestDefault`. On the iPhone 16's numbers it picks HEVC 4:2:2
+  at 2880x2160. A phone already fitted by the old rule is fitted once more, if its choice still
+  matches what that rule made. A chosen codec and size that measured under 30 fps warns at record.
+- **Tests:** 7 new, 170 in all, none run yet, since nothing here compiles Swift.
+
+## Earlier session: 2026-11-08, on `947b90e`
 
 - **Baked FX on the Efficient path, short, gap closed:** four alternating 15-second SDR HEVC takes
   baked with ACES 2.0 (graded exposure +1.1), FX halation and bloom +50, diffusion and grain +30,
@@ -47,6 +71,13 @@ tested over the link. Earlier sessions' work is in [history/2026-11.md](history/
   plain viewfinder is still the fallback. Built in `cb8137a`, CI run 97, untested on the phone.
 
 ## Waiting on the phone
+
+**The iPhone 16, once this session's changes are built:** open the app and wait 20 seconds on the
+1x, switch to the 0.5x and wait 20 seconds, record 10 seconds, then send the `session_*.log`, with
+**Log capture timing** on in Diagnostics if they can. The log should show which setup streams, or
+where the request hangs. **The 14 Pro, same build:** one launch and a short take, to confirm no
+`Capture stalled` line appears and the format is unchanged, and its `Encoder check` lines if the
+check runs, to see how the trial's numbers sit against real takes.
 
 **Start of the next session:** once `cb8137a` is on the phone, start the server, which isn't running
 between sessions, with `python3 tools/test_server.py serve` (it prints the address, port 8765, the

@@ -59,6 +59,53 @@ public struct EncoderSupport: Codable, Equatable, Sendable {
             ?? tried.max { sizes[$0.label]! < sizes[$1.label]! }
     }
 
+    /// What a default needs over 30 fps. The trials run on a cool, idle phone, and a take shares
+    /// it with the camera and the GPU, so a size that only just made 30 has nothing to spare.
+    public static let comfortableFPS = 36.0
+
+    /// The largest size the preset encoded with room to spare, or else the largest it encoded at
+    /// 30 fps at all.
+    public func defaultSize(for preset: EncoderPreset) -> (size: EncoderSize, comfortable: Bool)? {
+        guard measured, let sizes = fps[preset.id] else { return nil }
+        let tried = EncoderSize.all.filter { sizes[$0.label] != nil }
+        if let size = tried.first(where: { sizes[$0.label]! >= Self.comfortableFPS }) { return (size, true) }
+        if let size = tried.first(where: { sizes[$0.label]! >= Self.realTimeFPS }) { return (size, false) }
+        return nil
+    }
+
+    private static func chroma(_ id: String) -> String {
+        id.contains("444") ? "444" : id.contains("420") ? "420" : "422"
+    }
+
+    /// The codec and size a phone should start on, given the one the app would otherwise use. A
+    /// phone that encodes it at full size with room to spare keeps it, so a phone with a fast
+    /// ProRes encoder is never moved. Otherwise the most pixels win, since a small picture loses
+    /// more than a codec change does: then room to spare, the wanted codec, its chroma, and the
+    /// usual order. Nil before the trials, or when nothing reached 30 fps.
+    public func bestDefault(for preset: EncoderPreset) -> (preset: EncoderPreset, size: EncoderSize)? {
+        guard measured else { return nil }
+        if let own = defaultSize(for: preset), own.comfortable, own.size == EncoderSize.all[0] {
+            return (preset, own.size)
+        }
+        let order = ["prores422hq", "prores4444", "prores422", "hevc422", "hevc444", "hevc420"]
+        var best: (preset: EncoderPreset, size: EncoderSize, score: [Double])?
+        for (rank, id) in order.enumerated() {
+            guard let candidate = EncoderPreset.all.first(where: { $0.id == id }), supports(candidate),
+                let fit = defaultSize(for: candidate)
+            else { continue }
+            let score: [Double] = [
+                Double(fit.size.width * fit.size.height), fit.comfortable ? 1 : 0,
+                candidate.id == preset.id ? 1 : 0, Self.chroma(id) == Self.chroma(preset.id) ? 1 : 0,
+                -Double(rank),
+            ]
+            if best.map({ $0.score.lexicographicallyPrecedes(score) }) ?? true {
+                best = (candidate, fit.size, score)
+            }
+        }
+        if let best { return (best.preset, best.size) }
+        return bestSize(for: preset).map { (preset, $0) }
+    }
+
     /// The closest preset this phone records with: the same chroma first, then the most detail,
     /// and HEVC 4:2:0, which every phone has, when nothing is known to work.
     public func replacement(for preset: EncoderPreset) -> EncoderPreset {

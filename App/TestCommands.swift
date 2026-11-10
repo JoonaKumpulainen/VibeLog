@@ -313,6 +313,7 @@ extension AppModel {
             "drawMs": String(format: "%.1f", pipelineStats.drawMs),
             "saveGyro": String(saveGyroLog), "captureTiming": String(logCaptureTiming),
             "appPreview": appPreviewConnected ? "connected" : "disconnected",
+            "captureSetup": captureSupport.setup.label,
             "fps": String(format: "%.2f", stats.rollingFPS), "drops": String(takeDrops),
             "gpuMs": String(format: "%.1f", pipelineStats.gpuRecentMs),
             "thermal": status.thermal, "battery": status.battery, "freeGB": String(status.freeDiskGB),

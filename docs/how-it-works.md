@@ -138,6 +138,25 @@ The ISP monitor removes the Metal view, so it stays in Settings. Keep SwiftUI up
 a second while recording, and avoid continuous animations, because main-thread load has cost frames
 before. A faster reading draws on its own layers from its own queue, as the mic bar does.
 
+## Fitting each phone
+
+The rules are in [decisions/per-phone-fitting.md](decisions/per-phone-fitting.md). A phone only
+leaves the standard setup on its own evidence, so a workaround for one never reaches another.
+
+- **Capture:** `CaptureSupport` holds the step of `CaptureSetup.ladder` this phone streams on, in
+  `capture_support.json`, per phone model and iOS version. `PhotoRawDriver` retries one stall in
+  place. After two with no frame between, or four in 20 seconds, it stops and `CameraController`
+  calls `onCaptureStalled`, unless the session is interrupted or the method was picked in
+  Diagnostics. `AppModel.captureStalled` moves to the next step and rebuilds. 90 frames on a new
+  step save it. When every step stalls, the stream stops with a card and a tap tries again from
+  the standard setup.
+- **Encoders:** `EncoderSupport` times each codec once per phone and iOS version. `bestDefault`
+  picks the first launch's codec and size: the wanted codec if it holds full size at 36 fps or
+  more, otherwise the most pixels, then room to spare, then the same chroma. Only an untouched
+  default moves.
+- **Adding a fallback:** give it a step on the ladder or a measured trial, never a model name, and
+  put the costlier change later.
+
 ## Encoder failures
 
 Two takes ended with `-11800`, underlying `-16364`, after 92 and 820 frames, both at serious heat.

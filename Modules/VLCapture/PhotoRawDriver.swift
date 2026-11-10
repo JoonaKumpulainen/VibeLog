@@ -10,6 +10,9 @@ final class PhotoRawDriver: NSObject {
     /// The flag says whether this failure should be logged.
     var onFailure: ((String, Bool) -> Void)?
     var onReference: ((Data?, [String: Any]) -> Void)?
+    /// Runs on the loop's queue when requests have stopped finishing. True means the owner
+    /// rebuilds the session, so the loop stops. False keeps it retrying in place.
+    var onStalled: (() -> Bool)?
 
     private let output: AVCapturePhotoOutput
     private let device: AVCaptureDevice
@@ -32,6 +35,11 @@ final class PhotoRawDriver: NSObject {
     private var failureCounts: [Int: Int] = [:]
     private var watchdog: DispatchSourceTimer?
     private var coordinator: AVCapturePhotoOutputReadinessCoordinator?
+    private var stalls = StallCounter()
+    /// Written from the photo callbacks' threads, so a stall can say how far its request got.
+    private let traceLock = NSLock()
+    private var lastCallback = "none"
+    private var framesDelivered = 0
 
     init(
         output: AVCapturePhotoOutput, device: AVCaptureDevice, method: CaptureMethod,
@@ -56,10 +64,41 @@ final class PhotoRawDriver: NSObject {
             sensorTime: sensorTime, inFlight: inFlight)
     }
 
+    private func trace(_ callback: String, frame: Bool = false) {
+        traceLock.lock()
+        lastCallback = callback
+        if frame { framesDelivered += 1 }
+        traceLock.unlock()
+    }
+
+    private func readTrace(reset: Bool = false) -> (callback: String, frames: Int) {
+        traceLock.lock()
+        defer { traceLock.unlock() }
+        let result = (lastCallback, framesDelivered)
+        if reset {
+            lastCallback = "none"
+            framesDelivered = 0
+        }
+        return result
+    }
+
+    private var readinessName: String {
+        switch output.captureReadiness {
+        case .sessionNotRunning: return "session not running"
+        case .ready: return "ready"
+        case .notReadyMomentarily: return "not ready momentarily"
+        case .notReadyWaitingForCapture: return "waiting for capture"
+        case .notReadyWaitingForProcessing: return "waiting for processing"
+        @unknown default: return "unknown"
+        }
+    }
+
     func start() {
         queue.async { [self] in
             running = true
             inFlight = 0
+            stalls.reset()
+            _ = readTrace(reset: true)
             lastEvent = Date()
             failureCounts = [:]
             if method == .photoReadiness {
@@ -91,13 +130,31 @@ final class PhotoRawDriver: NSObject {
         timer.schedule(deadline: .now() + 2, repeating: 1)
         timer.setEventHandler { [weak self] in
             guard let self, self.running, Date().timeIntervalSince(self.lastEvent) > 2 else { return }
-            Log.shared.warn("Photo loop stalled with \(self.inFlight) in flight, restarting it")
-            self.inFlight = 0
-            self.lastEvent = Date()
-            self.fire()
+            self.handleStall()
         }
         timer.resume()
         watchdog = timer
+    }
+
+    /// Runs on `queue`. One stall is retried in place. A second with no frame between them means
+    /// the requests aren't finishing, and each new one would pile onto the camera's limit, so the
+    /// owner is asked to rebuild the session another way.
+    private func handleStall() {
+        let seen = readTrace()
+        let detail = "\(inFlight) in flight, last callback \(seen.callback), "
+            + "\(seen.frames) frames since start, readiness \(readinessName)"
+        let now = CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock()))
+        if stalls.stalled(at: now) == .giveUp, onStalled?() == true {
+            Log.shared.warn("Photo loop stalled again with \(detail), so the session is rebuilt")
+            running = false
+            watchdog?.cancel()
+            watchdog = nil
+            return
+        }
+        Log.shared.warn("Photo loop stalled with \(detail), restarting it")
+        inFlight = 0
+        lastEvent = Date()
+        fire()
     }
 
     private func makeSettings() -> AVCapturePhotoSettings {
@@ -204,6 +261,7 @@ extension PhotoRawDriver: AVCapturePhotoCaptureDelegate {
         willCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings
     ) {
         note(.willCapture, request: resolvedSettings.uniqueID)
+        trace("willCapture")
         // Removes the shutter sound on iOS 17, where suppression has no public API.
         AudioServicesDisposeSystemSoundID(1108)
         if method == .photoReadiness {
@@ -217,10 +275,13 @@ extension PhotoRawDriver: AVCapturePhotoCaptureDelegate {
     ) {
         if let error {
             note(.failed, request: photo.resolvedSettings.uniqueID)
+            trace("photo failed \((error as NSError).code)")
             reportFailure(error as NSError)
             return
         }
         note(.frame, request: photo.resolvedSettings.uniqueID, sensorTime: CMTimeGetSeconds(photo.timestamp))
+        trace("photo", frame: true)
+        queue.async { [self] in stalls.frameArrived() }
         guard let buffer = photo.pixelBuffer else {
             onFailure?("Photo has no pixelBuffer (isRawPhoto=\(photo.isRawPhoto))", true)
             return
@@ -245,6 +306,7 @@ extension PhotoRawDriver: AVCapturePhotoCaptureDelegate {
         didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?
     ) {
         note(.finished, request: resolvedSettings.uniqueID)
+        trace("finished")
         finishedRequest()
     }
 }

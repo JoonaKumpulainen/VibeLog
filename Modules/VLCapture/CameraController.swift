@@ -12,6 +12,11 @@ public final class CameraController: NSObject {
     public var onReference: ((Data?, [String: Any]) -> Void)?
     /// Runs on the main queue when options change after configuring.
     public var onOptionsChanged: ((CaptureOptions) -> Void)?
+    /// Runs on the main queue when photo requests have stopped finishing and the loop has given
+    /// up, so the app can rebuild the session another way. Never while the session is interrupted.
+    public var onCaptureStalled: (() -> Void)?
+    /// Off, a stalled loop keeps retrying in place and `onCaptureStalled` never runs.
+    public var reportsStalls = false
     /// Survives session rebuilds. It records nothing until `begin()`.
     public let timing = CaptureTimingLog()
 
@@ -26,6 +31,20 @@ public final class CameraController: NSObject {
     private var options: CaptureOptions?
     private var observers: [NSObjectProtocol] = []
     private var pressureObservation: NSKeyValueObservation?
+    private let interruptionLock = NSLock()
+    private var interrupted = false
+
+    private var isInterrupted: Bool {
+        interruptionLock.lock()
+        defer { interruptionLock.unlock() }
+        return interrupted
+    }
+
+    private func setInterrupted(_ value: Bool) {
+        interruptionLock.lock()
+        interrupted = value
+        interruptionLock.unlock()
+    }
 
     public override init() {
         super.init()
@@ -38,8 +57,15 @@ public final class CameraController: NSObject {
         })
         observers.append(center.addObserver(
             forName: .AVCaptureSessionWasInterrupted, object: session, queue: nil
-        ) { note in
+        ) { [weak self] note in
+            self?.setInterrupted(true)
             Log.shared.warn("Session interrupted: \(note.userInfo ?? [:])")
+        })
+        observers.append(center.addObserver(
+            forName: .AVCaptureSessionInterruptionEnded, object: session, queue: nil
+        ) { [weak self] _ in
+            self?.setInterrupted(false)
+            Log.shared.info("Session interruption ended")
         })
     }
 
@@ -107,6 +133,7 @@ public final class CameraController: NSObject {
     public func start() {
         queue.async { [self] in
             guard !session.isRunning else { return }
+            setInterrupted(false)
             session.startRunning()
             guard session.isRunning else {
                 Log.shared.error("Session did not start")
@@ -512,7 +539,7 @@ public final class CameraController: NSObject {
             output.maxPhotoDimensions = CMVideoDimensions(
                 width: Int32(size.width), height: Int32(size.height))
             output.maxPhotoQualityPrioritization = .speed
-            let wantsFast = options.config.method == .photoReadiness
+            let wantsFast = options.config.method == .photoReadiness && options.config.fastCapture
             if output.isZeroShutterLagSupported {
                 output.isZeroShutterLagEnabled = wantsFast
             }
@@ -545,6 +572,13 @@ public final class CameraController: NSObject {
             self?.onCaptureFailure?(message)
         }
         driver.onReference = { [weak self] data, metadata in self?.onReference?(data, metadata) }
+        // An interrupted session stalls for a reason no other setup would cure, and its loop
+        // picks up again when the interruption ends.
+        driver.onStalled = { [weak self] in
+            guard let self, self.reportsStalls, !self.isInterrupted, self.session.isRunning else { return false }
+            DispatchQueue.main.async { self.onCaptureStalled?() }
+            return true
+        }
         photoDriver = driver
     }
 
