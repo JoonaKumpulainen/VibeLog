@@ -174,7 +174,8 @@ or shorten recording.
   Baked into takes, they fell behind at about 2 minutes in both early long takes. The viewfinder
   then shared the take's glow, which slowed the Maximum path from the start of a third take; the
   glow now comes from a pool and is handed over with the finished frame, proven on the phone. The
-  Maximum path still falls behind from about 2 minutes until the Efficient path takes over.
+  Maximum path still fell behind from about 2 minutes, so baked-FX takes run on the Efficient
+  path throughout, untested as a whole take.
 - Looks baked into recordings: built and proven, at no measurable GPU cost in a 60-second take, to
   HEVC or ProRes.
 - Timecode and Apple Watch control, if they prove useful.

@@ -33,28 +33,27 @@ Files can be read straight from a phone plugged in here, under `/run/user/<uid>/
 3. **Export:** whether "Wheels •" fits its tab upright; the fullscreen preview upright and
    sideways, with a crop outline on; the scope's drag, snap and resize, and the camera's scope
    too, whose code changed.
-4. **Run probe**, phone still, and send the newest `probes/probe_*.txt`. In its lens stabilization
+4. **Run probe**, on the build after `02d2d11` on the 14 Pro, where it crashed, phone still,
+   and send the newest `probes/probe_*.txt`. In its lens stabilization
    section, a stabilizer-off case holding about 30 fps with even 33 ms gaps would make a
    stabilizer switch for takes worth building. From the 14 Pro it also shows whether its lenses
    have the switch.
 
 **The 14 Pro:**
 
-5. **Gyroflow:** in Lenses, **Measure Lenses** if none are saved, then **Share for Gyroflow**; or
-   over the link, `send measureLenses`, then `listFiles` and `sendFile` for `gyroflow-*.json`. Load
+5. **Gyroflow:** the profiles were measured and fetched on 2026-11-11, and are in the test
+   folder as `gyroflow-back-wide-4032x3024.json` and three more. Load
    the 1x open gate profile in Gyroflow with a 1x take that has slow pans and a straight edge near
    a corner, shot at 1/250 s with lens distortion correction off. Say whether Gyroflow loads it,
    whether it stabilizes, and whether the edge comes out straight. A bowed edge means Apple's
    table runs the other way.
-6. **A launch and a short take on `edec570` or later,** to confirm no `Capture stalled` line and
-   an unchanged format.
+6. **`scope_cost.json` needs about 112 GB free** for its ProRes take, and the phone has 109.
 7. **Nothing for baked FX until the next build:** the long take ran on `02d2d11`, and what's
    left needs a change first. To run a suite, start the server with `python3
    tools/test_server.py serve`, turn on **Connect**, then `suite tools/suites/fx_baked.json`.
    Over the link, `set` takes name and value as two arguments.
 8. **Still waiting on the owner:** the stabilization take, slow pans and quick shakes at 1/250 s;
-   a colour chart shot; the matched pair for Apple's preview; `scope_cost.json`; ARRI Wide Gamut
-   3, left for later.
+   a colour chart shot; the matched pair for Apple's preview; ARRI Wide Gamut 3, left for later.
 
 **The iPhone 16:** a five-minute HEVC 4:2:2 take at full size, started cold and unplugged, and one
 at 2880x2160.
@@ -62,10 +61,10 @@ at 2880x2160.
 ## Still to build
 
 - **A stabilizer switch for takes,** only if the probe shows brackets can hold 30 fps.
-- **FX in baked takes: a way through the GPU's step down.** The Maximum path loses about 7
-  frames a second from about 2 minutes until serious heat brings the Efficient path, which then
-  holds. Not decided: take the Efficient path when the GPU falls behind, not only when hot, or
-  from the start of a baked-FX take.
+- **FX in baked takes: the long take on the Efficient path.** The Maximum path lost about 7
+  frames a second from about 2 minutes until serious heat brought the Efficient path, which then
+  held. The owner chose the Efficient path from the start of a baked-FX take. Written, not yet
+  built, with the probe's crash fix.
 - **ACES 1.3 HDR.**
 - **Lens profiles, next steps:** the straight-edge check, colour from a chart, the readout time
   for Gyroflow, and a profile for the ultra wide, which Apple gives no table for.

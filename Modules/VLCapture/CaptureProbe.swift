@@ -444,7 +444,10 @@ public enum CaptureProbe {
         private var errors: [Int] = []
 
         init(inFlight: Int) {
-            places = DispatchSemaphore(value: inFlight)
+            // Made empty and then filled: a semaphore freed below the value it was made with
+            // traps, which ended the app on the 14 Pro when a photo never came back.
+            places = DispatchSemaphore(value: 0)
+            for _ in 0..<inFlight { places.signal() }
         }
 
         var summary: String {

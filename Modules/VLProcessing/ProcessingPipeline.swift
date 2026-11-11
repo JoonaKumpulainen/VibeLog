@@ -734,14 +734,17 @@ public final class ProcessingPipeline: NSObject {
         let look = takeLook?.look ?? LookParams(settings: settings, lut: customLUT?.lut, expectsRec709: customLUT?.expectsRec709)
         let lookLUT = takeLook == nil ? customLUT?.texture : takeLook?.lut
         let hotPath = hot && settings.efficientWhenHot
-        let efficient = (settings.pipeline == .efficient || hotPath) && stillRequest == nil
         let bakedEffects = sinkFrame != nil ? takeEffects : nil
+        // A baked-FX take is Efficient throughout. On Maximum, takes 192732 and 190958 ran clean
+        // for about 2 minutes, then the GPU stepped from 26 to 43 ms a frame at nominal heat and
+        // 7 frames a second dropped until serious heat brought this path, which then held.
+        let efficient = (settings.pipeline == .efficient || hotPath || bakedEffects != nil) && stillRequest == nil
         let effectsKit = takeEffectsKit
         if bakedEffects != nil { takeEffectsFrame += 1 }
         let effectsParams = bakedEffects.map { EffectsParams($0, curve: settings.curve, frame: takeEffectsFrame) }
         lock.unlock()
 
-        // Stills and resized recordings need the full image. Baked FX may take the direct kernels:
+        // Stills and resized recordings need the full image. Baked FX take the direct kernels:
         // forced onto the full image when hot, a 10-minute take lost 2,381 frames by 5:52 at 44 to
         // 56 ms a frame, so the direct kernels now apply the FX to the linear light they already
         // have, rather than decoding and encoding the curve again, which cost them 43 ms a frame.

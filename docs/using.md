@@ -95,7 +95,8 @@ HDR picture with the screen's extra brightness while its dynamic range is HDR. *
 Advanced measures this phone's lenses from Apple's calibration, and **Share for Gyroflow** there
 sends them as Gyroflow lens profiles, for the 1x and tele, open gate and 16:9. **Bake** under Image records the
 look into takes, with **Bake to ProRes**, **FX in baked takes** and **Bake as** SDR, HDR PQ or HDR
-HLG beneath it. **Lens shading correction** under Advanced brightens the corners by Apple's own lens
+HLG beneath it. A take with FX baked in runs on the Efficient pipeline whichever is chosen, and
+its details say so. **Lens shading correction** under Advanced brightens the corners by Apple's own lens
 shading. A switch's explanation shows while it's on, and search finds a setting by its explanation
 too.
 

@@ -159,6 +159,13 @@ final class AppModel: ObservableObject {
     private func syncBakeHDR() {
         if processing.bakeHDR != bakesHDR { processing.bakeHDR = bakesHDR }
     }
+    /// The pipeline a take runs on. Baked FX take the Efficient one, whatever is chosen.
+    var takePipelineLabel: String {
+        let bakesEffects = bakeLook && processing.bakeEffects && !lookEffects.isNeutral
+        guard bakesEffects, processing.pipeline != .efficient else { return processing.pipeline.label }
+        return "\(PipelineMode.efficient.label), for the baked FX"
+    }
+
     /// What the sidecar says the file holds.
     var bakedLookLabel: String {
         guard bakeLook else { return "log, as recorded" }
@@ -1882,7 +1889,7 @@ final class AppModel: ObservableObject {
             "whiteBalanceDuringTake": whiteBalanceLocked ? "manual" : lockAtRoll ? "frozen at start" : "auto",
             "aspect": widescreen ? "16:9 center crop" : "4:3 open gate",
             "debayer": processing.demosaic.label,
-            "pipeline": processing.pipeline.label,
+            "pipeline": takePipelineLabel,
             "orientation": hold.hold.label,
             "reducedLoadAtStart": isHot && processing.bilinearWhenHot ? "yes, bilinear debayer" : "no",
             "lens": currentLensLabel,
@@ -1943,7 +1950,7 @@ final class AppModel: ObservableObject {
             isRecording = true
             let seconds = takeSeconds ?? recordSeconds
             takeSeconds = nil
-            Log.shared.info("Encoding \(name): lens \(currentLensLabel), \(takePreset.label) \(takePreset.bitDepth)-bit \(outputSize.label) at \(frameRateLabel) fps, frame time \(metadata["frameTime"] ?? "?"), audio \(metadata["audio"] ?? "?"), gyro \(metadata["gyroLog"] ?? "?"), tools \(toolsLabel), exposure \(metadata["exposureDuringTake"] ?? "?"), white balance \(metadata["whiteBalanceDuringTake"] ?? "?"), \(processing.curve.label), \(processing.pipeline.label) pipeline, \(seconds > 0 ? "\(seconds)s" : "until stopped"), battery \(SystemStatus.batteryText), thermal \(SystemStatus.thermalName), free \(SystemStatus.freeDisk / 1_000_000_000) GB")
+            Log.shared.info("Encoding \(name): lens \(currentLensLabel), \(takePreset.label) \(takePreset.bitDepth)-bit \(outputSize.label) at \(frameRateLabel) fps, frame time \(metadata["frameTime"] ?? "?"), audio \(metadata["audio"] ?? "?"), gyro \(metadata["gyroLog"] ?? "?"), tools \(toolsLabel), exposure \(metadata["exposureDuringTake"] ?? "?"), white balance \(metadata["whiteBalanceDuringTake"] ?? "?"), \(processing.curve.label), \(takePipelineLabel) pipeline, \(seconds > 0 ? "\(seconds)s" : "until stopped"), battery \(SystemStatus.batteryText), thermal \(SystemStatus.thermalName), free \(SystemStatus.freeDisk / 1_000_000_000) GB")
             guard seconds > 0 else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self, weak encoder] in
                 guard let self, let encoder, self.activeEncoder === encoder else { return }

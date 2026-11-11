@@ -370,6 +370,19 @@ an item from **Not verified** once it is.
   - **The Efficient path ended it:** at serious, 6:09, it took over, and the last 3:50 ran at 28
     to 29 ms, queue about 1 ms, `draw` 4 ms, with nothing lost.
 
+- **14 Pro over the link on `02d2d11`, 2026-11-11:**
+  - **The standard capture setup holds there:** three launches and two 10-minute takes with no
+    `Capture stalled` line, `captureSetup` standard and the format 4032x3024 `bgg4` as before.
+  - **Measuring lenses writes the Gyroflow profiles:** `measureLenses` saved the three lens
+    profiles and four Gyroflow files, 1x and tele, open gate and 16:9, and `sendFile` fetched
+    them. The 1x reads fx 2840.9 px, centre (2004.3, 1528.8), fitted within 0.56 px; the tele fx
+    9258.4, centre (2029.4, 1444.1), within 0.02 px.
+  - **The probe ended the app:** `probe` crashed with signal 5 in `StabilizationCatcher`'s
+    release, reached from `probeLensStabilization`, and wrote no report. A dispatch semaphore
+    freed below the value it was made with traps, which happens when a photo's wait times out. So
+    at least one stabilization case never got its photo back in 5 seconds on this phone. Fixed in
+    the next build by making the semaphore empty and filling it.
+
 ## Not verified
 
 - **Baked FX for a whole take:** whether the Efficient path from the start, or from the moment
