@@ -8,8 +8,8 @@ short.
 
 As of mid Phase 7. The latest build is `7e2b514`, CI run 110, version 0.1.110, which passed
 with 187 tests and one skip: stabilized export, its preview, stabilized copies of baked takes
-and the probe's stabilizer names, none tried on a phone. Run 109, of `c669641` alone, was
-cancelled while still queued. Before it, `35d43dc`, run 108: a baked-FX take makes its monitor image and glow every other
+and the probe's stabilizer names, none tried on a phone. Run 109, of `c669641` alone, never
+started: GitHub lists it as queued and won't cancel it. Before it, `35d43dc`, run 108: a baked-FX take makes its monitor image and glow every other
 frame, and the 14 Pro held two 10-minute takes back to back on it with no cooling, `212113`
 with 2 frames lost and `213229`, started at serious heat, with 30. `907287d`, run 107, added the GPU cost test, which ran on the 14 Pro.
 Before it,
