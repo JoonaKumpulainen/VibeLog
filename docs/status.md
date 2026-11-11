@@ -6,8 +6,9 @@ short.
 
 ## Latest build
 
-As of mid Phase 7. The latest build is `b740eab`, CI run 106, version 0.1.106, which passed
-with 181 tests and one skip: baked-FX takes run on the Efficient path throughout, and the
+As of mid Phase 7. The latest build is `907287d`, CI run 107, version 0.1.107, which passed
+with 181 tests and one skip and adds the GPU cost test, not yet run on a phone. Before it,
+`b740eab`, run 106: baked-FX takes run on the Efficient path throughout, and the
 probe's crash on the 14 Pro is fixed. The 14 Pro proved the probe, and a baked-FX take with no
 cooling held 5:07 before the hot GPU stepped down. Before it, `02d2d11`, run
 105: a baked-FX take
@@ -66,8 +67,8 @@ at 2880x2160.
 - **A stabilizer switch for takes** fails its condition on the 14 Pro: brackets reach 20.8 fps
   at best. Not yet struck off by the owner.
 - **A cheaper baked-FX frame,** so a hot phone needs no cooling: it must fall from about 29 ms
-  to about 23. **Run GPU cost test**, or `send costTest`, times each stage first; written, not
-  yet built. Candidates: the monitor image and glow every other frame, cheaper per-pixel FX, a
+  to about 23. **Run GPU cost test**, or `send costTest`, times each stage first, in `907287d`:
+  run it cool, then send `probes/gpu_cost_*.txt`. Candidates: the monitor image and glow every other frame, cheaper per-pixel FX, a
   slower viewfinder when hot.
 - **FX in baked takes: the long take on the Efficient path.** The Maximum path lost about 7
   frames a second from about 2 minutes until serious heat brought the Efficient path, which then
