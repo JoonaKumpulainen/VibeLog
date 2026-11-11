@@ -566,7 +566,7 @@ struct SettingsView: View {
             .disabled(model.isRecording)
     }
 
-    private static let bakeEffectsDetail = "Records the FX tab's halation, bloom, diffusion, vignette and grain into baked takes, as the viewfinder shows them, fixed as a take starts. Each frame then makes its own glow, which the viewfinder shares during the take rather than making a second one. These takes use the Efficient pipeline throughout, since Maximum quality fell behind after about two minutes. Log takes never get FX. Grain suits ProRes better than HEVC, which smears it."
+    private static let bakeEffectsDetail = "Records the FX tab's halation, bloom, diffusion, vignette and grain into baked takes, as the viewfinder shows them, fixed as a take starts. The take then makes its own glow every other frame, which the viewfinder shares rather than making a second one. These takes use the Efficient pipeline throughout, since Maximum quality fell behind after about two minutes. Log takes never get FX. Grain suits ProRes better than HEVC, which smears it."
 
     private var twelveBitRow: some View {
         switchRow("12-bit ProRes 4444", Self.twelveBitDetail, isOn: $model.twelveBitProRes)

@@ -424,6 +424,8 @@ public final class ProcessingPipeline: NSObject {
     /// The glow of the take's last finished frame, which the viewfinder samples instead of making
     /// its own.
     private var takeGlow: MTLTexture?
+    /// The glow the take last encoded, which the frames between monitor images sample again.
+    private var encodedGlow: MTLTexture?
     /// A look only takes record, such as HDR, while the viewfinder shows the SDR one.
     private var bakeLUT: CustomLUT?
     private var customLUT: CustomLUT?
@@ -602,6 +604,7 @@ public final class ProcessingPipeline: NSObject {
         if baking, takeEffectsKit == nil { takeEffectsKit = EffectsKit(device: device, poolSize: Self.outputCount) }
         takeEffectsFrame = 0
         takeGlow = nil
+        encodedGlow = nil
         lock.unlock()
     }
 
@@ -742,6 +745,7 @@ public final class ProcessingPipeline: NSObject {
         let effectsKit = takeEffectsKit
         if bakedEffects != nil { takeEffectsFrame += 1 }
         let effectsParams = bakedEffects.map { EffectsParams($0, curve: settings.curve, frame: takeEffectsFrame) }
+        let earlierGlow = bakedEffects != nil ? encodedGlow : nil
         lock.unlock()
 
         // Stills and resized recordings need the full image. Baked FX take the direct kernels:
@@ -754,12 +758,15 @@ public final class ProcessingPipeline: NSObject {
         var still: (() -> Void)?
         var encoded: Bool
         if direct {
-            // Every other frame is enough for the monitor while recording, but baked FX take their
-            // glow from it, so then it's made every frame, first, for the planes to sample.
+            // Every other frame is enough for the monitor while recording. Baked FX take their
+            // glow from it, made first for the planes to sample, and the frame between samples
+            // that glow again: a heavy blur one frame old doesn't show, and the monitor image and
+            // glow were 3.3 of a frame's 12.0 ms on the 14 Pro.
             efficientFrames += 1
             var effects: TakeEffects?
+            if let effectsParams, let earlierGlow { effects = (earlierGlow, effectsParams) }
             encoded = true
-            if sinkFrame == nil || efficientFrames % 2 == 0 || effectsParams != nil,
+            if sinkFrame == nil || efficientFrames % 2 == 0 || (effectsParams != nil && earlierGlow == nil),
                 let monitor = takeMonitorOutput(width: input.width / 2, height: input.height / 2) {
                 encoded = encodeMonitor(
                     into: commands, input: input, output: monitor, cfa: cfa,
@@ -769,6 +776,9 @@ public final class ProcessingPipeline: NSObject {
                     let glow = effectsKit.glow(for: monitor, params: effectsParams, commands: commands, reduction: 4) {
                     effects = (glow, effectsParams)
                     frameGlow = glow
+                    lock.lock()
+                    encodedGlow = glow
+                    lock.unlock()
                 }
             }
             encoded = encoded && (sinkFrame.map { frame -> Bool in
@@ -1570,10 +1580,10 @@ extension ProcessingPipeline {
                 encodeMonitor(into: commands, input: raw, output: monitor, cfa: cfa, gains: gains)
                     && kit.glow(for: monitor, params: params(all, frame), commands: commands, reduction: 4) != nil
             }
-            measure("Efficient, \(debayer): a baked FX take, as recorded") { commands, frame in
+            measure("Efficient, \(debayer): a baked FX take, monitor image and glow every frame") { commands, frame in
                 bakedFrame(commands, frame, all, luma: luma, chroma: chroma)
             }
-            measure("Efficient, \(debayer): a baked FX take, monitor image and glow every other frame") { commands, frame in
+            measure("Efficient, \(debayer): a baked FX take as recorded, monitor image and glow every other frame") { commands, frame in
                 bakedFrame(commands, frame, all, luma: luma, chroma: chroma, glowEvery: 2)
             }
             measure("Efficient, \(debayer): a baked FX take, monitor image and glow every fourth frame") { commands, frame in
