@@ -8,7 +8,8 @@ short.
 
 As of mid Phase 7. The latest build is `b740eab`, CI run 106, version 0.1.106, which passed
 with 181 tests and one skip: baked-FX takes run on the Efficient path throughout, and the
-probe's crash on the 14 Pro is fixed. Neither is tried on a phone. Before it, `02d2d11`, run
+probe's crash on the 14 Pro is fixed. The 14 Pro proved the probe, and a baked-FX take with no
+cooling held 5:07 before the hot GPU stepped down. Before it, `02d2d11`, run
 105: a baked-FX take
 hands its glow to the viewfinder only when a frame finishes, from a pool of four, after take
 `164209` ran 45 ms a frame from its start on the Maximum path. The 14 Pro proved the fix in take
@@ -35,8 +36,8 @@ Files can be read straight from a phone plugged in here, under `/run/user/<uid>/
 3. **Export:** whether "Wheels •" fits its tab upright; the fullscreen preview upright and
    sideways, with a crop outline on; the scope's drag, snap and resize, and the camera's scope
    too, whose code changed.
-4. **Run probe**, on `b740eab` or later on the 14 Pro, where it crashed before, phone still,
-   and send the newest `probes/probe_*.txt`. In its lens stabilization
+4. **Run probe on the iPhone 16** for its overlapped cases, phone still, and send the newest
+   `probes/probe_*.txt`. The 14 Pro's ran: no bracket holds 30 fps there. In its lens stabilization
    section, a stabilizer-off case holding about 30 fps with even 33 ms gaps would make a
    stabilizer switch for takes worth building. From the 14 Pro it also shows whether its lenses
    have the switch.
@@ -50,8 +51,8 @@ Files can be read straight from a phone plugged in here, under `/run/user/<uid>/
    whether it stabilizes, and whether the edge comes out straight. A bowed edge means Apple's
    table runs the other way.
 6. **`scope_cost.json` needs about 112 GB free** for its ProRes take, and the phone has 109.
-7. **The baked-FX long take on `b740eab`,** now Efficient throughout: 10 minutes with nothing
-   lost after the first seconds would close it. To run a suite, start the server with `python3
+7. **The baked-FX long take on `b740eab`, with its 30 minutes of cooling.** Without cooling it
+   held 5:07, then lost about 2.7 frames a second at serious heat. To run a suite, start the server with `python3
    tools/test_server.py serve`, turn on **Connect**, then `suite tools/suites/fx_baked.json`.
    Over the link, `set` takes name and value as two arguments.
 8. **Still waiting on the owner:** the stabilization take, slow pans and quick shakes at 1/250 s;
@@ -62,7 +63,8 @@ at 2880x2160.
 
 ## Still to build
 
-- **A stabilizer switch for takes,** only if the probe shows brackets can hold 30 fps.
+- **A stabilizer switch for takes** fails its condition on the 14 Pro: brackets reach 20.8 fps
+  at best. Not yet struck off by the owner.
 - **FX in baked takes: the long take on the Efficient path.** The Maximum path lost about 7
   frames a second from about 2 minutes until serious heat brought the Efficient path, which then
   held. The owner chose the Efficient path from the start of a baked-FX take, built in

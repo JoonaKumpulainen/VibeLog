@@ -383,11 +383,36 @@ an item from **Not verified** once it is.
     at least one stabilization case never got its photo back in 5 seconds on this phone. Fixed in
     `b740eab` by making the semaphore empty and filling it.
 
+- **Lens stabilization in RAW brackets, 14 Pro on `b740eab`, 2026-11-11:** from
+  `probe_20261111_200208.txt`, which ran to its end, so the probe's crash is fixed.
+  - **The 1x and tele can switch the stabilizer, the ultra wide can't,** as on the iPhone 16.
+    Brackets with it off reported `off` on every photo, and with it on `active`.
+  - **No bracket holds 30 fps.** On the 1x, frames in a bracket came 33 ms apart, then 161 to 202
+    ms passed before the next bracket: 6.2 fps in brackets of 1, about 14 in 3s and 20.8 in 8s.
+    Two or four requests in flight changed nothing, and brackets of 3 with 2 in flight gave four
+    `-11800` errors. The tele gave 70 ms in a bracket and 252 ms between, 11.6 fps at best.
+  - **Plain RAW in the probe** came 40 ms apart on the 1x, 60 on the tele and 50 on the ultra
+    wide, and reports `unsupported`, so the stabilizer's state in a normal take is still unknown.
+  - So a stabilizer switch for takes fails the condition set for building it.
+
+- **Baked FX on the Efficient path throughout, 14 Pro on `b740eab`, 2026-11-11:** take `200230`
+  from `fx_baked.json` with no cooling wait, unplugged from 65%, minutes after the probe and
+  about 50 after the last 10-minute take. It ran 10:00 and wrote 17,182 frames at 28.64 fps, with
+  812 lost at the GPU and none at the encoder; capture held 29.99 fps, `missed 5`. The sidecar
+  reads "Efficient, for the baked FX".
+  - **Nothing was lost for 5:07,** at 28 to 30 ms a frame, queue under 1 ms, `draw` 3 to 4 ms and
+    no viewfinder yields, through fair at 0:40 and serious at 2:00. The Maximum path's step at
+    about 2 minutes didn't come.
+  - **Then the GPU stepped again:** at 5:07, after 3:07 at serious, GPU time went from 29 to 37
+    ms and queue to 50 ms, and about 2.7 frames a second dropped to the end, with 7,054 yields.
+  - It heated far faster than the cooled takes, which reached serious at 4 to 6 minutes, so this
+    doesn't show what a cooled take does. Long take 1, without FX, held 7 minutes at serious on
+    this path at 30 to 32 ms.
+
 ## Not verified
 
-- **Baked FX for a whole take:** whether the Efficient path from the start, or from the moment
-  the GPU falls behind, holds 10 minutes with FX baked in. It held the last 3:50 of two takes at
-  serious heat.
+- **Baked FX for a whole take:** whether the Efficient path holds 10 minutes after the suite's 30
+  minutes of cooling. Without cooling it held 5:07.
 
 - **Gyroflow lens profiles:** whether Gyroflow loads them, whether Apple's table describes the RAW
   frame, and whether it runs undistorted to distorted, as Apple's sample code reads it and the
