@@ -6,8 +6,10 @@ short.
 
 ## Latest build
 
-As of mid Phase 7. The latest build is `7e2b514`, CI run 110, version 0.1.110, which passed
-with 187 tests and one skip: stabilized export, its preview, stabilized copies of baked takes
+As of mid Phase 7. The latest build is `652ba7a`, CI run 111, version 0.1.111, which passed
+with 187 tests and one skip: the ultra wide's stabilizing corrects every speed, the probe prints
+RAW photos' maker notes, and the Legal page and gyro wording say what the optics mean for
+Gyroflow. Before it, `7e2b514`, run 110: stabilized export, its preview, stabilized copies of baked takes
 and the probe's stabilizer names, none tried on a phone. Run 109, of `c669641` alone, never
 started: GitHub lists it as queued and won't cancel it. Before it, `35d43dc`, run 108: a baked-FX take makes its monitor image and glow every other
 frame, and the 14 Pro held two 10-minute takes back to back on it with no cooling, `212113`
