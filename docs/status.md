@@ -6,8 +6,10 @@ short.
 
 ## Latest build
 
-As of mid Phase 7. The latest build is `907287d`, CI run 107, version 0.1.107, which passed
-with 181 tests and one skip and adds the GPU cost test, not yet run on a phone. Before it,
+As of mid Phase 7. The latest build is `35d43dc`, CI run 108, version 0.1.108, which passed
+with 181 tests and one skip: a baked-FX take makes its monitor image and glow every other
+frame, untried on a phone. `907287d`, run 107, added the GPU cost test, which ran on the 14 Pro.
+Before it,
 `b740eab`, run 106: baked-FX takes run on the Efficient path throughout, and the
 probe's crash on the 14 Pro is fixed. The 14 Pro proved the probe, and a baked-FX take with no
 cooling held 5:07 before the hot GPU stepped down. Before it, `02d2d11`, run
@@ -69,7 +71,7 @@ at 2880x2160.
 - **A cheaper baked-FX frame,** so a hot phone needs no cooling: it must fall from about 29 ms
   to about 23. The GPU cost test ran on the 14 Pro: a frame costs 12.0 ms alone, 3.3 of it the
   monitor image and glow, so those every other frame save 13%, and every fourth 20%. Every
-  other frame is written, not yet built; the owner chose it over every fourth. Candidates: the monitor image and glow every other frame, cheaper per-pixel FX, a
+  other frame is in `35d43dc`, waiting on a long take; the owner chose it over every fourth. Candidates: the monitor image and glow every other frame, cheaper per-pixel FX, a
   slower viewfinder when hot.
 - **FX in baked takes: the long take on the Efficient path.** The Maximum path lost about 7
   frames a second from about 2 minutes until serious heat brought the Efficient path, which then
