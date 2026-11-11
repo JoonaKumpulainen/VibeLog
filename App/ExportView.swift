@@ -21,6 +21,8 @@ struct ExportView: View {
     @State private var crop = ExportCrop.none
     @State private var stabilize = false
     @State private var stabilizeSeconds = 0.6
+    /// What the stabilized preview did, or why it couldn't: its enlargement, or what's missing.
+    @State private var steadyNote: String?
     /// Where the crop sits, -1 to 1 across what it leaves out, as the take plays.
     @State private var cropShift = 0.0
     /// A log curve and gamut to write the take as instead of a look.
@@ -83,6 +85,17 @@ struct ExportView: View {
     private var gamut: Gamut { ExportChoice.gamut(of: take) }
 
     private var isLog: Bool { ExportChoice.isLog(take) }
+
+    /// What the preview shows, under it.
+    private var previewCaption: String {
+        var caption = "Plays as recorded"
+        if isLog {
+            caption = "\(curve.label) in \(gamut.label). Plays with the look, as the export will write it"
+            if !grade.isNeutral { caption += ", graded" }
+        }
+        return caption + (stabilize ? ", stabilized." : ".")
+    }
+    private var hasGyroLog: Bool { FileManager.default.fileExists(atPath: TakeLibrary.gyroLog(for: take.url).path) }
 
     var body: some View {
         NavigationStack {
@@ -153,9 +166,13 @@ struct ExportView: View {
             scopeKind = model.isOn(.scope) ? model.scopeKind : nil
             scopeScale = model.scopeScale
             configureScope()
+            // A take with its look baked in can only be steadied, so its screen opens on that.
+            if !isLog { stabilize = hasGyroLog }
             player.replaceCurrentItem(with: AVPlayerItem(url: take.url))
             refreshPreview()
         }
+        .onChange(of: stabilize) { _, _ in refreshPreview() }
+        .onChange(of: stabilizeSeconds) { _, _ in refreshSoon() }
         .onChange(of: scopeKind) { _, _ in
             configureScope()
             // A paused preview draws no new frame by itself, and a seek to where it is reuses the
@@ -256,8 +273,7 @@ struct ExportView: View {
                 .accessibilityLabel(fullscreen ? "Show the settings" : "Fill the screen with the preview")
             }
             if !fullscreen {
-            Text("\(curve.label) in \(gamut.label). Plays with the look, as the export will write it"
-                + (grade.isNeutral ? "." : ", graded."))
+            Text(previewCaption)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
@@ -271,6 +287,7 @@ struct ExportView: View {
 
     /// The look, codec and export button, which the grade editor replaces while it's open.
     @ViewBuilder private var settingsSections: some View {
+                if isLog {
                 Section("Look") {
                     Picker("Write as", selection: $logTarget) {
                         Text("A look").tag(ExportChoice.LogTarget?.none)
@@ -302,6 +319,7 @@ struct ExportView: View {
                             ForEach(BakeTarget.allCases) { Text($0.label).tag($0) }
                         }
                     }
+                }
                 }
                 Section {
                     Picker("Codec", selection: $codec) {
@@ -340,7 +358,7 @@ struct ExportView: View {
                         .accessibilityElement(children: .contain)
                         .accessibilityLabel("Crop position")
                     }
-                    if FileManager.default.fileExists(atPath: TakeLibrary.gyroLog(for: take.url).path) {
+                    if hasGyroLog {
                         Toggle("Stabilize", isOn: $stabilize)
                         if stabilize {
                             VStack(alignment: .leading, spacing: 4) {
@@ -352,7 +370,12 @@ struct ExportView: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 Slider(value: $stabilizeSeconds, in: 0.2...2, step: 0.1)
-                                Text("Steadies the export from the take's gyro log and enlarges it to hide the edges. Fast small shake is left to the lens's own stabilizer. The preview plays the take as shot.")
+                                if let steadyNote {
+                                    Text(steadyNote)
+                                        .font(.caption)
+                                        .monospacedDigit()
+                                }
+                                Text("Steadies the picture from the take's gyro log and enlarges it to hide the edges. Fast small shake is left to the lens's own stabilizer. The preview plays it stabilized: switch Stabilize off and on to compare.")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -373,8 +396,8 @@ struct ExportView: View {
                         }
                         Button("Cancel", role: .destructive) { job.cancel() }
                     } else {
-                        Button("Export") { startExport() }
-                            .disabled(!isLog)
+                        Button(isLog ? "Export" : "Export stabilized copy") { startExport() }
+                            .disabled(!isLog && !stabilize)
                     }
                     if let message = job.message {
                         Text(message)
@@ -384,7 +407,9 @@ struct ExportView: View {
                 } footer: {
                     Text(isLog
                         ? "Writes a new take beside this one, tagged Rec.709, or Rec.2020 PQ or HLG for HDR. Keep VibeLog open until it's done."
-                        : "This take already has its look baked in.")
+                        : hasGyroLog
+                            ? "This take has its look baked in, so only a stabilized copy can be written: the same picture, steadied and encoded again, beside this one. Keep VibeLog open until it's done."
+                            : "This take already has its look baked in, and has no gyro log to steady it with.")
                 }
     }
 
@@ -403,6 +428,7 @@ struct ExportView: View {
             lutName: lutName, lutMadeForRec709: lutMadeForRec709, grade: grade, effects: effects, target: target,
             codec: codec, quality: quality, resolution: resolution, crop: crop, cropShift: cropShift,
             stabilize: stabilize, stabilizeSeconds: stabilizeSeconds, logTarget: logTarget)
+            .keepingAsShot(isLog ? nil : take)
     }
 
     /// A paused player redraws only for a composition it hasn't seen, so it gets a copy of the same.
@@ -434,12 +460,32 @@ struct ExportView: View {
         let (chosen, takeCurve, takeGamut, scope) = (choice, curve, gamut, scope)
         let sourceRec709 = ExportChoice.sourceRec709(take)
         let url = take.url
+        let lens = take.info?.metadata["lens"]
         previewGeneration += 1
         let generation = previewGeneration
         let existing = previewExporter.flatMap { exporter in previewComposition.map { (exporter, $0) } }
         Task.detached(priority: .userInitiated) {
             do {
-                let look = chosen.previewLook(curve: takeCurve, gamut: takeGamut, sourceRec709: sourceRec709)
+                var building = chosen.previewLook(curve: takeCurve, gamut: takeGamut, sourceRec709: sourceRec709)
+                // The preview is steadied as the export will be. What stops it is said beside the
+                // switch, and the take then plays as shot.
+                var note: String?
+                if chosen.stabilize {
+                    do {
+                        let source = try await LookExporter.describe(url)
+                        if let steadying = try chosen.steadying(
+                            gyroLog: TakeLibrary.gyroLog(for: url), lens: lens, width: source.width, height: source.height) {
+                            building.steadying = steadying
+                            note = String(format: "Enlarged %.0f%% to hide the edges", steadying.zoom * 100)
+                                + (steadying.zoom >= steadying.path.settings.maxZoom - 0.001
+                                    ? ", the most allowed: some frames are steadied less. Try less smoothness." : ".")
+                        }
+                    } catch {
+                        note = "\(error)"
+                    }
+                }
+                let look = building
+                let steadyText = note
                 var made: (LookExporter, AVVideoComposition)?
                 if existing == nil {
                     guard let exporter = LookExporter(look: look) else { throw LookExporter.Failure.gpu }
@@ -451,6 +497,7 @@ struct ExportView: View {
                 await MainActor.run {
                     // Only the newest look reaches the exporter, however the builds finish.
                     guard generation == previewGeneration, let item = player.currentItem else { return }
+                    steadyNote = steadyText
                     if let fresh {
                         previewExporter = fresh.0
                         previewComposition = fresh.1
@@ -655,7 +702,7 @@ final class LookExportJob: ObservableObject {
 
     /// What an NSError carries beyond its message, which is where AVFoundation names the cause.
     nonisolated private static func details(of error: Error) -> String {
-        guard !(error is LookExporter.Failure), !(error is StepFailure) else { return "" }
+        guard !(error is LookExporter.Failure), !(error is StepFailure), !(error is ExportChoice.SteadyFailure) else { return "" }
         let error = error as NSError
         var text = " (\(error.domain) \(error.code)"
         if let reason = error.localizedFailureReason { text += ", \(reason)" }
@@ -708,28 +755,15 @@ final class LookExportJob: ObservableObject {
         var look = look
         look.cropShift = choice.storedCropShift(width: source.width, height: source.height, quarterTurns: source.quarterTurns)
         var steadied: String?
-        if choice.stabilize {
-            trace.begin("reading the gyro log")
-            guard let text = try? String(contentsOf: TakeLibrary.gyroLog(for: take.url), encoding: .utf8) else {
-                throw StepFailure(description: "This take has no gyro log to steady it with")
-            }
-            var settings = SteadyPath.Settings()
-            settings.smoothSeconds = choice.stabilizeSeconds
-            guard let path = SteadyPath(samples: GyroLog.samples(from: text), settings: settings) else {
-                throw StepFailure(description: "The take's gyro log is too short to steady it with")
-            }
-            let lens = ExportChoice.lensName(take.info?.metadata["lens"])
-            guard let profile = LensProfile.saved().first(where: { $0.lens == lens }), profile.width > 0 else {
-                throw StepFailure(description: "Stabilizing needs this lens measured first, in Settings, Advanced, Lenses")
-            }
-            // The profile's focal length is in pixels of the sensor's full width.
-            let focal = profile.fx * Double(source.width) / Double(profile.width)
-            let zoom = path.zoom(width: Double(source.width), height: Double(source.height), focal: focal)
-            look.steadying = LookExporter.Steadying(path: path, focal: focal, zoom: zoom)
+        if choice.stabilize { trace.begin("reading the gyro log") }
+        if let steadying = try choice.steadying(
+            gyroLog: TakeLibrary.gyroLog(for: take.url), lens: take.info?.metadata["lens"], width: source.width,
+            height: source.height) {
+            look.steadying = steadying
             steadied = String(
                 format: "from the gyro log, smoothed over %.1f s and enlarged %.0f%%, with fast small shake left to the lens's stabilizer",
-                choice.stabilizeSeconds, zoom * 100)
-            Log.shared.info("Export of \(take.url.lastPathComponent) is steadied \(steadied ?? ""), focal \(Int(focal)) px")
+                choice.stabilizeSeconds, steadying.zoom * 100)
+            Log.shared.info("Export of \(take.url.lastPathComponent) is steadied \(steadied ?? ""), focal \(Int(steadying.focal)) px")
         }
         guard let exporter = LookExporter(look: look) else { throw LookExporter.Failure.gpu }
         let size = choice.outputSize(width: source.width, height: source.height, quarterTurns: source.quarterTurns)

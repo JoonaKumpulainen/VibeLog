@@ -104,7 +104,9 @@ final class LookCompositor: NSObject, AVVideoCompositing {
                 return
             }
             do {
-                try instruction.exporter.render(frame, into: output, quarterTurns: instruction.quarterTurns)
+                try instruction.exporter.render(
+                    frame, into: output, quarterTurns: instruction.quarterTurns,
+                    seconds: request.compositionTime.seconds)
                 instruction.scope?.measure(output)
                 request.finish(withComposedVideoFrame: output)
             } catch {

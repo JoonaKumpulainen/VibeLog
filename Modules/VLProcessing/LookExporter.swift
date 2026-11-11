@@ -21,8 +21,11 @@ public final class LookExporter {
         public var hdr = false
         /// Where the crop sits within what it leaves out, -1 to 1 along each axis of the stored picture.
         public var cropShift = SIMD2<Float>.zero
-        /// Steadies each exported frame from the take's gyro log, or nil to leave them as shot.
+        /// Steadies each frame from the take's gyro log, or nil to leave them as shot.
         public var steadying: Steadying?
+        /// Writes the picture as the take holds it, with no look: for a take whose look is
+        /// already baked in, which can still be steadied. `lut` and the effects are left out.
+        public var asShot = false
 
         public init(
             curve: LogCurve, gamut: Gamut, lut: CubeLUT?, lutExpectsRec709: Bool, sourceRec709: Bool,
@@ -90,7 +93,8 @@ public final class LookExporter {
     private var effectsImage: MTLTexture?
     private var effectsFrame = 0
     private let cropShift: SIMD2<Float>
-    private let steadying: Steadying?
+    /// Changes with the look while the preview plays, under `renderLock`.
+    private var steadying: Steadying?
     private let warpState: MTLComputePipelineState?
     private var steadyImage: MTLTexture?
 
@@ -116,10 +120,10 @@ public final class LookExporter {
         curve = look.curve
         cropShift = look.cropShift
         steadying = look.steadying
-        let warp = look.steadying == nil ? nil
-            : library.makeFunction(name: "steadyWarp").flatMap { try? pipeline.device.makeComputePipelineState(function: $0) }
-        if look.steadying != nil, warp == nil { return nil }
-        warpState = warp
+        // Made for every exporter, since the preview may turn steadying on later.
+        warpState = library.makeFunction(name: "steadyWarp").flatMap {
+            try? pipeline.device.makeComputePipelineState(function: $0)
+        }
         effectsKit = look.effects.isNeutral ? nil : EffectsKit(device: pipeline.device)
         CVMetalTextureCacheCreate(nil, nil, pipeline.device, nil, &cache)
     }
@@ -127,6 +131,12 @@ public final class LookExporter {
     private static func params(_ look: Look) -> LookParams {
         var settings = ProcessingSettings()
         settings.restore(curve: look.curve, gamut: look.gamut)
+        if look.asShot {
+            // No look, and the same YCbCr matrix the take was written in.
+            settings.bakeLook = false
+            settings.rec709Matrix = look.sourceRec709
+            return LookParams(settings: settings, lut: nil)
+        }
         settings.bakeLook = true
         settings.lutExpectsRec709 = look.lutExpectsRec709
         settings.bakeHDR = look.hdr
@@ -146,6 +156,7 @@ public final class LookExporter {
         sourceLuma = look.sourceRec709 ? LookParams.rec709Luma : LookParams.rec2020Luma
         effects = look.effects
         curve = look.curve
+        steadying = look.steadying
         if look.effects.isNeutral {
             effectsKit = nil
             effectsImage = nil
@@ -170,10 +181,11 @@ public final class LookExporter {
         return effectsImage
     }
 
-    /// The frame's log image steadied for its time in the take, or as it is when the export
-    /// doesn't steady. Only the export does this: the preview plays the take as shot.
-    private func steadied(_ image: MTLTexture, seconds: Double, commands: MTLCommandBuffer) -> MTLTexture? {
-        guard let steadying, let warpState else { return image }
+    /// The frame's log image steadied for its time in the take, or as it is when nothing steadies
+    /// it or its time isn't known. The preview and the export both come through here, so the
+    /// preview shows what the export writes.
+    private func steadied(_ image: MTLTexture, seconds: Double?, commands: MTLCommandBuffer) -> MTLTexture? {
+        guard let steadying, let warpState, let seconds else { return image }
         if steadyImage?.width != image.width || steadyImage?.height != image.height {
             steadyImage = pipeline.device.makeTexture(
                 descriptor: ProcessingPipeline.outputDescriptor(width: image.width, height: image.height))
@@ -212,9 +224,12 @@ public final class LookExporter {
     }
 
     /// One frame with the look into `output`, a 32BGRA buffer, scaled to its size and turned
-    /// `quarterTurns` clockwise, so a take held upright plays upright. For playback, which calls
-    /// it from one queue at a time.
-    public func render(_ frame: CVPixelBuffer, into output: CVPixelBuffer, quarterTurns: Int = 0) throws {
+    /// `quarterTurns` clockwise, so a take held upright plays upright. `seconds` is the frame's
+    /// time in the take, which steadying needs. For playback, which calls it from one queue at a
+    /// time.
+    public func render(
+        _ frame: CVPixelBuffer, into output: CVPixelBuffer, quarterTurns: Int = 0, seconds: Double? = nil
+    ) throws {
         renderLock.lock()
         defer { renderLock.unlock() }
         let width = CVPixelBufferGetWidth(output)
@@ -226,7 +241,8 @@ public final class LookExporter {
             let wrappedOutput, let target = CVMetalTextureGetTexture(wrappedOutput),
             let commands = queue.makeCommandBuffer(),
             let decoded = decode(frame, commands: commands),
-            let source = withEffects(decoded.image, commands: commands),
+            let steady = steadied(decoded.image, seconds: seconds, commands: commands),
+            let source = withEffects(steady, commands: commands),
             let encoder = commands.makeComputeCommandEncoder(),
             let lut = lutTexture ?? pipeline.placeholderTexture
         else { throw Failure.gpu }
@@ -271,6 +287,7 @@ public final class LookExporter {
         from url: URL, seconds: Double, measuringLight: Bool, progress: (Double) -> Void, cancelled: () -> Bool,
         makeSink: ((maxCLL: Int, maxFALL: Int)?) throws -> VideoFrameSink
     ) async throws -> (maxCLL: Int, maxFALL: Int)? {
+        if steadying != nil, warpState == nil { throw Failure.gpu }
         let (reader, output, range) = try await makeReader(url, from: 0, randomAccess: measuringLight)
         defer { reader.cancelReading() }
         let lightShare = measuringLight ? 0.35 : 0

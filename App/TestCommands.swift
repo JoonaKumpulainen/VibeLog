@@ -140,7 +140,14 @@ extension AppModel {
             ? takes.first { ExportChoice.isLog($0) && !TakeLibrary.isExport($0.url) }
             : takes.first { $0.url.lastPathComponent == wanted }
         guard let take = found else { return wanted == "newest" ? "No take in log to export" : "No take named \(wanted)" }
-        guard ExportChoice.isLog(take) else { return "\(take.url.lastPathComponent) already has its look baked in" }
+        // A take with its look baked in can still be written again steadied, as it is.
+        if !ExportChoice.isLog(take) {
+            guard choice.stabilize else {
+                return "\(take.url.lastPathComponent) already has its look baked in; only stabilize=on can export it"
+            }
+            choice.keepAsShot(take)
+        }
+        let chosen = choice
         return MainActor.assumeIsolated {
             guard testExport.progress == nil else { return "An export is running" }
             // The camera's stream takes close to a gigabyte, which a long 12 MP export needs, so
@@ -151,7 +158,7 @@ extension AppModel {
                 guard let self, wasStreaming, !self.isStreaming, !self.isRecording else { return }
                 self.toggleStream()
             }
-            testExport.start(take: take, choice: choice)
+            testExport.start(take: take, choice: chosen)
             return nil
         }
     }

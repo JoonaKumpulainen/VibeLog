@@ -89,6 +89,52 @@ struct ExportChoice: Sendable {
     /// seconds.
     var stabilize = false
     var stabilizeSeconds = 0.6
+    /// Writes the take's picture as it is, with no look: for a take whose look is baked in, which
+    /// can still be steadied. Its tag and look are kept from the take.
+    var asShot = false
+    var takeTag: FileTag?
+    var takeLook: String?
+
+    /// This choice, keeping a baked take's picture, or as it is for nil.
+    func keepingAsShot(_ take: Take?) -> ExportChoice {
+        guard let take else { return self }
+        var kept = self
+        kept.keepAsShot(take)
+        return kept
+    }
+
+    /// Sets the choice to keep a baked take's picture, tag and look.
+    mutating func keepAsShot(_ take: Take) {
+        asShot = true
+        takeTag = FileTag.allCases.first { $0.label == take.info?.metadata["fileTag"] } ?? .rec709
+        takeLook = take.info?.metadata["look"]
+    }
+
+    struct SteadyFailure: Error, CustomStringConvertible {
+        let description: String
+    }
+
+    /// The take's gyro path and the lens's focal length for a picture `width` wide as stored, or
+    /// nil when the choice doesn't stabilize. Throws what's missing, in words for the screen.
+    func steadying(gyroLog: URL, lens: String?, width: Int, height: Int) throws -> LookExporter.Steadying? {
+        guard stabilize else { return nil }
+        guard let text = try? String(contentsOf: gyroLog, encoding: .utf8) else {
+            throw SteadyFailure(description: "This take has no gyro log to steady it with")
+        }
+        var settings = SteadyPath.Settings()
+        settings.smoothSeconds = stabilizeSeconds
+        guard let path = SteadyPath(samples: GyroLog.samples(from: text), settings: settings) else {
+            throw SteadyFailure(description: "The take's gyro log is too short to steady it with")
+        }
+        let name = Self.lensName(lens)
+        guard let profile = LensProfile.saved().first(where: { $0.lens == name }), profile.width > 0 else {
+            throw SteadyFailure(description: "Stabilizing needs this lens measured first, in Settings, Advanced, Lenses")
+        }
+        // The profile's focal length is in pixels of the sensor's full width.
+        let focal = profile.fx * Double(width) / Double(profile.width)
+        let zoom = path.zoom(width: Double(width), height: Double(height), focal: focal)
+        return LookExporter.Steadying(path: path, focal: focal, zoom: zoom)
+    }
 
     /// The lens profile's name for a take's lens, as its sidecar labels it.
     static func lensName(_ label: String?) -> String {
@@ -176,9 +222,13 @@ struct ExportChoice: Sendable {
     var hdr: BakeTarget? { logTarget == nil && lutName == BuiltInLook.aces20.name && target.isHDR ? target : nil }
 
     /// Log stays tagged Rec.2020, as takes are, since no tag names these curves.
-    var fileTag: FileTag { logTarget != nil ? .rec2020 : hdr == .hlg ? .hlg : hdr == .pq ? .pq : .rec709 }
+    var fileTag: FileTag {
+        if asShot, let takeTag { return takeTag }
+        return logTarget != nil ? .rec2020 : hdr == .hlg ? .hlg : hdr == .pq ? .pq : .rec709
+    }
 
     var label: String {
+        if asShot { return takeLook ?? "as recorded" }
         if let logTarget {
             let graded = grade.isNeutral ? "" : ", graded (\(grade.label))"
             return "converted to \(logTarget.label)\(graded)"
@@ -223,6 +273,7 @@ struct ExportChoice: Sendable {
     /// The look for playback, without HDR. Reading a .cube or building an ACES look takes a
     /// moment, so this belongs off the main thread.
     func previewLook(curve: LogCurve, gamut: Gamut, sourceRec709: Bool) -> LookExporter.Look {
+        if asShot { return shotLook(curve: curve, gamut: gamut, sourceRec709: sourceRec709) }
         var look = gradedLook(curve: curve, gamut: gamut, sourceRec709: sourceRec709, size: 65)
         look.effects = effects
         return look
@@ -230,6 +281,7 @@ struct ExportChoice: Sendable {
 
     /// The look the export writes, HDR included, at the export's finer LUT size.
     func exportLook(curve: LogCurve, gamut: Gamut, sourceRec709: Bool) -> LookExporter.Look {
+        if asShot { return shotLook(curve: curve, gamut: gamut, sourceRec709: sourceRec709) }
         var look: LookExporter.Look
         if let hdr {
             look = LookExporter.Look(
@@ -241,6 +293,14 @@ struct ExportChoice: Sendable {
             look = gradedLook(curve: curve, gamut: gamut, sourceRec709: sourceRec709, size: Self.exportLUTSize)
         }
         look.effects = effects
+        return look
+    }
+
+    /// No look at all: the take's picture, decoded and encoded again in its own matrix.
+    private func shotLook(curve: LogCurve, gamut: Gamut, sourceRec709: Bool) -> LookExporter.Look {
+        var look = LookExporter.Look(
+            curve: curve, gamut: gamut, lut: nil, lutExpectsRec709: false, sourceRec709: sourceRec709)
+        look.asShot = true
         return look
     }
 

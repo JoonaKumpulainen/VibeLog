@@ -48,8 +48,9 @@ Files can be read straight from a phone plugged in here, under `/run/user/<uid>/
 
 **The 14 Pro:**
 
-5. **Stabilized export:** in the player's **Export**, turn on **Stabilize** for a log take shot
-   on a measured lens, or over the link `export <file> "look=ACES 2.0;stabilize=on"`. Say
+5. **Stabilized export:** in the player's **Export**, turn on **Stabilize** for a take shot on a
+   measured lens, baked or log, and watch the preview with it on and off; or over the link
+   `export <file> "stabilize=on"`. Take `220644`, upright and baked, is a good first one. Say
    whether the copy is steadier than the take, whether anything shakes that didn't before, and
    whether an edge ever shows. Then **Run probe** and send the newest `probes/probe_*.txt`, for
    its stabilizer names.

@@ -19,7 +19,12 @@ optics steady two axes and leave roll alone. The figures are in [findings.md](..
   frame that would still show an edge is turned back less.
 - **A full perspective warp per frame,** from the lens profile's focal length, before the FX and
   the look. The picture's middle is taken as the optical centre.
-- **Export only.** The preview plays the take as shot. Live stabilization stays ruled out.
+- **The preview shows it.** Export's preview plays the take stabilized, through the same step
+  the export uses, and says how far it's enlarged. Switching **Stabilize** off and on compares.
+  Live stabilization while recording stays ruled out.
+- **Baked takes too.** A take with its look baked in has no log to export, so its Export screen
+  offers only this: the same picture, steadied and encoded again in the take's own tag, with no
+  look applied. It costs one more encode of an already encoded picture.
 - **It says what it did:** the export's sidecar has `steadied`, and it gets no copy of the gyro
   log, which no longer describes it.
 
@@ -33,7 +38,10 @@ and `LookExporter.Look.steadying` carries them into an export. In the export scr
   know how large a shake is. A limit that follows the motion's size is the next step.
 - **No rolling-shutter correction,** so fast pans keep their lean.
 - **No lens distortion in the warp,** which matters most on the ultra wide.
-- **No horizon lock,** and no crop set in the preview.
+- **No horizon lock,** and no view of the whole frame with the kept part outlined, as Gyroflow
+  has. The preview shows the result, not what was cut away.
+- **A baked HDR take previews with its codes shown as SDR,** so it looks flat there. The copy
+  keeps its PQ or HLG tag.
 - **The 2 Hz and the gyro's 20 ms lead come from one take** on the 1x. The tele, the ultra wide,
   which has no optical stabilizer, and other phones are unmeasured. The ultra wide should
   correct every speed on all three axes.
