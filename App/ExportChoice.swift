@@ -121,12 +121,15 @@ struct ExportChoice: Sendable {
         guard let text = try? String(contentsOf: gyroLog, encoding: .utf8) else {
             throw SteadyFailure(description: "This take has no gyro log to steady it with")
         }
+        let name = Self.lensName(lens)
         var settings = SteadyPath.Settings()
         settings.smoothSeconds = stabilizeSeconds
+        // The ultra wide has no optical stabilizer, so nothing is left to the optics there: every
+        // speed is corrected on all three axes.
+        if name == "back-ultrawide" { settings.opticsSeconds = 0 }
         guard let path = SteadyPath(samples: GyroLog.samples(from: text), settings: settings) else {
             throw SteadyFailure(description: "The take's gyro log is too short to steady it with")
         }
-        let name = Self.lensName(lens)
         guard let profile = LensProfile.saved().first(where: { $0.lens == name }), profile.width > 0 else {
             throw SteadyFailure(description: "Stabilizing needs this lens measured first, in Settings, Advanced, Lenses")
         }

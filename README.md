@@ -107,10 +107,13 @@ licenses, and VibeLog doesn't ship any camera maker's LUTs.
 Apple, iPhone, Apple Log and ProRes are trademarks of Apple Inc. ACES is a trademark of the Academy
 of Motion Picture Arts and Sciences. Sony, ARRI and Canon, and the names of their log curves and
 color spaces, such as S-Log2, S-Log3, S-Gamut3.Cine, LogC3, LogC4, ARRI Wide Gamut, Canon Log 3 and
-Cinema Gamut, may be trademarks of their owners. Gyroflow, DaVinci Resolve and other names belong to
-their owners. They're used only to say what VibeLog works with.
+Cinema Gamut, may be trademarks of their owners. Gyroflow belongs to the Gyroflow project, DaVinci
+Resolve to Blackmagic Design, and other names to their owners. They're used only to say what
+VibeLog works with.
 
 VibeLog is an independent project. It isn't affiliated with, endorsed by or certified by Apple,
-Sony, ARRI, Canon, the Academy of Motion Picture Arts and Sciences, the Academy Software Foundation
-or the OpenColorIO Project. Its ACES looks are its own implementation, checked against OpenColorIO's
-output, and it isn't an ACES Logo product.
+Sony, ARRI, Canon, the Academy of Motion Picture Arts and Sciences, the Academy Software Foundation,
+the OpenColorIO Project, the Gyroflow project or Blackmagic Design. Its ACES looks are its own
+implementation, checked against OpenColorIO's output, and it isn't an ACES Logo product. Its
+stabilization is its own too, and carries none of Gyroflow's code: the gyro logs and lens profiles
+it writes only follow the file formats Gyroflow reads.

@@ -57,7 +57,7 @@ struct LensesView: View {
                         Label("Share for Gyroflow", systemImage: "gyroscope")
                     }
                 } footer: {
-                    Text("Lens profiles Gyroflow loads, one for open gate and one for 16:9 for each lens with Apple's calibration, for takes with lens distortion correction off. Gyroflow fits them to smaller sizes itself. The ultra wide has none, and the readout time is left for Gyroflow to estimate.")
+                    Text("Lens profiles Gyroflow loads, one for open gate and one for 16:9 for each lens with Apple's calibration, for takes with lens distortion correction off. Gyroflow fits them to smaller sizes itself. The ultra wide has none, and the readout time is left for Gyroflow to estimate. The 1x and tele steady themselves optically while recording, which a gyro log can't see, so Gyroflow adds small fast shake back on them; Stabilize in Export allows for it.")
                 }
             }
             if !profiles.isEmpty {

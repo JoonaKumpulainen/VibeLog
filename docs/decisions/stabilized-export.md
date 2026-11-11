@@ -43,6 +43,10 @@ and `LookExporter.Look.steadying` carries them into an export. In the export scr
 - **A baked HDR take previews with its codes shown as SDR,** so it looks flat there. The copy
   keeps its PQ or HLG tag.
 - **The 2 Hz and the gyro's 20 ms lead come from one take** on the 1x. The tele, the ultra wide,
-  which has no optical stabilizer, and other phones are unmeasured. The ultra wide should
-  correct every speed on all three axes.
+  which has no optical stabilizer, and other phones are unmeasured. The ultra wide corrects
+  every speed on all three axes.
+- **It guesses what the optics did.** The share they take is a figure from one take, not each
+  frame's own lens shift. An exact correction needs that shift, which the system tracks but
+  doesn't hand over through any public route found so far, or a measurement per lens: a take
+  compared with its gyro log, as `220644` was, giving the share at each speed.
 - **It needs the lens measured,** under Advanced, Lenses, for its focal length.

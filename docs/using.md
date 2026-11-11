@@ -191,7 +191,11 @@ phone. Files are written in 10-second fragments, so a killed app should lose onl
 seconds. **Freeze viewfinder during a take** freezes the preview to save power and heat. **Stereo
 audio**, on by default, records left and right from the built-in microphones, with a meter for each.
 **Uncompressed audio** records 24-bit PCM instead of AAC. **Save gyro data** writes a `.gcsv` beside
-each take, which Gyroflow finds by itself when you open the video. **Efficient when hot**,
+each take, which **Stabilize** in Export steadies the take from. Gyroflow finds it by itself when
+you open the video, with two cautions: the 1x and tele steady themselves optically while recording,
+which the gyro can't see, so Gyroflow adds small fast shake back on them, and a take held upright
+is corrected on the wrong axes until the log says how the phone was held. The ultra wide has no
+optical stabilizer and suits Gyroflow as it is. **Efficient when hot**,
 **Bilinear when hot** and **Slow viewfinder when hot** switch to the Efficient path, the bilinear
 debayer and a slower monitor once the thermal state is serious.
 

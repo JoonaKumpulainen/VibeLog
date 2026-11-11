@@ -484,8 +484,27 @@ an item from **Not verified** once it is.
     export should correct slow, large motion from the gyro and leave fast small motion to the
     optics, or measure the picture as well.
 
+- **No switch for the stabilizer in a plain RAW stream, 14 Pro on `7e2b514`, 2026-11-11:** from
+  `probe_20261111_233803.txt`, whose runtime scan listed every member named for stabilizing.
+  - **The only lens switch is the bracket's.** `setLensStabilizationEnabled:` on bracket settings
+    and its twins beneath, `setLensStabilizationDuringBracketEnabled:` and
+    `setLensStabilizationEnabledForClientBracket:`. Nothing sets it on a device, a connection or
+    plain photo settings. The capture classes beneath AVFoundation run in the system's camera
+    process, out of the app's reach.
+  - **Apple calls it sphere, and tracks where it is:** `sphereShiftState` and
+    `updateSphereShiftStateWithSampleBuffer:` on the capture device, and a sphere tracking error
+    and distance from its end stop in still-image analytics. So each frame's lens shift exists
+    inside the system.
+  - **Two leads for getting it out:** `isOfflineVideoStabilizationMotionMetadataSupported` on
+    the metadata output, and `optimizesImagesForOfflineVideoStabilization` on the photo output.
+    Neither is in the public headers, and neither has been tried.
+  - **Per-photo calibration doesn't come with Bayer RAW.** Every single camera reported
+    `calibration none` for RAW, so the optical centre can't be read frame by frame that way.
+
 ## Not verified
 
+- **Whether a RAW photo's own metadata tells the lens's shift:** the next probe prints Apple's
+  maker note for plain RAW and for brackets with the stabilizer off and on.
 - **The `.gcsv`'s orientation for upright takes:** which string Gyroflow needs for each way of
   holding the phone upright, and that a take held sideways is right as it is.
 - **How the optical stabilizer's share changes** with the size and speed of the motion between

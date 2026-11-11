@@ -78,7 +78,7 @@ struct SettingsView: View {
     private static let autoDetail = "Shutter, ISO and white balance keep following the scene. Off freezes them at the start. Values you set stay, and focus always holds."
     private static let stereoDetail = "Records left and right from the built-in microphones. Off records mono."
     private static let pcmDetail = "Records 24-bit PCM instead of AAC, about 0.5 GB an hour in mono and 1 GB in stereo."
-    private static let gyroDetail = "Saves a .gcsv file beside each take for stabilizing in Gyroflow."
+    private static let gyroDetail = "Saves a .gcsv file beside each take, which Stabilize in Export steadies it from. Gyroflow reads it too, but on the 1x and tele it adds back small fast shake the lens's own stabilizer already took out."
     private static let slowDetail = "Draws fewer frames once the phone is hot, leaving more for the take."
     private static let mainsDetail = "Match your country's power, shown as major stops on the shutter dial."
     private static let ispDetail = "Shows Apple's own processed picture instead of VibeLog's. Looks, monitoring tools and scopes don't show on it."

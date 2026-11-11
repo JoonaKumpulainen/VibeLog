@@ -441,6 +441,12 @@ public enum CaptureProbe {
             let seconds = Date().timeIntervalSince(started)
             lines.append("    \(test.name): \(catcher.summary) in \(String(format: "%.2f", seconds)) s"
                 + (failure.map { ", \($0)" } ?? ""))
+            // What a RAW photo says of itself, with the stabilizer running, off and on: a value
+            // that follows the switch, or the lens's position, would let a take's frames say
+            // where the optics had moved them.
+            if ["plain RAW", "bracket of 1, stabilizer off", "bracket of 1, stabilizer on"].contains(test.name) {
+                lines += catcher.metadataLines
+            }
         }
         return lines
     }
@@ -454,6 +460,14 @@ public enum CaptureProbe {
         private var statuses: [String: Int] = [:]
         private var sizes: Set<String> = []
         private var errors: [Int] = []
+        private var notes: [String] = []
+
+        /// The first two photos' metadata groups and Apple's maker note, key by key.
+        var metadataLines: [String] {
+            lock.lock()
+            defer { lock.unlock() }
+            return notes
+        }
 
         init(inFlight: Int) {
             // Made empty and then filled: a semaphore freed below the value it was made with
@@ -492,6 +506,18 @@ public enum CaptureProbe {
             statuses[status, default: 0] += 1
             guard error == nil else { return }
             times.append(photo.timestamp.seconds)
+            if notes.count < 4 {
+                let metadata = photo.metadata
+                var parts: [String] = []
+                if let maker = metadata["{MakerApple}"] as? [AnyHashable: Any] {
+                    parts = maker.map { entry in
+                        let value = String(describing: entry.value).replacingOccurrences(of: "\n", with: " ")
+                        return "\(entry.key)=\(value.prefix(90))"
+                    }.sorted()
+                }
+                notes.append("        metadata groups: \(metadata.keys.sorted().joined(separator: " "))")
+                notes.append("        MakerApple: \(parts.isEmpty ? "none" : parts.joined(separator: "; "))")
+            }
             if let buffer = photo.pixelBuffer {
                 sizes.insert("\(CVPixelBufferGetWidth(buffer))x\(CVPixelBufferGetHeight(buffer))")
             }
