@@ -448,7 +448,31 @@ an item from **Not verified** once it is.
   - `draw` read 7 to 25 ms, higher than the cool take's 5 to 15.
   - So 20 minutes of baked FX recorded back to back with 32 frames lost in all.
 
+- **Gyroflow on an upright take, measured from a screen recording, 2026-11-11:** take `220644`, 38
+  seconds held upright, slow pans at 0.3 to 0.4 rad/s, then held with small shakes, played in
+  Gyroflow on the phone with the 1x profile at 118.6% zoom. Frame-to-frame shifts of the
+  preview, by matching row and column sums, were fitted to the `.gcsv`. This is a recording of
+  Gyroflow's preview, not the take's own frames, so it counts as strong evidence, not proof.
+  - **Gyroflow corrects on the wrong axes when the phone is upright.** A pan about the phone's
+    long axis, gyro y, moves the picture sideways, as it must. In the hold, Gyroflow's frame
+    outline moved sideways with gyro x instead, and the picture moved up and down with gyro y:
+    0.22 to 0.27 screen px per predicted sensor px, the same scale as the pan, explaining 62 to
+    87% of the motion. The `.gcsv` always says `yXZ`, which is the sensor's own frame, while an
+    upright take's file carries a quarter-turn. So the shakes aren't removed, they're moved to
+    the other axis.
+  - **The shakes the gyro saw aren't in the footage.** With Gyroflow correcting the wrong axis,
+    the camera's real shake should still show on the right one: gyro y in the picture's sideways
+    motion at -0.22. It came out at +0.02, and gyro x in the up and down motion at +0.03 to
+    +0.04. The simplest reading is that the optical stabilizer had already taken nearly all of
+    a hand's small shake out of the RAW frames, while pans pass whole.
+  - **What follows, if the take's own frames confirm it:** a gyro correction of small shakes
+    would add them back in reverse, so stabilized export should leave fast small motion to the
+    optics and correct only the slow, large motion, or measure the picture as well.
+
 ## Not verified
+
+- **The two Gyroflow readings above, on the take's own frames:** a small export of `220644`
+  against its `.gcsv` would settle both without Gyroflow in between.
 
 - **Baked FX past 20 minutes, or in a warm room:** both takes were indoors on a phone lying
   still.

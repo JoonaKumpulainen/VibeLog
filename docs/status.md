@@ -48,9 +48,11 @@ Files can be read straight from a phone plugged in here, under `/run/user/<uid>/
 
 **The 14 Pro:**
 
-5. **Gyroflow:** the 1x profile loads and stabilizes, but take `215524` was too fast and
-   blurred to judge it: pan at about 10 degrees a second, a quarter turn in 8 seconds, in bright
-   light, and send the `.mov` with its `.gcsv`. The profiles are in the test
+5. **Gyroflow:** take `220644` was slow and sharp. Its recording shows Gyroflow correcting the
+   wrong axes on an upright take, and no small shake left in the footage for it to correct: see
+   [findings.md](findings.md). To confirm on the take's own frames, turn **Connect** on with
+   `video_20261111_220644.mov` still on the phone. A take held sideways would check the axes
+   there. The profiles are in the test
    folder as `gyroflow-back-wide-4032x3024.json` and three more. Load
    the 1x open gate profile in Gyroflow with a 1x take that has slow pans and a straight edge near
    a corner, shot at 1/250 s with lens distortion correction off. Say whether Gyroflow loads it,
