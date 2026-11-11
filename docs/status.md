@@ -69,6 +69,8 @@ at 2880x2160.
 - **ACES 1.3 HDR.**
 - **Lens profiles, next steps:** the straight-edge check, colour from a chart, the readout time
   for Gyroflow, and a profile for the ultra wide, which Apple gives no table for.
+- **A native log mode for Pro phones,** starting with the probe listing video formats: see
+  [decisions/native-log-mode.md](decisions/native-log-mode.md). The HLG idea was dropped.
 - **Stabilized export**, after the stabilization check. Then Phase 8: denoise, proxies and
   log-to-log conversion.
 

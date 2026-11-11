@@ -196,7 +196,8 @@ limits no longer apply. Each step writes a new file and leaves the original unto
 ## Later ideas
 
 - Short RAW bursts in CinemaDNG, within the 8 GB the phone can write at full speed.
-- A labeled 10-bit HLG mode at 1080p 60 fps, which would not be RAW.
+- A native Apple Log mode for Pro phones from the 15 Pro on, labelled as not RAW, for 60 fps and
+  cooler long takes. See [docs/decisions/native-log-mode.md](docs/decisions/native-log-mode.md).
 - Live gyro stabilization while recording, only if GPU headroom allows it.
 - Cloud sync, streaming and multi-camera control, which matter less for this app's goal.
 - External storage on phones with fast USB-C. The iPhone 14 Pro's Lightning port is likely too slow
