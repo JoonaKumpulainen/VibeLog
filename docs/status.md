@@ -6,163 +6,60 @@ short.
 
 ## Latest build
 
-As of mid Phase 7. The latest build is `cb8137a`, CI run 97, which passed with 163 tests and one
-skip: during baked-FX takes the viewfinder samples the take's own glow instead of making a second
-one, keeping the FX preview. It was sent to the owner but isn't on the phone or measured yet. Before
-it, `947b90e`, run 96, applied baked FX to the direct kernels' linear light, so they can take the
-Efficient path when hot; on the phone on 2026-11-08 it closed the short-take gap, but the long take
-still fell behind at 2 minutes; see **Last session** below. Before that, `b76befc`, run 95, kept
-baked FX on the full path, whose long take failed hot; `f41859c`, run 94, added FX in baked takes
-behind a switch, the 1x's focus lock for lens measuring, the movable export crop and focus peaking
-at 0.15 and 0.075, all tested over the link; `d14bf0e`, run 93, added lens shading correction, log
-conversion in export, the faster PQ export, the Fine look LUT switch and the crop outline, all
-tested over the link. Earlier sessions' work is in [history/2026-11.md](history/2026-11.md), from
-**Session on 2026-11-07, on `88728c4`** onward.
-
-## Session on 2026-11-10, built as `edec570`
-
-A second tester's iPhone 16 (`iPhone17,3`, iOS 26.6.2) sent three logs from `d2958aa`. What they
-show is in [findings.md](findings.md) under **iPhone 16**: the RAW photo loop hangs after its first
-frame, so both takes wrote 0 frames, and the fit left it on ProRes 422 HQ at 1920x1440. The plan
-the owner agreed is [decisions/per-phone-fitting.md](decisions/per-phone-fitting.md). Written, not
-committed or built:
-
-- **Capture ladder:** `CaptureSupport` in VLCore. A phone stays on the standard setup until its
-  loop stalls twice with no frame between, or four times in 20 seconds. Then the loop stops instead
-  of piling requests up to `-11830`, and the app rebuilds the session on the next step: Apple's
-  preview connected, fast capture off, both, then sequential requests. A step that streams 90
-  frames is saved in `capture_support.json` for that phone model and iOS version. An interrupted
-  session never escalates. The cause of the hang isn't known; the ladder's order is a guess, with
-  the missing preview first.
-- **Stall log:** each stall line names the last photo callback reached, the frames since start and
-  the output's readiness.
-- **Record guard:** record is refused with a notice when no frame has arrived for 2 seconds, and a
-  take with none for 3 seconds stops with a card.
-- **Codec default:** `EncoderSupport.bestDefault`. On the iPhone 16's numbers it picks HEVC 4:2:2
-  at 2880x2160. A phone already fitted by the old rule is fitted once more, if its choice still
-  matches what that rule made. A chosen codec and size that measured under 30 fps warns at record.
-- **Tests:** 7 new, 170 in all, none run yet, since nothing here compiles Swift.
-
-## This session: 2026-11-11, built as `1a1d56c`
-
-The 2026-11-10 work below was committed as `edec570` and its CI run passed on 2026-11-11. On top of
-it, in `1a1d56c`:
-
-- **Reset all:** a red circled arrow beside each look page's RESET clears ADJUST, COLOR, WHEELS and
-  FX after asking, and leaves the look. Export's grade editor has **Reset All**, which asks too.
-- **Change dots:** a dot over the name of each look page that holds a change, and after the name in
-  export's grade editor.
-- **Lens stabilization probe:** **Run probe** now also takes, per rear lens, plain RAW photos and
-  RAW brackets of one and three with `isLensStabilizationEnabled` off and on, and reports what each
-  photo says of the stabilizer and the gaps between photos. It answers whether the optical
-  stabilizer can be switched for RAW, and whether a bracket could feed 30 fps.
-- **Export preview:** the arrows at its top right fill the screen with the preview and put the
-  settings away. Its scope is now the camera's `ScopeOverlay`, which takes its layer, kind, corner
-  and scale as inputs: it drags to any corner of the preview and resizes, with its own corner and
-  scale, opening top left at the camera's size.
-
-Written after `657767f`:
-
-- **Gyroflow lens profiles:** `GyroflowProfile` in VLCore fits Apple's distortion table to
-  Gyroflow's `opencv_fisheye` model, within 0.01 px on tables like the 14 Pro's, and writes
-  `gyroflow-<lens>-<size>.json` beside the lens profiles, open gate and 16:9, for lenses with a
-  table. **Share for Gyroflow** on the Lenses page sends them. The ultra wide gets none. 6 tests.
-- **Probe:** overlapped bracket cases, described below.
-
-**iPhone 16 logs from `edec570`, read 2026-11-11:** the ladder found its setup, fast capture off,
-and short full-size takes wrote about 29.6 fps. A 71-second ProRes 422 HQ take at full size then
-wrote only 14.26 fps, all lost at the encoder, as the encoder check predicted: its ProRes is
-software. Details are in [findings.md](findings.md) under **iPhone 16**. Its files can be read
-straight from the phone when it's plugged in here, under `/run/user/<uid>/gvfs/afc:*/`. Full-size
-HEVC 4:2:2 then held 80 seconds at 29.94 fps with nothing lost. Still wanted from it: a
-five-minute HEVC 4:2:2 take at full size, started cold and unplugged.
-
-**Latest build:** `657767f`, CI run 102, 174 tests with one skip, versioned 0.1.102 so SideStore
-should offer the build after it as an update without re-adding the source; that isn't confirmed.
-
-**Lens stabilization probe, iPhone 16:** the 1x's stabilizer can be switched off for RAW with a
-bracket, but brackets came too slowly one at a time; see [findings.md](findings.md). Written, not
-built: on a lens with the switch, **Run probe** now also overlaps requests, 2 and 4 in flight, for
-plain RAW and brackets of 1, 3 and the largest, and gives each case's rate from the photos' own
-times. A steady 30 fps with the stabilizer off there would make a stabilizer switch for takes
-worth building.
-
-**On the phone:** check the arrow and dots in all four holds and the export tabs' width; in
-export, the fullscreen preview upright and sideways, with the crop outline, and the scope's drag,
-snap and resize, also on the camera, whose scope code changed; then **Run probe** and send the
-newest `probes/probe_*.txt`. **Gyroflow, on the 14 Pro:** open Lenses, **Measure Lenses** if none
-are saved, **Share for Gyroflow**, load the 1x open gate profile in Gyroflow with a 1x take that
-has slow pans and a straight edge near a corner, and say whether it stabilizes and whether the
-edge comes out straight. A bowed edge means Apple's table runs the other way.
-
-## Earlier session: 2026-11-08, on `947b90e`
-
-- **Baked FX on the Efficient path, short, gap closed:** four alternating 15-second SDR HEVC takes
-  baked with ACES 2.0 (graded exposure +1.1), FX halation and bloom +50, diffusion and grain +30,
-  `pipeline efficient`, charging at 30%. FX on at fair, `185455`: 446 frames, 1 lost, GPU 20 ms. At
-  serious: FX off `185519` 449 frames, 0 lost, GPU 11 rising to 29.7 ms; FX on `185544` 443 frames,
-  4 lost, 20.7 rising to 29.8 ms; FX off `185608` 450 frames, 0 lost, 11.4 rising to 29.8 ms. Queue
-  under 1 ms throughout, against 60 ms and 42.9 ms GPU with 72 lost on `b76befc`. The sidecars name
-  the FX and the Efficient path.
-- **Baked FX, the long take, failed again:** `fx_baked.json`, take `192732`, after 30 minutes'
-  cooling, charging from 50%. Nominal, then fair at 1:31, GPU 22 ms, `draw` 8 ms, nothing lost. At
-  1:57, still fair and on the full path, GPU time doubled in one step to 44 ms, queue 54 to 69 ms
-  and `draw` 21 to 28 ms, and frames began to drop. Serious at 2:05, when the Efficient path took
-  over, made no difference: GPU held 44 ms, about 7 frames a second lost, over 1,000 viewfinder
-  yields. Stopped by hand at 2:47: 4,622 frames at 27.66 fps written, 389 lost at the GPU, capture
-  29.98 fps. So the short takes' 30 ms didn't survive the GPU's step down, which came at fair this
-  time. Both failed baked-FX long takes were charging and slowed within about 2 minutes, where
-  `fx_cost`, unplugged, held, so charging isn't ruled out.
-- **The viewfinder shares the take's glow:** the owner first chose a plain viewfinder during
-  baked-FX takes, then wanted the FX kept on it, since they're what's being baked. So while a take
-  bakes FX, `draw` shows the take's own FX and samples the glow texture the take's last frame made,
-  `takeGlow`, handed over by `shareTakeGlow`, instead of a downsample and two blurs of its own each
-  draw. Both run on one command queue, so a draw reads a finished glow. Both paths make it at
-  504x378, from the full image at an eighth or the half-size monitor at a quarter. The per-pixel FX
-  step in `monitorFragment` stays. Whether that saves enough is what the next long take shows; a
-  plain viewfinder is still the fallback. Built in `cb8137a`, CI run 97, untested on the phone.
+As of mid Phase 7. The latest build is `f8eb02a`, CI run 103, version 0.1.103, which passed with 180
+tests and one skip: Gyroflow lens
+profiles from the Lenses page, and overlapped bracket cases in the probe. Before it, `657767f`,
+run 102, versioned each build `0.1.<CI run>` for SideStore, and `1a1d56c`, run 101, added reset
+all, change dots, export's fullscreen preview and movable scope, and the lens stabilization
+probe. None of that has been tried on a phone except the first probe, on the iPhone 16. `edec570`
+fitted capture and the codec default to each phone, and worked on the iPhone 16. `cb8137a`, run
+97, shares the take's glow with the viewfinder during baked-FX takes, still unmeasured. Every
+session is in [history/2026-11.md](history/2026-11.md); the last is **Session on 2026-11-11**.
 
 ## Waiting on the phone
 
-**The iPhone 16, once this session's changes are built:** open the app and wait 20 seconds on the
-1x, switch to the 0.5x and wait 20 seconds, record 10 seconds, then send the `session_*.log`, with
-**Log capture timing** on in Diagnostics if they can. The log should show which setup streams, or
-where the request hangs. **The 14 Pro, same build:** one launch and a short take, to confirm no
-`Capture stalled` line appears and the format is unchanged, and its `Encoder check` lines if the
-check runs, to see how the trial's numbers sit against real takes.
+Files can be read straight from a phone plugged in here, under `/run/user/<uid>/gvfs/afc:*/`.
 
-**Start of the next session:** once `cb8137a` is on the phone, start the server, which isn't running
-between sessions, with `python3 tools/test_server.py serve` (it prints the address, port 8765, the
-token is in the results folder's `token` file, and the results folder is the one
-`~/.vibelog_test_folder` names), have the owner turn on **Connect** with the phone on a stand on the
-camera screen, unplugged if they can, then:
+**Either phone, on `f8eb02a`:**
 
-1. **The long take again:** `suite tools/suites/fx_baked.json`, 30 minutes' cooling and 10 minutes,
-   about 15 GB. Watch the heat CSV: the take's label has a comma, so read it with a CSV parser. If
-   the GPU passes about 40 ms with frames falling away, stop it with `send stop` rather than run on,
-   as the owner asked. `send stop` ends the take, but the suite keeps waiting out its timer, so stop
-   the suite too and put the settings back by hand. Over the link, `set` takes name and value as two
-   arguments, so in zsh pass them separately, not as one string. If it fails again, run it unplugged
-   to rule out charging.
-2. **Still waiting on the owner:** a stabilization take, slow pans and quick shakes at 1/250 s; a
-   colour chart shot for per-lens colour and the exposure default; the matched pair for Apple's
-   preview; corners with lens shading on real scenes, which the owner confirmed work.
+1. **SideStore:** whether the build after the one installed shows as an update by itself.
+2. **Look panel:** the red arrow and the dots in all four holds, and the confirmation sideways.
+3. **Export:** whether "Wheels •" fits its tab upright; the fullscreen preview upright and
+   sideways, with a crop outline on; the scope's drag, snap and resize, and the camera's scope
+   too, whose code changed.
+4. **Run probe**, phone still, and send the newest `probes/probe_*.txt`. In its lens stabilization
+   section, a stabilizer-off case holding about 30 fps with even 33 ms gaps would make a
+   stabilizer switch for takes worth building. From the 14 Pro it also shows whether its lenses
+   have the switch.
 
-The phone had about 130 GB free at the end, after the owner cleared takes.
+**The 14 Pro:**
 
-Of the older list: the HLG bake is proven, `fx_cost.json` ran clean on the viewfinder, the gear,
-scope, look panel and haptics are confirmed. Still open from it: `scope_cost.json`, the Apple's
-preview pair, the stabilization check and ARRI Wide Gamut 3, left for later at the owner's choice.
+5. **Gyroflow:** in Lenses, **Measure Lenses** if none are saved, then **Share for Gyroflow**. Load
+   the 1x open gate profile in Gyroflow with a 1x take that has slow pans and a straight edge near
+   a corner, shot at 1/250 s with lens distortion correction off. Say whether Gyroflow loads it,
+   whether it stabilizes, and whether the edge comes out straight. A bowed edge means Apple's
+   table runs the other way.
+6. **A launch and a short take on `edec570` or later,** to confirm no `Capture stalled` line and
+   an unchanged format.
+7. **The baked-FX long take** on `cb8137a` or later: start the server with `python3
+   tools/test_server.py serve`, turn on **Connect**, then `suite tools/suites/fx_baked.json`, 30
+   minutes' cooling and 10 minutes, about 15 GB, unplugged if it failed charging. If the GPU
+   passes about 40 ms with frames falling away, `send stop`, stop the suite too and put the
+   settings back by hand. Over the link, `set` takes name and value as two arguments.
+8. **Still waiting on the owner:** the stabilization take, slow pans and quick shakes at 1/250 s;
+   a colour chart shot; the matched pair for Apple's preview; `scope_cost.json`; ARRI Wide Gamut
+   3, left for later.
 
-Vignette correction is built from Apple's own `FixVignetteRadial`; no sample is needed any more.
+**The iPhone 16:** a five-minute HEVC 4:2:2 take at full size, started cold and unplugged, and one
+at 2880x2160.
 
 ## Still to build
 
-- **FX in baked takes: the long take** with them on and the viewfinder sharing the glow, against
-  `fx_cost`.
+- **A stabilizer switch for takes,** only if the probe shows brackets can hold 30 fps.
+- **FX in baked takes: the long take** with the viewfinder sharing the glow, against `fx_cost`.
 - **ACES 1.3 HDR.**
-- **Lens profiles, next steps:** checking the table against a straight edge in a RAW corner, colour
-  from a chart and Gyroflow import.
+- **Lens profiles, next steps:** the straight-edge check, colour from a chart, the readout time
+  for Gyroflow, and a profile for the ultra wide, which Apple gives no table for.
 - **Stabilized export**, after the stabilization check. Then Phase 8: denoise, proxies and
   log-to-log conversion.
 

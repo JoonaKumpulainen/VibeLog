@@ -22,8 +22,8 @@ it.
 4. Trust your Apple ID and turn on Developer Mode as in step 4 below, then open VibeLog and allow
    camera access.
 
-New builds then show under **My Apps** as updates, numbered by CI run. SideStore refreshes the 7-day
-signature by itself while its own connection works.
+New builds then show under **My Apps** as updates, versioned `0.1.<CI run>`. SideStore refreshes
+the 7-day signature by itself while its own connection works.
 
 ### By hand
 
