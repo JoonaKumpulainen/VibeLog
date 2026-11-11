@@ -1608,6 +1608,9 @@ final class AppModel: ObservableObject {
     func measureLenses() {
         runReleasingCamera(LensCalibrator.run) { _ in
             let saved = LensProfile.saved()
+            // Their Gyroflow profiles too, so the test link can fetch them with no one on the page.
+            let gyroflow = GyroflowProfile.write(saved)
+            Log.shared.info("Lenses: \(gyroflow.count) Gyroflow profiles written: \(gyroflow.map(\.lastPathComponent).joined(separator: ", "))")
             return saved.isEmpty ? "No lens gave a profile" : "Lens profiles saved: " + saved.map(\.lens).joined(separator: ", ")
         }
     }

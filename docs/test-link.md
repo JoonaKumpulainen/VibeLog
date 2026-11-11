@@ -143,7 +143,7 @@ Other commands:
 | `applyPreset <name>`, `savePreset <name>`, `defaultPreset <name or none>` | Manage presets |
 | `resetSettings` | Returns every setting to the app's own, keeping presets and the link |
 | `controlTest`, `encoderTest`, `probe` | Run the Diagnostics tests |
-| `measureLenses` | Saves this phone's lens profiles, as **Measure Lenses** does; `listFiles` and `sendFile` reach them |
+| `measureLenses` | Saves this phone's lens profiles, as **Measure Lenses** does, and their Gyroflow profiles, `gyroflow-*.json`; `listFiles` and `sendFile` reach them |
 | `sendPreview` | Sends a small JPEG of the scene |
 | `saveStill`, `sendStill` | Saves a full still, and sends the newest one |
 | `sendReference` | Sends the newest RAW clip's reference frame and metadata |
