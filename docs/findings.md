@@ -381,7 +381,7 @@ an item from **Not verified** once it is.
     release, reached from `probeLensStabilization`, and wrote no report. A dispatch semaphore
     freed below the value it was made with traps, which happens when a photo's wait times out. So
     at least one stabilization case never got its photo back in 5 seconds on this phone. Fixed in
-    the next build by making the semaphore empty and filling it.
+    `b740eab` by making the semaphore empty and filling it.
 
 ## Not verified
 
