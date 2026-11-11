@@ -171,8 +171,9 @@ or shorten recording.
   screen's extended range, at no measurable draw cost.
 - Shadow, midtone and highlight wheels: built, in WHEELS and in export's grade editor.
 - Halation, bloom, diffusion, vignette and grain: built for the viewfinder, export and baked takes.
-  Baked into takes, they fell behind at about 2 minutes in both long takes so far; the viewfinder
-  now shares the take's glow during such takes instead of making its own, untested.
+  Baked into takes, they fell behind at about 2 minutes in both early long takes. The viewfinder
+  then shared the take's glow, which slowed the Maximum path from the start of a third take; the
+  glow now comes from a pool and is handed over with the finished frame, untested.
 - Looks baked into recordings: built and proven, at no measurable GPU cost in a 60-second take, to
   HEVC or ProRes.
 - Timecode and Apple Watch control, if they prove useful.

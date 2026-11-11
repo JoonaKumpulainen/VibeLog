@@ -6,22 +6,26 @@ short.
 
 ## Latest build
 
-As of mid Phase 7. The latest build is `6f4d393`, CI run 104, version 0.1.104, which passed
-with 180 tests and one skip: measuring lenses also writes their Gyroflow profiles, so the test
-link can fetch them. Before it, `f8eb02a`, run 103, added Gyroflow lens profiles from the Lenses
+As of mid Phase 7. The latest build is `02d2d11`, CI run 105, version 0.1.105, which passed
+with 181 tests and one skip: a baked-FX take
+hands its glow to the viewfinder only when a frame finishes, from a pool of four, after take
+`164209` ran 45 ms a frame from its start on the Maximum path. Untried on the phone. Before it,
+`6f4d393`, run 104, passed with 180 tests and one skip: measuring lenses also writes their
+Gyroflow profiles, so the test link can fetch them. `f8eb02a`, run 103, added Gyroflow lens profiles from the Lenses
 page and overlapped bracket cases in the probe; `657767f`,
 run 102, versioned each build `0.1.<CI run>` for SideStore, and `1a1d56c`, run 101, added reset
 all, change dots, export's fullscreen preview and movable scope, and the lens stabilization
 probe. None of that has been tried on a phone except the first probe, on the iPhone 16. `edec570`
 fitted capture and the codec default to each phone, and worked on the iPhone 16. `cb8137a`, run
-97, shares the take's glow with the viewfinder during baked-FX takes, still unmeasured. Every
+97, shared the take's glow with the viewfinder during baked-FX takes, which the 14 Pro showed
+slows the Maximum path: see [findings.md](findings.md). Every
 session is in [history/2026-11.md](history/2026-11.md); the last is **Session on 2026-11-11**.
 
 ## Waiting on the phone
 
 Files can be read straight from a phone plugged in here, under `/run/user/<uid>/gvfs/afc:*/`.
 
-**Either phone, on `6f4d393`:**
+**Either phone, on `6f4d393` or later:**
 
 1. **SideStore:** whether the build after the one installed shows as an update by itself.
 2. **Look panel:** the red arrow and the dots in all four holds, and the confirmation sideways.
@@ -43,11 +47,13 @@ Files can be read straight from a phone plugged in here, under `/run/user/<uid>/
    table runs the other way.
 6. **A launch and a short take on `edec570` or later,** to confirm no `Capture stalled` line and
    an unchanged format.
-7. **The baked-FX long take** on `cb8137a` or later: start the server with `python3
+7. **The baked-FX long take again, on `02d2d11`:** start the server with `python3
    tools/test_server.py serve`, turn on **Connect**, then `suite tools/suites/fx_baked.json`, 30
-   minutes' cooling and 10 minutes, about 15 GB, unplugged if it failed charging. If the GPU
-   passes about 40 ms with frames falling away, `send stop`, stop the suite too and put the
-   settings back by hand. Over the link, `set` takes name and value as two arguments.
+   minutes' cooling and 10 minutes, about 15 GB, unplugged. The first minute decides the fix: GPU
+   near 22 ms, queue under 1 ms and `draw` near 8 ms at nominal heat, as take `192732` had, where
+   `164209` had 45, 71 and 93 ms. If the GPU passes about 40 ms with frames falling away, `send
+   stop`, stop the suite too and put the settings back by hand. Over the link, `set` takes name
+   and value as two arguments.
 8. **Still waiting on the owner:** the stabilization take, slow pans and quick shakes at 1/250 s;
    a colour chart shot; the matched pair for Apple's preview; `scope_cost.json`; ARRI Wide Gamut
    3, left for later.
@@ -58,7 +64,8 @@ at 2880x2160.
 ## Still to build
 
 - **A stabilizer switch for takes,** only if the probe shows brackets can hold 30 fps.
-- **FX in baked takes: the long take** with the viewfinder sharing the glow, against `fx_cost`.
+- **FX in baked takes: the long take** on `02d2d11`, then whether the Maximum path still steps
+  down at about 2 minutes, as it did before the glow was shared.
 - **ACES 1.3 HDR.**
 - **Lens profiles, next steps:** the straight-edge check, colour from a chart, the readout time
   for Gyroflow, and a profile for the ultra wide, which Apple gives no table for.

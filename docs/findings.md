@@ -341,7 +341,25 @@ an item from **Not verified** once it is.
   - The probe's photos were 4224x3024, the size with distortion correction left at its default,
     not the app's 4032x3024.
 
+- **Baked FX with the shared glow, 14 Pro, 2026-11-11:** take `164209` from `fx_baked.json` with
+  no cooling wait, on a build with `cb8137a`'s shared glow, unplugged from 40% to 20%, nominal at
+  the start after a few minutes with the stream off. It ran 10:00 and wrote 14,747 frames at 24.58
+  fps, with 3,247 lost at the GPU and none at the encoder; capture held 29.99 fps, `missed 7`.
+  - **The Maximum path was slow from the first 5 seconds, at nominal heat:** GPU 45 to 48 ms,
+    queue 71 to 77 ms, `draw` 88 to 97 ms and about 9 frames a second lost, through fair at 2:54,
+    until serious at 6:20. Take `192732` on `947b90e`, the same settings without the shared glow,
+    had 19 to 22 ms, 0.5 ms and 6 to 8 ms for its first two minutes. So heat isn't the cause. That
+    take was charging after 30 minutes' cooling, which also differs.
+  - **The Efficient path with baked FX held at serious heat:** from 6:20 to the end, 3:40, GPU 24
+    to 29 ms, queue about 1 ms, `draw` 9 to 17 ms and 1 frame lost. On `947b90e` it held 44 ms.
+  - **Read from the code, not proven:** the viewfinder sampled the one glow texture every queued
+    frame rewrites, handed over at encoding, so each draw waited on those frames. `02d2d11` pools
+    the glows and hands one over with the finished image.
+
 ## Not verified
+
+- **The glow fix in `02d2d11`:** whether a baked-FX take on the Maximum path returns to about 22
+  ms a frame, and whether it then holds past 2 minutes, where `192732` stepped down.
 
 - **Gyroflow lens profiles:** whether Gyroflow loads them, whether Apple's table describes the RAW
   frame, and whether it runs undistorted to distorted, as Apple's sample code reads it and the
