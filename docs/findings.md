@@ -438,10 +438,20 @@ an item from **Not verified** once it is.
   - **GPU time didn't fall with the work:** 29 ms, as before the change that the cost test puts
     at 13% less work. That fits the GPU's speed following its load.
 
+- **A second baked-FX take, started hot, held too, 14 Pro on `35d43dc`, 2026-11-11:** take
+  `213229`, begun 76 seconds after `212113` ended, at serious heat and 50%, with no cooling step.
+  It ran 10:00 at serious throughout, never critical, and wrote 17,969 frames at 29.95 fps, with
+  30 lost at the GPU, 0.17%, and none at the encoder; `missed 2`, 560 viewfinder yields.
+  - **No step down:** GPU time stayed 26 to 32 ms and queue under 3 ms for the whole take, about
+    13.5 minutes after the phone first reached serious. `200230` stepped to 37 ms after 3:07.
+  - **The losses came in short bursts** between 4:30 and 8:30: 3, then 9, then 17, then 1.
+  - `draw` read 7 to 25 ms, higher than the cool take's 5 to 15.
+  - So 20 minutes of baked FX recorded back to back with 32 frames lost in all.
+
 ## Not verified
 
-- **Baked FX on a phone that starts hot:** whether the take holds once it has been at serious
-  heat for more than about 3 minutes, as a second take straight after the first would show.
+- **Baked FX past 20 minutes, or in a warm room:** both takes were indoors on a phone lying
+  still.
 
 - **Why a take's frame reads two to three times its own cost:** the GPU's speed following the
   load is a guess. A take that reads the same GPU time with half the work would support it.
