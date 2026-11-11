@@ -29,7 +29,8 @@ the phone can sustain. When quality and convenience conflict, quality wins.
   --log-failed` and look under `Testing failed:`. The `Executed N tests` line shows totals,
   including skips.
 - **Install:** the owner sideloads the unsigned `.ipa` with a free Apple ID, now through SideStore.
-  Each green build of `main` goes to the `sidestore` release as `VibeLog.ipa`, numbered by CI run,
+  Each green build of `main` goes to the `sidestore` release as `VibeLog.ipa`, versioned `0.1.<CI
+  run>` so SideStore sees it as an update,
   and `source.json` goes to the `sidestore-source` branch, which SideStore reads at
   `https://raw.githubusercontent.com/JoonaKumpulainen/VibeLog/sidestore-source/source.json`.
   SideStore gives a source about 3 s, which the release download's redirect missed, hence the

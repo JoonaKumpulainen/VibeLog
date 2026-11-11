@@ -69,6 +69,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            MARKETING_VERSION=0.1.${{ github.run_number }} \
             | tail -n 60
 
       - name: Package IPA
@@ -98,7 +99,8 @@ jobs:
           retention-days: 30
 
       # SideStore on the phone adds the source once, then offers each build of main as an update.
-      # The build number is the run number, which is how SideStore tells one build from the next.
+      # The run number is the build number and the version's last part. SideStore only offered an
+      # update once the version itself changed; with 0.1.0 on every build it showed none.
       - name: Publish to the SideStore source
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
