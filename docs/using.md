@@ -67,6 +67,12 @@ HEVC or ProRes in SDR or HDR. The scope works as the camera's does: tap it for t
 it to any corner of the preview, and drag from just outside its inner corner to resize it. The
 arrows at the preview's top right fill the screen with the preview and bring the settings back.
 
+**Stabilize** in Export steadies the copy from the take's gyro log, with **Smoothness** setting
+how many seconds the camera's path is smoothed over. The copy is enlarged just enough to hide its
+moving edges, up to 140%. Fast small shake is left to the lens's own stabilizer, which already
+took most of it out, and the preview plays the take as shot. It needs the take's lens measured
+under Advanced, Lenses.
+
 **Export** in the player writes a copy of a log take with a look baked in, after a preview that
 plays it with the look: the Rec.709 view, an ACES look or a LUT, in HEVC 4:2:0 or ProRes 422 LT, 422
 or 422 HQ, tagged Rec.709, or Rec.2020 PQ or HLG for HDR, with the take's audio. An HDR10 export in

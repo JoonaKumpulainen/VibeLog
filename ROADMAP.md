@@ -186,8 +186,11 @@ or shorten recording.
 Keep recording clean, and do the heavy work after the shot, when real-time limits and most heat
 limits no longer apply. Each step writes a new file and leaves the original untouched.
 
-- **One-tap stabilization:** use the saved gyro data and the spare sensor area from open gate, with
-  an optional horizon lock.
+- **One-tap stabilization:** a first version is built into export, untested on a phone: it
+  steadies from the saved gyro data, leaves fast small shake to the optical stabilizer, and
+  enlarges to hide the edges. See
+  [docs/decisions/stabilized-export.md](docs/decisions/stabilized-export.md). Rolling shutter,
+  lens distortion, a horizon lock and a limit that follows the shake's size are left.
 - **One-tap denoise:** use the noise profile from the metadata, with temporal denoise where quality
   justifies the time.
 - **Export with look:** a copy with any look, its grade, FX and SDR or HDR, played through first, is

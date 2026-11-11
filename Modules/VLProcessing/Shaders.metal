@@ -540,6 +540,19 @@ kernel void decodeVideo(texture2d<float, access::read> frame [[texture(0)]],
     image.write(float4(saturate(float3(r, g, b)), 1.0), gid);
 }
 
+// Steadies a frame for export: each output pixel takes its content from where `warp` says it
+// lies in the frame as recorded, which SteadyPath works out from the gyro log.
+kernel void steadyWarp(texture2d<float, access::sample> image [[texture(0)]],
+                       texture2d<float, access::write> output [[texture(1)]],
+                       constant float3x3 &warp [[buffer(0)]],
+                       uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= output.get_width() || gid.y >= output.get_height()) return;
+    constexpr sampler steadySampler(filter::linear, address::clamp_to_edge);
+    float3 source = warp * float3(float2(gid) + 0.5, 1.0);
+    float2 uv = source.xy / source.z / float2(image.get_width(), image.get_height());
+    output.write(image.sample(steadySampler, uv), gid);
+}
+
 // The look on a smaller copy of the log image, for the export preview, turned upright by the
 // take's rotation in clockwise quarter turns.
 kernel void lookPreview(texture2d<float, access::sample> image [[texture(0)]],

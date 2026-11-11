@@ -48,7 +48,12 @@ Files can be read straight from a phone plugged in here, under `/run/user/<uid>/
 
 **The 14 Pro:**
 
-5. **Gyroflow's axes:** a take held sideways, with a few seconds held still, played in Gyroflow,
+5. **Stabilized export:** in the player's **Export**, turn on **Stabilize** for a log take shot
+   on a measured lens, or over the link `export <file> "look=ACES 2.0;stabilize=on"`. Say
+   whether the copy is steadier than the take, whether anything shakes that didn't before, and
+   whether an edge ever shows. Then **Run probe** and send the newest `probes/probe_*.txt`, for
+   its stabilizer names.
+9. **Gyroflow's axes:** a take held sideways, with a few seconds held still, played in Gyroflow,
    to check `yXZ` is right there. Upright takes are corrected a quarter-turn off until the
    `.gcsv` says how the phone was held. The profiles are in the test
    folder as `gyroflow-back-wide-4032x3024.json` and three more. Load
@@ -86,7 +91,10 @@ at 2880x2160.
   for Gyroflow, and a profile for the ultra wide, which Apple gives no table for.
 - **A native log mode for Pro phones,** starting with the probe listing video formats: see
   [decisions/native-log-mode.md](decisions/native-log-mode.md). The HLG idea was dropped.
-- **Stabilized export**, after the stabilization check. Then Phase 8: denoise, proxies and
+- **Stabilized export, first version built, waiting on the phone:** see
+  [decisions/stabilized-export.md](decisions/stabilized-export.md). Next: a limit that follows
+  the shake's size, rolling shutter, lens distortion and a horizon lock.
+- After it: Then Phase 8: denoise, proxies and
   log-to-log conversion.
 
 ## Stabilization check: answered on 2026-11-11

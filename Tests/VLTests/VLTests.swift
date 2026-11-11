@@ -3005,3 +3005,104 @@ final class HDRTests: XCTestCase {
         XCTAssertFalse(TakeLibrary.isExport(take))
     }
 }
+
+final class SteadyPathTests: XCTestCase {
+    /// Readings at 100 Hz for `seconds`, turning as `rate` says at each time.
+    private func samples(seconds: Double, rate: (Double) -> SIMD3<Double>) -> [MotionSample] {
+        (0..<Int(seconds * 100)).map { index in
+            let time = Double(index) / 100
+            return MotionSample(seconds: time, rotation: rate(time), acceleration: SIMD3(0, 1, 0))
+        }
+    }
+
+    func testReadsItsOwnLog() {
+        let text = GyroLog.header(videoName: "video.mov", startedAt: Date(timeIntervalSince1970: 0), version: "1")
+            + "\n105040,7348,-23930,1081,-383,10024,903\n115015,6905,22079,946,-407,10035,932\n"
+        let read = GyroLog.samples(from: text)
+        XCTAssertEqual(read.count, 2)
+        XCTAssertEqual(read[0].seconds, 0.10504, accuracy: 1e-9)
+        XCTAssertEqual(read[0].rotation.x, 0.07348, accuracy: 1e-9)
+        XCTAssertEqual(read[0].rotation.y, -0.2393, accuracy: 1e-9)
+        XCTAssertEqual(read[1].acceleration.y, 1.0035, accuracy: 1e-9)
+    }
+
+    func testASteadyPanIsLeftAlone() throws {
+        let path = try XCTUnwrap(SteadyPath(samples: samples(seconds: 10) { _ in SIMD3(0, 0.4, 0) }))
+        // Away from the ends, a smoothed straight line is the line itself.
+        XCTAssertEqual(simd_length(path.excess(at: 5)), 0, accuracy: 1e-6)
+    }
+
+    func testSlowSwayIsUndoneAndFastShakeIsLeftToTheOptics() throws {
+        // One degree of sway at 0.7 Hz about x, and of shake at 8 Hz about y and z.
+        let amplitude = 1.0 * Double.pi / 180
+        func rate(_ hertz: Double, _ time: Double) -> Double {
+            amplitude * 2 * Double.pi * hertz * cos(2 * Double.pi * hertz * time)
+        }
+        var settings = SteadyPath.Settings()
+        settings.frameOffset = 0
+        let path = try XCTUnwrap(SteadyPath(
+            samples: samples(seconds: 12) { SIMD3(rate(0.7, $0), rate(8, $0), rate(8, $0)) }, settings: settings))
+        var most = SIMD3<Double>.zero
+        for index in 0..<400 {
+            let excess = path.excess(at: 4 + Double(index) / 100)
+            most = SIMD3(max(most.x, abs(excess.x)), max(most.y, abs(excess.y)), max(most.z, abs(excess.z)))
+        }
+        // The sway is nearly all there to undo, the optics' two axes keep almost none of the
+        // shake, and roll keeps all of it.
+        XCTAssertGreaterThan(most.x, amplitude * 0.8)
+        XCTAssertLessThan(most.x, amplitude * 1.05)
+        XCTAssertLessThan(most.y, amplitude * 0.05)
+        XCTAssertGreaterThan(most.z, amplitude * 0.9)
+    }
+
+    func testNoTurnLeavesThePictureWhereItIs() throws {
+        let path = try XCTUnwrap(SteadyPath(samples: samples(seconds: 5) { _ in .zero }))
+        XCTAssertEqual(path.zoom(width: 4032, height: 3024, focal: 2840), 1, accuracy: 1e-9)
+        let source = path.matrix(at: 2, width: 4032, height: 3024, focal: 2840, zoom: 1) * SIMD3(1000, 700, 1)
+        XCTAssertEqual(source.x / source.z, 1000, accuracy: 1e-6)
+        XCTAssertEqual(source.y / source.z, 700, accuracy: 1e-6)
+    }
+
+    /// The directions measured on take 220644: a turn about the phone's x moves the picture
+    /// right, one about y moves it up, and one about z turns it clockwise.
+    func testATurnMovesThePictureTheMeasuredWay() {
+        let angle = 0.01
+        func source(_ phone: SIMD3<Double>, _ x: Double, _ y: Double) -> SIMD2<Double> {
+            let moved = SteadyPath.warp(SteadyPath.pictureTurn(phone), width: 4032, height: 3024, focal: 2840, zoom: 1) * SIMD3(x, y, 1)
+            return SIMD2(moved.x / moved.z, moved.y / moved.z)
+        }
+        // At the middle, the content sits a focal length times the angle away.
+        XCTAssertEqual(source(SIMD3(angle, 0, 0), 2016, 1512).x, 2016 + 2840 * tan(angle), accuracy: 0.01)
+        XCTAssertEqual(source(SIMD3(angle, 0, 0), 2016, 1512).y, 1512, accuracy: 0.01)
+        XCTAssertEqual(source(SIMD3(0, angle, 0), 2016, 1512).y, 1512 - 2840 * tan(angle), accuracy: 0.01)
+        // Clockwise: the content right of the middle lies lower in the frame.
+        XCTAssertEqual(source(SIMD3(0, 0, angle), 3016, 1512).y, 1512 + 1000 * sin(angle), accuracy: 0.01)
+    }
+
+    func testZoomHidesTheEdgesAndStopsAtItsMost() throws {
+        // A sway of one degree needs a little room, and a wild one more than is allowed.
+        func path(_ degrees: Double) throws -> SteadyPath {
+            let amplitude = degrees * Double.pi / 180
+            return try XCTUnwrap(SteadyPath(samples: samples(seconds: 12) {
+                SIMD3(amplitude * 2 * Double.pi * 0.7 * cos(2 * Double.pi * 0.7 * $0), 0, 0)
+            }))
+        }
+        let gentle = try path(1)
+        let zoom = gentle.zoom(width: 4032, height: 3024, focal: 2840)
+        XCTAssertGreaterThan(zoom, 1.01)
+        XCTAssertLessThan(zoom, 1.12)
+        for index in 0..<100 {
+            let matrix = gentle.matrix(at: 3 + Double(index) / 30, width: 4032, height: 3024, focal: 2840, zoom: zoom)
+            XCTAssertTrue(SteadyPath.fits(matrix, width: 4032, height: 3024))
+        }
+        let wild = try path(25)
+        let most = wild.zoom(width: 4032, height: 3024, focal: 2840)
+        XCTAssertEqual(most, wild.settings.maxZoom, accuracy: 1e-9)
+        // Turned back less, each frame still keeps its edges out.
+        for index in 0..<100 {
+            let matrix = wild.matrix(at: 3 + Double(index) / 30, width: 4032, height: 3024, focal: 2840, zoom: most)
+            XCTAssertTrue(SteadyPath.fits(matrix, width: 4032, height: 3024))
+        }
+    }
+}
+

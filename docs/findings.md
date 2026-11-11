@@ -476,6 +476,8 @@ an item from **Not verified** once it is.
     predicted 3.2 to 3.8 px rms a frame on each axis and the picture showed 0.13 to 0.35 of it.
     The optics take out roughly two thirds to nine tenths.
   - **Small slow drift partly passes:** under 2 Hz in the holds, 0.56 to 0.97 of it.
+  - **Roll passes nearly whole:** the picture's right side against its left turned 0.89 of gyro
+    z's turn, with a correlation of 0.99. The optics steady two axes, not roll.
   - **The axes in the sensor's own frame are as `yXZ` says:** the picture's x follows gyro x and
     its y gyro y, with nothing crossed.
   - **So a gyro correction of small shakes would add most of them back in reverse.** Stabilized

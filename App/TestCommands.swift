@@ -124,8 +124,14 @@ extension AppModel {
                     else { return "effects takes none, or halation, bloom, diffusion, vignette and grain as name:value" }
                     choice.effects[keyPath: control.keyPath] = number
                 }
+            case "stabilize":
+                guard ["on", "off"].contains(pair[1]) else { return "stabilize takes on or off" }
+                choice.stabilize = pair[1] == "on"
+            case "smooth":
+                guard let seconds = Double(pair[1]), (0.1...5).contains(seconds) else { return "smooth takes 0.1 to 5 seconds" }
+                choice.stabilizeSeconds = seconds
             default:
-                return "export takes look=, lutMadeFor=, target=, codec=, size=, resolution=, crop= and effects=, split by ;"
+                return "export takes look=, lutMadeFor=, target=, codec=, size=, resolution=, crop=, stabilize=, smooth= and effects=, split by ;"
             }
         }
         let wanted = command.name.flatMap(TestLinkAddress.safeName) ?? "newest"

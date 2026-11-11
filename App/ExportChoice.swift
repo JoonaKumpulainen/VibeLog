@@ -85,6 +85,16 @@ struct ExportChoice: Sendable {
     /// Where the crop sits as the take plays, -1 to 1: left to right for a crop that cuts the
     /// sides, top to bottom for one that cuts top and bottom. 0 is the centre.
     var cropShift = 0.0
+    /// Steadies the export from the take's gyro log, smoothing the camera's path over this many
+    /// seconds.
+    var stabilize = false
+    var stabilizeSeconds = 0.6
+
+    /// The lens profile's name for a take's lens, as its sidecar labels it.
+    static func lensName(_ label: String?) -> String {
+        guard let label, label != "1x" else { return "back-wide" }
+        return label.hasPrefix("0.") ? "back-ultrawide" : "back-tele"
+    }
 
     /// Whether the crop, as the take plays, cuts the sides rather than the top and bottom.
     func cropCutsSides(width: Int, height: Int, quarterTurns: Int) -> Bool {

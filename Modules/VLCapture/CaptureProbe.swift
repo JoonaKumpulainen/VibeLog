@@ -8,6 +8,9 @@ import VLCore
 public enum CaptureProbe {
     private static let rawPattern =
         "raw|bayer|sensor|unprocessed|bypass|demosaic|debayer|isp|proRes|cinema"
+    /// Names Apple might use for the optical stabilizer, which it calls sphere inside. Not "ois"
+    /// alone, which "noise" holds.
+    private static let stabilizerPattern = "stabiliz|sphere|opticalImage|sensorShift|lensShift"
 
     /// Runs on a background queue. The camera must be released first.
     public static func run(
@@ -71,6 +74,15 @@ public enum CaptureProbe {
             add("")
             add("=== runtime members matching /\(rawPattern)/i on AVCapture* classes")
             VLRuntimeScan("AVCapture", rawPattern).forEach(add)
+            // Looking for a way to hold the optical stabilizer still in a plain RAW stream, which
+            // the public API only gives to brackets. The capture classes beneath AVFoundation too.
+            for prefix in ["AVCapture", "FigCapture", "BWFigVideoCaptureDevice", "BWFigCaptureDevice", "BWStillImage"] {
+                add("")
+                add("=== runtime members matching /\(stabilizerPattern)/i on \(prefix)* classes")
+                let found = VLRuntimeScan(prefix, stabilizerPattern)
+                found.forEach(add)
+                if found.isEmpty { add("none") }
+            }
 
             let url = Storage.probes.appendingPathComponent("probe_\(Storage.timestamp()).txt")
             do {

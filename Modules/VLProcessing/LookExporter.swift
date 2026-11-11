@@ -1,6 +1,7 @@
 import AVFoundation
 import Metal
 import VLCore
+import simd
 
 /// Writes a take again with a look baked in, frame by frame, as fast as the phone manages. Each
 /// frame is turned back into the log image and encoded through the same look step a baked take
@@ -20,6 +21,8 @@ public final class LookExporter {
         public var hdr = false
         /// Where the crop sits within what it leaves out, -1 to 1 along each axis of the stored picture.
         public var cropShift = SIMD2<Float>.zero
+        /// Steadies each exported frame from the take's gyro log, or nil to leave them as shot.
+        public var steadying: Steadying?
 
         public init(
             curve: LogCurve, gamut: Gamut, lut: CubeLUT?, lutExpectsRec709: Bool, sourceRec709: Bool,
@@ -31,6 +34,20 @@ public final class LookExporter {
             self.lutExpectsRec709 = lutExpectsRec709
             self.sourceRec709 = sourceRec709
             self.effects = effects
+        }
+    }
+
+    /// A take's gyro path with the lens's focal length, in pixels of the picture as stored, and
+    /// how far the picture is enlarged to hide its moving edges.
+    public struct Steadying: Sendable {
+        public var path: SteadyPath
+        public var focal: Double
+        public var zoom: Double
+
+        public init(path: SteadyPath, focal: Double, zoom: Double) {
+            self.path = path
+            self.focal = focal
+            self.zoom = zoom
         }
     }
 
@@ -73,6 +90,9 @@ public final class LookExporter {
     private var effectsImage: MTLTexture?
     private var effectsFrame = 0
     private let cropShift: SIMD2<Float>
+    private let steadying: Steadying?
+    private let warpState: MTLComputePipelineState?
+    private var steadyImage: MTLTexture?
 
     public init?(look: Look) {
         guard let pipeline = ProcessingPipeline(), let queue = pipeline.device.makeCommandQueue(),
@@ -95,6 +115,11 @@ public final class LookExporter {
         effects = look.effects
         curve = look.curve
         cropShift = look.cropShift
+        steadying = look.steadying
+        let warp = look.steadying == nil ? nil
+            : library.makeFunction(name: "steadyWarp").flatMap { try? pipeline.device.makeComputePipelineState(function: $0) }
+        if look.steadying != nil, warp == nil { return nil }
+        warpState = warp
         effectsKit = look.effects.isNeutral ? nil : EffectsKit(device: pipeline.device)
         CVMetalTextureCacheCreate(nil, nil, pipeline.device, nil, &cache)
     }
@@ -143,6 +168,29 @@ public final class LookExporter {
             effectsKit.apply(image, into: effectsImage, glow: glow, params: params, commands: commands)
         else { return nil }
         return effectsImage
+    }
+
+    /// The frame's log image steadied for its time in the take, or as it is when the export
+    /// doesn't steady. Only the export does this: the preview plays the take as shot.
+    private func steadied(_ image: MTLTexture, seconds: Double, commands: MTLCommandBuffer) -> MTLTexture? {
+        guard let steadying, let warpState else { return image }
+        if steadyImage?.width != image.width || steadyImage?.height != image.height {
+            steadyImage = pipeline.device.makeTexture(
+                descriptor: ProcessingPipeline.outputDescriptor(width: image.width, height: image.height))
+        }
+        guard let steadyImage, let encoder = commands.makeComputeCommandEncoder() else { return nil }
+        let matrix = steadying.path.matrix(
+            at: seconds, width: Double(image.width), height: Double(image.height), focal: steadying.focal,
+            zoom: steadying.zoom)
+        var warp = simd_float3x3(
+            SIMD3<Float>(matrix.columns.0), SIMD3<Float>(matrix.columns.1), SIMD3<Float>(matrix.columns.2))
+        encoder.setComputePipelineState(warpState)
+        encoder.setTexture(image, index: 0)
+        encoder.setTexture(steadyImage, index: 1)
+        encoder.setBytes(&warp, length: MemoryLayout<simd_float3x3>.stride, index: 0)
+        dispatch(encoder, warpState, width: image.width, height: image.height)
+        encoder.endEncoding()
+        return steadyImage
     }
 
     /// Frames come out as 16-bit AYCbCr, which `decodeVideo` reads, with chroma at full size.
@@ -268,8 +316,11 @@ public final class LookExporter {
                 guard let frame = CMSampleBufferGetImageBuffer(sample) else { return false }
                 let time = CMSampleBufferGetPresentationTimeStamp(sample)
                 first = first ?? time
+                // The gyro log's time zero is the take's first frame.
+                let sinceFirst = (time - (first ?? time)).seconds
                 guard let commands = queue.makeCommandBuffer(), let decoded = decode(frame, commands: commands),
-                    let source = withEffects(decoded.image, commands: commands),
+                    let steady = steadied(decoded.image, seconds: sinceFirst, commands: commands),
+                    let source = withEffects(steady, commands: commands),
                     let planes = pipeline.encodeImage(
                         source, into: buffer, commands: commands, look: look, lut: lutTexture, smooth: true,
                         shift: cropShift)

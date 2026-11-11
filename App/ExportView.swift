@@ -19,6 +19,8 @@ struct ExportView: View {
     @State private var quality = ExportQuality.master
     @State private var resolution = ExportResolution.full
     @State private var crop = ExportCrop.none
+    @State private var stabilize = false
+    @State private var stabilizeSeconds = 0.6
     /// Where the crop sits, -1 to 1 across what it leaves out, as the take plays.
     @State private var cropShift = 0.0
     /// A log curve and gamut to write the take as instead of a look.
@@ -338,6 +340,26 @@ struct ExportView: View {
                         .accessibilityElement(children: .contain)
                         .accessibilityLabel("Crop position")
                     }
+                    if FileManager.default.fileExists(atPath: TakeLibrary.gyroLog(for: take.url).path) {
+                        Toggle("Stabilize", isOn: $stabilize)
+                        if stabilize {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text("Smoothness")
+                                    Spacer()
+                                    Text(String(format: "%.1f s", stabilizeSeconds))
+                                        .monospacedDigit()
+                                        .foregroundStyle(.secondary)
+                                }
+                                Slider(value: $stabilizeSeconds, in: 0.2...2, step: 0.1)
+                                Text("Steadies the export from the take's gyro log and enlarges it to hide the edges. Fast small shake is left to the lens's own stabilizer. The preview plays the take as shot.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .accessibilityElement(children: .contain)
+                            .accessibilityLabel("Stabilizing smoothness")
+                        }
+                    }
                 } header: {
                     Text("File")
                 } footer: {
@@ -379,7 +401,8 @@ struct ExportView: View {
     private var choice: ExportChoice {
         ExportChoice(
             lutName: lutName, lutMadeForRec709: lutMadeForRec709, grade: grade, effects: effects, target: target,
-            codec: codec, quality: quality, resolution: resolution, crop: crop, cropShift: cropShift, logTarget: logTarget)
+            codec: codec, quality: quality, resolution: resolution, crop: crop, cropShift: cropShift,
+            stabilize: stabilize, stabilizeSeconds: stabilizeSeconds, logTarget: logTarget)
     }
 
     /// A paused player redraws only for a composition it hasn't seen, so it gets a copy of the same.
@@ -684,6 +707,30 @@ final class LookExportJob: ObservableObject {
         trace.begin("setting up the GPU")
         var look = look
         look.cropShift = choice.storedCropShift(width: source.width, height: source.height, quarterTurns: source.quarterTurns)
+        var steadied: String?
+        if choice.stabilize {
+            trace.begin("reading the gyro log")
+            guard let text = try? String(contentsOf: TakeLibrary.gyroLog(for: take.url), encoding: .utf8) else {
+                throw StepFailure(description: "This take has no gyro log to steady it with")
+            }
+            var settings = SteadyPath.Settings()
+            settings.smoothSeconds = choice.stabilizeSeconds
+            guard let path = SteadyPath(samples: GyroLog.samples(from: text), settings: settings) else {
+                throw StepFailure(description: "The take's gyro log is too short to steady it with")
+            }
+            let lens = ExportChoice.lensName(take.info?.metadata["lens"])
+            guard let profile = LensProfile.saved().first(where: { $0.lens == lens }), profile.width > 0 else {
+                throw StepFailure(description: "Stabilizing needs this lens measured first, in Settings, Advanced, Lenses")
+            }
+            // The profile's focal length is in pixels of the sensor's full width.
+            let focal = profile.fx * Double(source.width) / Double(profile.width)
+            let zoom = path.zoom(width: Double(source.width), height: Double(source.height), focal: focal)
+            look.steadying = LookExporter.Steadying(path: path, focal: focal, zoom: zoom)
+            steadied = String(
+                format: "from the gyro log, smoothed over %.1f s and enlarged %.0f%%, with fast small shake left to the lens's stabilizer",
+                choice.stabilizeSeconds, zoom * 100)
+            Log.shared.info("Export of \(take.url.lastPathComponent) is steadied \(steadied ?? ""), focal \(Int(focal)) px")
+        }
         guard let exporter = LookExporter(look: look) else { throw LookExporter.Failure.gpu }
         let size = choice.outputSize(width: source.width, height: source.height, quarterTurns: source.quarterTurns)
         let preset = choice.preset(width: size.width, height: size.height)
@@ -709,6 +756,7 @@ final class LookExportJob: ObservableObject {
             ? "The look is baked in, and the file's tags describe it."
             : "The file's transfer tag is nominal; decode with the curve named here."
         metadata["exportedFrom"] = take.url.lastPathComponent
+        if let steadied { metadata["steadied"] = steadied }
         metadata["exportFormat"] = format
         let rate = take.info?.metadata["frameRate"].flatMap(Double.init) ?? 30
         // HDR10 in HEVC states its content light levels, which a first pass over the frames measures,
@@ -754,7 +802,8 @@ final class LookExportJob: ObservableObject {
             Log.shared.warn("Export: can't write the sidecar for \(name): \(error)")
         }
         let gyro = TakeLibrary.gyroLog(for: take.url)
-        if FileManager.default.fileExists(atPath: gyro.path) {
+        // A steadied export no longer moves as its take's gyro log says.
+        if steadied == nil, FileManager.default.fileExists(atPath: gyro.path) {
             do {
                 try? FileManager.default.removeItem(at: TakeLibrary.gyroLog(for: destination))
                 try FileManager.default.copyItem(at: gyro, to: TakeLibrary.gyroLog(for: destination))
