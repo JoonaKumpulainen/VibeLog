@@ -96,10 +96,10 @@ at 2880x2160.
   for Gyroflow, and a profile for the ultra wide, which Apple gives no table for.
 - **A native log mode for Pro phones,** starting with the probe listing video formats: see
   [decisions/native-log-mode.md](decisions/native-log-mode.md). The HLG idea was dropped.
-- **The stabilizer's own shift:** the next probe prints each RAW photo's maker note with the
-  stabilizer off and on, and two unpublished switches for offline stabilization are untried.
-  Failing those, a **Measure stabilizer** test per lens, the take-against-gyro fit done by hand
-  on `220644`.
+- **The stabilizer's own shift isn't in a RAW photo's maker note,** which the probe printed on
+  `652ba7a`. Left to try: logging maker note keys 15 and 12 through a real take, two unpublished
+  switches for offline stabilization, and a **Measure stabilizer** test per lens, the
+  take-against-gyro fit done by hand on `220644`.
 - **Stabilized export, first version built, waiting on the phone:** see
   [decisions/stabilized-export.md](decisions/stabilized-export.md). Next: a limit that follows
   the shake's size, rolling shutter, lens distortion and a horizon lock.

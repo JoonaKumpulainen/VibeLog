@@ -501,10 +501,29 @@ an item from **Not verified** once it is.
   - **Per-photo calibration doesn't come with Bayer RAW.** Every single camera reported
     `calibration none` for RAW, so the optical centre can't be read frame by frame that way.
 
+- **A RAW photo's maker note doesn't give the lens's shift, 14 Pro on `652ba7a`, 2026-11-11:**
+  from `probe_20261111_235722.txt`, two photos each of plain RAW and of brackets with the
+  stabilizer off and on, phone lying still.
+  - **No key reads as a position.** About 55 keys a photo, and none is a signed pair that could
+    be where the lens sits.
+  - **Key 15 follows the stabilizer,** and is the one ExifTool lists as OIS mode. On the 1x it
+    reads 5 for plain RAW and for a bracket with the stabilizer off, and 2 with it on. On the
+    tele it's missing for plain RAW and off, and 2 for on. The ultra wide never has it. What 5
+    means isn't known: plain RAW sharing a value with off doesn't fit take `220644`, where the
+    app's own stream clearly steadied the picture, so the probe's single shots may differ from a
+    running stream.
+  - **Key 12 is only on the lenses with a stabilizer:** two positive numbers in steps of 1/256,
+    0.09 to 0.14 and 0.11 to 0.32, changing shot to shot with the phone still. ExifTool guesses
+    focus distance range. They look more like sizes of something than a position.
+  - **Key 77 looks like a temperature:** 47.6 rising to 47.9 on the 1x, 44 on the ultra wide and
+    42 on the tele, with the phone at serious heat.
+  - So an exact correction from each frame's own lens shift isn't on offer through photo
+    metadata. A measurement per lens is the way left.
+
 ## Not verified
 
-- **Whether a RAW photo's own metadata tells the lens's shift:** the next probe prints Apple's
-  maker note for plain RAW and for brackets with the stabilizer off and on.
+- **What maker note keys 15 and 12 read in a running take,** frame by frame, still and shaken:
+  whether 15 changes from the probe's 5, and whether 12 grows with the shake.
 - **The `.gcsv`'s orientation for upright takes:** which string Gyroflow needs for each way of
   holding the phone upright, and that a take held sideways is right as it is.
 - **How the optical stabilizer's share changes** with the size and speed of the motion between
