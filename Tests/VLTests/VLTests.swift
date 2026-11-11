@@ -2839,6 +2839,32 @@ final class EffectsTests: XCTestCase {
         return (at(32, 32), at(0, 0), at(46, 32), gray)
     }
 
+    /// A take's kit must give each frame its own glow, so the viewfinder's isn't rewritten by the
+    /// frames queued behind it.
+    func testPooledGlowsTakeTurns() throws {
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        let queue = try XCTUnwrap(device.makeCommandQueue())
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .rgba16Unorm, width: 64, height: 64, mipmapped: false)
+        descriptor.usage = [.shaderRead, .shaderWrite]
+        let image = try XCTUnwrap(device.makeTexture(descriptor: descriptor))
+        var effects = LookEffects()
+        effects.bloom = 1
+        let params = EffectsParams(effects, curve: .sLog3, frame: 1)
+        func glows(_ kit: EffectsKit, _ count: Int) throws -> [MTLTexture] {
+            let commands = try XCTUnwrap(queue.makeCommandBuffer())
+            let made = try (0..<count).map { _ in try XCTUnwrap(kit.glow(for: image, params: params, commands: commands)) }
+            commands.commit()
+            commands.waitUntilCompleted()
+            return made
+        }
+        let pooled = try glows(try XCTUnwrap(EffectsKit(device: device, poolSize: 4)), 5)
+        for first in 0..<4 { for second in (first + 1)..<4 { XCTAssertFalse(pooled[first] === pooled[second]) } }
+        XCTAssertTrue(pooled[0] === pooled[4])
+        let single = try glows(try XCTUnwrap(EffectsKit(device: device)), 2)
+        XCTAssertTrue(single[0] === single[1])
+    }
+
     func testGlowsLeaveFlatGrayAlone() throws {
         var effects = LookEffects()
         effects.bloom = 1

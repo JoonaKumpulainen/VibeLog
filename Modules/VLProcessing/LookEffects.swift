@@ -42,12 +42,16 @@ final class EffectsKit {
     private let downsample: MTLComputePipelineState
     private let blur: MTLComputePipelineState
     private let applyState: MTLComputePipelineState
-    private var small: MTLTexture?
+    /// The glows, taken in turn. A take's kit keeps several, so the glow the viewfinder samples
+    /// isn't the one the next queued frames write.
+    private var smalls: [MTLTexture] = []
+    private var nextSmall = 0
+    private let poolSize: Int
     private var scratch: MTLTexture?
     /// Bound when the effects are off, since the viewfinder's shader always takes a glow.
     let placeholder: MTLTexture
 
-    init?(device: MTLDevice) {
+    init?(device: MTLDevice, poolSize: Int = 1) {
         guard let library = try? device.makeDefaultLibrary(bundle: Bundle(for: EffectsKit.self)),
             let down = library.makeFunction(name: "effectsDownsample"),
             let blurFunction = library.makeFunction(name: "effectsBlur"),
@@ -60,6 +64,7 @@ final class EffectsKit {
         descriptor.usage = .shaderRead
         guard let placeholder = device.makeTexture(descriptor: descriptor) else { return nil }
         self.device = device
+        self.poolSize = max(poolSize, 1)
         self.downsample = downsample
         self.blur = blur
         self.applyState = applyState
@@ -72,14 +77,16 @@ final class EffectsKit {
     func glow(for image: MTLTexture, params: EffectsParams, commands: MTLCommandBuffer, reduction: Int = 8) -> MTLTexture? {
         let width = max(image.width / reduction, 1)
         let height = max(image.height / reduction, 1)
-        if small?.width != width || small?.height != height {
+        if smalls.first?.width != width || smalls.first?.height != height || smalls.count != poolSize {
             let descriptor = MTLTextureDescriptor.texture2DDescriptor(
                 pixelFormat: .rgba16Float, width: width, height: height, mipmapped: false)
             descriptor.usage = [.shaderRead, .shaderWrite]
-            small = device.makeTexture(descriptor: descriptor)
+            smalls = (0..<poolSize).compactMap { _ in device.makeTexture(descriptor: descriptor) }
             scratch = device.makeTexture(descriptor: descriptor)
         }
-        guard let small, let scratch, let encoder = commands.makeComputeCommandEncoder() else { return nil }
+        guard smalls.count == poolSize, let scratch, let encoder = commands.makeComputeCommandEncoder() else { return nil }
+        nextSmall = (nextSmall + 1) % poolSize
+        let small = smalls[nextSmall]
         var parameters = params
         encoder.setComputePipelineState(downsample)
         encoder.setTexture(image, index: 0)
