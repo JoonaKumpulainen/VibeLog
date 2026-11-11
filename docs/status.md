@@ -48,11 +48,9 @@ Files can be read straight from a phone plugged in here, under `/run/user/<uid>/
 
 **The 14 Pro:**
 
-5. **Gyroflow:** take `220644` was slow and sharp. Its recording shows Gyroflow correcting the
-   wrong axes on an upright take, and no small shake left in the footage for it to correct: see
-   [findings.md](findings.md). To confirm on the take's own frames, turn **Connect** on with
-   `video_20261111_220644.mov` still on the phone. A take held sideways would check the axes
-   there. The profiles are in the test
+5. **Gyroflow's axes:** a take held sideways, with a few seconds held still, played in Gyroflow,
+   to check `yXZ` is right there. Upright takes are corrected a quarter-turn off until the
+   `.gcsv` says how the phone was held. The profiles are in the test
    folder as `gyroflow-back-wide-4032x3024.json` and three more. Load
    the 1x open gate profile in Gyroflow with a 1x take that has slow pans and a straight edge near
    a corner, shot at 1/250 s with lens distortion correction off. Say whether Gyroflow loads it,
@@ -83,6 +81,7 @@ at 2880x2160.
   held. The owner chose the Efficient path from the start of a baked-FX take, built in
   `b740eab` and waiting on the long take.
 - **ACES 1.3 HDR.**
+- **The `.gcsv`'s orientation by hold,** so Gyroflow corrects the right axes on upright takes.
 - **Lens profiles, next steps:** the straight-edge check, colour from a chart, the readout time
   for Gyroflow, and a profile for the ultra wide, which Apple gives no table for.
 - **A native log mode for Pro phones,** starting with the probe listing video formats: see
@@ -90,7 +89,14 @@ at 2880x2160.
 - **Stabilized export**, after the stabilization check. Then Phase 8: denoise, proxies and
   log-to-log conversion.
 
-## In progress: stabilization check
+## Stabilization check: answered on 2026-11-11
+
+Take `220644`'s own frames show the optical stabilizer running during RAW capture: pans pass
+whole, and a hand's small fast shake mostly doesn't reach the picture. The figures are in
+[findings.md](findings.md). Stabilized export should correct slow, large motion from the gyro
+and leave the rest to the optics. The notes below are the earlier attempt.
+
+## Earlier: stabilization check
 
 Before building stabilized export, find out whether optical stabilization moves the picture during
 RAW capture, which the gyro can't see, and the sensor's rolling-shutter readout time. The owner

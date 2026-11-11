@@ -460,19 +460,34 @@ an item from **Not verified** once it is.
     87% of the motion. The `.gcsv` always says `yXZ`, which is the sensor's own frame, while an
     upright take's file carries a quarter-turn. So the shakes aren't removed, they're moved to
     the other axis.
-  - **The shakes the gyro saw aren't in the footage.** With Gyroflow correcting the wrong axis,
-    the camera's real shake should still show on the right one: gyro y in the picture's sideways
-    motion at -0.22. It came out at +0.02, and gyro x in the up and down motion at +0.03 to
-    +0.04. The simplest reading is that the optical stabilizer had already taken nearly all of
-    a hand's small shake out of the RAW frames, while pans pass whole.
-  - **What follows, if the take's own frames confirm it:** a gyro correction of small shakes
-    would add them back in reverse, so stabilized export should leave fast small motion to the
-    optics and correct only the slow, large motion, or measure the picture as well.
+  - **The shakes the gyro saw were mostly missing from the preview,** which the take's own
+    frames then measured: see the next entry.
+
+- **The optical stabilizer runs during RAW capture, 14 Pro, proven on take `220644`'s own
+  frames, 2026-11-11.** The 1x, upright, 1/250 s and ISO 4001 by hand, lens correction off,
+  1,152 frames with none dropped. Each frame was read in the sensor's own orientation at a
+  quarter size, its shift from the last found by matching row and column sums over the middle
+  half, and fitted to the angle the `.gcsv` says the phone turned between the two frame times,
+  at the profile's 2840.9 px.
+  - **Pans pass whole.** At 0.3 to 0.4 rad/s the picture moved 1.12 and 1.02 times what the gyro
+    predicts, explaining 91 and 95% of it, with the gyro 10 to 30 ms off the frames. So the
+    `.gcsv`'s timing and scale and the profile's focal length are right to within about a tenth.
+  - **Small fast shakes mostly don't reach the picture.** Held still, above about 2 Hz, the gyro
+    predicted 3.2 to 3.8 px rms a frame on each axis and the picture showed 0.13 to 0.35 of it.
+    The optics take out roughly two thirds to nine tenths.
+  - **Small slow drift partly passes:** under 2 Hz in the holds, 0.56 to 0.97 of it.
+  - **The axes in the sensor's own frame are as `yXZ` says:** the picture's x follows gyro x and
+    its y gyro y, with nothing crossed.
+  - **So a gyro correction of small shakes would add most of them back in reverse.** Stabilized
+    export should correct slow, large motion from the gyro and leave fast small motion to the
+    optics, or measure the picture as well.
 
 ## Not verified
 
-- **The two Gyroflow readings above, on the take's own frames:** a small export of `220644`
-  against its `.gcsv` would settle both without Gyroflow in between.
+- **The `.gcsv`'s orientation for upright takes:** which string Gyroflow needs for each way of
+  holding the phone upright, and that a take held sideways is right as it is.
+- **How the optical stabilizer's share changes** with the size and speed of the motion between
+  a hand's shake and a pan, and on the tele.
 
 - **Baked FX past 20 minutes, or in a warm room:** both takes were indoors on a phone lying
   still.
@@ -489,9 +504,6 @@ an item from **Not verified** once it is.
   frame, and whether it runs undistorted to distorted, as Apple's sample code reads it and the
   fit assumes. The optical centre is used for the profile, 9 px from Apple's distortion centre.
 
-- **Lens stabilization:** whether brackets requested before the last one ends, or brackets of 8,
-  give a steady 30 fps, which a take would need. What the 14 Pro's probe says. Whether switching it
-  off removes the gap between the gyro and the picture's motion.
 
 - **iPhone 16:** why the fast capture options hang its photo requests. Whether Apple's preview
   connected alone would have streamed: it ran about 4 seconds without a stall line before the app
