@@ -9,7 +9,8 @@ short.
 As of mid Phase 7. The latest build is `02d2d11`, CI run 105, version 0.1.105, which passed
 with 181 tests and one skip: a baked-FX take
 hands its glow to the viewfinder only when a frame finishes, from a pool of four, after take
-`164209` ran 45 ms a frame from its start on the Maximum path. Untried on the phone. Before it,
+`164209` ran 45 ms a frame from its start on the Maximum path. The 14 Pro proved the fix in take
+`190958`, which then stepped down at 2:27 as `192732` had. Before it,
 `6f4d393`, run 104, passed with 180 tests and one skip: measuring lenses also writes their
 Gyroflow profiles, so the test link can fetch them. `f8eb02a`, run 103, added Gyroflow lens profiles from the Lenses
 page and overlapped bracket cases in the probe; `657767f`,
@@ -47,13 +48,10 @@ Files can be read straight from a phone plugged in here, under `/run/user/<uid>/
    table runs the other way.
 6. **A launch and a short take on `edec570` or later,** to confirm no `Capture stalled` line and
    an unchanged format.
-7. **The baked-FX long take again, on `02d2d11`:** start the server with `python3
-   tools/test_server.py serve`, turn on **Connect**, then `suite tools/suites/fx_baked.json`, 30
-   minutes' cooling and 10 minutes, about 15 GB, unplugged. The first minute decides the fix: GPU
-   near 22 ms, queue under 1 ms and `draw` near 8 ms at nominal heat, as take `192732` had, where
-   `164209` had 45, 71 and 93 ms. If the GPU passes about 40 ms with frames falling away, `send
-   stop`, stop the suite too and put the settings back by hand. Over the link, `set` takes name
-   and value as two arguments.
+7. **Nothing for baked FX until the next build:** the long take ran on `02d2d11`, and what's
+   left needs a change first. To run a suite, start the server with `python3
+   tools/test_server.py serve`, turn on **Connect**, then `suite tools/suites/fx_baked.json`.
+   Over the link, `set` takes name and value as two arguments.
 8. **Still waiting on the owner:** the stabilization take, slow pans and quick shakes at 1/250 s;
    a colour chart shot; the matched pair for Apple's preview; `scope_cost.json`; ARRI Wide Gamut
    3, left for later.
@@ -64,8 +62,10 @@ at 2880x2160.
 ## Still to build
 
 - **A stabilizer switch for takes,** only if the probe shows brackets can hold 30 fps.
-- **FX in baked takes: the long take** on `02d2d11`, then whether the Maximum path still steps
-  down at about 2 minutes, as it did before the glow was shared.
+- **FX in baked takes: a way through the GPU's step down.** The Maximum path loses about 7
+  frames a second from about 2 minutes until serious heat brings the Efficient path, which then
+  holds. Not decided: take the Efficient path when the GPU falls behind, not only when hot, or
+  from the start of a baked-FX take.
 - **ACES 1.3 HDR.**
 - **Lens profiles, next steps:** the straight-edge check, colour from a chart, the readout time
   for Gyroflow, and a profile for the ultra wide, which Apple gives no table for.

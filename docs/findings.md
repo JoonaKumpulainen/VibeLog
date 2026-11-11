@@ -356,10 +356,25 @@ an item from **Not verified** once it is.
     frame rewrites, handed over at encoding, so each draw waited on those frames. `02d2d11` pools
     the glows and hands one over with the finished image.
 
+- **The glow fix works, and the Maximum path still steps down, 14 Pro on `02d2d11`, 2026-11-11:**
+  take `190958` from `fx_baked.json`, after 30 minutes' cooling, unplugged from 70%. It ran 10:00
+  and wrote 16,471 frames at 27.45 fps, with 1,524 lost at the GPU and none at the encoder;
+  capture held 29.99 fps, `missed 7`.
+  - **The start is fixed:** for 2:25 at nominal heat, GPU 26 ms, queue 0.4 ms, `draw` 4 ms and
+    nothing lost, where `164209` had 45, 71 and 93 ms. `draw` is under the 6 to 8 ms it cost
+    before the glow was shared.
+  - **The step down came anyway:** at 2:27, still nominal, GPU time went from 26 to 43 ms in one
+    step, queue to 64 ms and `draw` to 24 ms, and about 7 frames a second dropped. Fair followed
+    12 seconds later. `192732` did the same at 1:57. So it's the GPU's own step, ahead of the
+    heat state, and baked FX on the Maximum path don't fit in what's left.
+  - **The Efficient path ended it:** at serious, 6:09, it took over, and the last 3:50 ran at 28
+    to 29 ms, queue about 1 ms, `draw` 4 ms, with nothing lost.
+
 ## Not verified
 
-- **The glow fix in `02d2d11`:** whether a baked-FX take on the Maximum path returns to about 22
-  ms a frame, and whether it then holds past 2 minutes, where `192732` stepped down.
+- **Baked FX for a whole take:** whether the Efficient path from the start, or from the moment
+  the GPU falls behind, holds 10 minutes with FX baked in. It held the last 3:50 of two takes at
+  serious heat.
 
 - **Gyroflow lens profiles:** whether Gyroflow loads them, whether Apple's table describes the RAW
   frame, and whether it runs undistorted to distorted, as Apple's sample code reads it and the
