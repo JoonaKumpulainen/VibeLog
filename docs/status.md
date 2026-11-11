@@ -70,6 +70,13 @@ straight from the phone when it's plugged in here, under `/run/user/<uid>/gvfs/a
 HEVC 4:2:2 then held 80 seconds at 29.94 fps with nothing lost. Still wanted from it: a
 five-minute HEVC 4:2:2 take at full size, started cold and unplugged.
 
+**Latest build:** `657767f`, CI run 102, 174 tests with one skip, versioned 0.1.102 so SideStore
+should offer the build after it as an update without re-adding the source; that isn't confirmed.
+
+**Lens stabilization probe, iPhone 16:** the 1x's stabilizer can be switched off for RAW with a
+bracket, but brackets came too slowly one at a time; see [findings.md](findings.md). Next would be
+a probe case that overlaps brackets, to see if they reach a steady 30 fps.
+
 **On the phone:** check the arrow and dots in all four holds and the export tabs' width; in
 export, the fullscreen preview upright and sideways, with the crop outline, and the scope's drag,
 snap and resize, also on the camera, whose scope code changed; then **Run probe** and send the

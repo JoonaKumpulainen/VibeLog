@@ -327,7 +327,25 @@ an item from **Not verified** once it is.
   - **Export works:** `111223` exported with ACES 2.0 and a grade to HEVC 4:2:0 at full size, 239
     frames in 8.8 s at about 31 fps, footprint 2.47 GB.
 
+- **Lens stabilization in RAW brackets, iPhone 16 on `1a1d56c`, 2026-11-11:** from
+  `probe_20261111_142741.txt`, with one request at a time.
+  - **The 1x's stabilizer can be switched for RAW.** `isLensStabilizationDuringBracketedCapture
+    Supported` is true, with brackets of up to 8. Every photo of a bracket with it off reported
+    `off`, and with it on `active`.
+  - **Brackets are too slow one at a time.** Brackets of 1 came 133 ms apart, 7.5 a second. In
+    brackets of 3 the frames came 33 ms apart, then 167 ms to the next bracket's first. Plain RAW
+    came 33 ms apart.
+  - **Plain RAW says nothing of the stabilizer:** its photos report `unsupported`, so whether it
+    runs in the app's normal stream is still unknown.
+  - **The 0.5x has no switch:** not supported, and asking for it raises, which the probe caught.
+  - The probe's photos were 4224x3024, the size with distortion correction left at its default,
+    not the app's 4032x3024.
+
 ## Not verified
+
+- **Lens stabilization:** whether brackets requested before the last one ends, or brackets of 8,
+  give a steady 30 fps, which a take would need. What the 14 Pro's probe says. Whether switching it
+  off removes the gap between the gyro and the picture's motion.
 
 - **iPhone 16:** why the fast capture options hang its photo requests. Whether Apple's preview
   connected alone would have streamed: it ran about 4 seconds without a stall line before the app
