@@ -44,6 +44,10 @@ struct DiagnosticsView: View {
                     close()
                     model.runEncoderTest()
                 }
+                Button("Run GPU cost test") {
+                    close()
+                    model.runCostTest()
+                }
             }
             Section {
                 TextField("Server, as 192.168.1.20:8765", text: $model.testServer)

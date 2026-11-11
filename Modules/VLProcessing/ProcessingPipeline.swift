@@ -1397,3 +1397,210 @@ extension ProcessingPipeline: MTKViewDelegate {
         commands.commit()
     }
 }
+
+// MARK: - GPU cost test
+
+extension ProcessingPipeline {
+    /// Times each stage of a frame by itself on this phone's GPU, with a made-up RAW frame at the
+    /// sensor's size, the current curve, gamut and look, and the FX of `fx_baked.json`. The
+    /// camera must be stopped. Frames run back to back, so the GPU is at its full speed, and
+    /// nothing draws: the figures show what each stage costs beside the others, not what a take
+    /// reads. Writes `probes/gpu_cost_*.txt`.
+    public func runCostTest(progress: @escaping (String) -> Void, completion: @escaping (URL) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            var report = [
+                "VibeLog GPU cost test \(Storage.timestamp())", "device=\(SystemStatus.deviceModel)",
+                "thermal at start=\(SystemStatus.thermalName)",
+            ]
+            report += costStages(progress: progress)
+            report.append("thermal at end=\(SystemStatus.thermalName)")
+            for line in report { Log.shared.info("GPU cost: \(line)") }
+            let url = Storage.probes.appendingPathComponent("gpu_cost_\(Storage.timestamp()).txt")
+            try? report.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+            DispatchQueue.main.async { completion(url) }
+        }
+    }
+
+    private func costStages(progress: (String) -> Void) -> [String] {
+        let width = 4032
+        let height = 3024
+        func texture(_ format: MTLPixelFormat, _ width: Int, _ height: Int) -> MTLTexture? {
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: format, width: width, height: height, mipmapped: false)
+            descriptor.usage = [.shaderRead, .shaderWrite]
+            descriptor.storageMode = .private
+            return device.makeTexture(descriptor: descriptor)
+        }
+        let rawDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .r16Uint, width: width, height: height, mipmapped: false)
+        rawDescriptor.usage = .shaderRead
+        guard let raw = device.makeTexture(descriptor: rawDescriptor),
+            let full = texture(.rgba16Unorm, width, height),
+            let monitor = texture(.rgba16Unorm, width / 2, height / 2),
+            let luma = texture(.r16Unorm, width, height),
+            let chroma = texture(.rg16Unorm, width / 2, height / 2),
+            let wideLuma = texture(.r16Unorm, width, 2268),
+            let wideChroma = texture(.rg16Unorm, width / 2, 1134),
+            let kit = EffectsKit(device: device)
+        else { return ["Cannot make the test's textures"] }
+
+        // A slope from black to past the clip, with noise, so the look and the glow have every
+        // level to work on.
+        var pixels = [UInt16](repeating: 0, count: width * height)
+        var seed: UInt32 = 12345
+        for y in 0..<height {
+            for x in 0..<width {
+                seed = seed &* 1_664_525 &+ 1_013_904_223
+                let slope = 2112 + (x + y) * 13000 / (width + height)
+                pixels[y * width + x] = UInt16(min(slope + Int(seed >> 24), 16383))
+            }
+        }
+        pixels.withUnsafeBytes { bytes in
+            raw.replace(
+                region: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0, withBytes: bytes.baseAddress!,
+                bytesPerRow: width * 2)
+        }
+
+        lock.lock()
+        let chosen = settings
+        var baked = settings
+        baked.bakeLook = true
+        baked.bakeHDR = false
+        let custom = customLUT
+        lock.unlock()
+        let look = LookParams(settings: baked, lut: custom?.lut, expectsRec709: custom?.expectsRec709)
+        let lut = custom?.texture
+        let cfa = CFAPattern.bggr
+        let gains: [Float] = [1.9, 1, 1.7]
+
+        var all = LookEffects()
+        all.halation = 0.5
+        all.bloom = 0.5
+        all.diffusion = 0.3
+        all.grain = 0.3
+        var glows = all
+        glows.grain = 0
+        var grain = LookEffects()
+        grain.grain = 0.3
+        func params(_ effects: LookEffects, _ frame: Int) -> EffectsParams {
+            EffectsParams(effects, curve: chosen.curve, frame: frame)
+        }
+
+        var lines = [
+            "size=\(width)x\(height), curve=\(chosen.curve.label), gamut=\(chosen.gamut.label), "
+                + "look=\(custom == nil ? "Rec.709 view" : "LUT of \(custom?.lut.size ?? 0)"), "
+                + "vignette correction=\(chosen.vignetteCorrection)",
+            "FX=\(all.label)", "", "stage, median ms, lowest to highest",
+        ]
+        func measure(_ name: String, _ build: (MTLCommandBuffer, Int) -> Bool) {
+            progress(name)
+            var times: [Double] = []
+            for frame in 0..<45 {
+                guard let commands = queue.makeCommandBuffer(), build(commands, frame) else {
+                    lines.append("\(name), failed to encode")
+                    return
+                }
+                commands.commit()
+                commands.waitUntilCompleted()
+                guard commands.status == .completed else {
+                    lines.append("\(name), failed on the GPU")
+                    return
+                }
+                times.append((commands.gpuEndTime - commands.gpuStartTime) * 1000)
+            }
+            // The first frames include the kernels' warm-up.
+            let kept = times.dropFirst(5).sorted()
+            lines.append(String(
+                format: "\(name), %.1f, %.1f to %.1f", kept[kept.count / 2], kept.first ?? 0, kept.last ?? 0))
+        }
+        // The take's direct kernels with FX: the monitor image and its glow first, then the planes.
+        var lastGlow: MTLTexture?
+        func bakedFrame(
+            _ commands: MTLCommandBuffer, _ frame: Int, _ effects: LookEffects, luma: MTLTexture,
+            chroma: MTLTexture, glowEvery: Int = 1
+        ) -> Bool {
+            let effectParams = params(effects, frame)
+            var glow: MTLTexture? = lastGlow
+            if frame % glowEvery == 0 {
+                guard encodeMonitor(into: commands, input: raw, output: monitor, cfa: cfa, gains: gains) else { return false }
+                glow = kit.glow(for: monitor, params: effectParams, commands: commands, reduction: 4)
+                lastGlow = glow
+            }
+            guard let glow else { return false }
+            return encodeDirect(
+                into: commands, input: raw, luma: luma, chroma: chroma, cfa: cfa, gains: gains, look: look,
+                lut: lut, effects: (glow, effectParams))
+        }
+
+        func stages(_ debayer: String) {
+            measure("Maximum, \(debayer): debayer to the full image") { commands, _ in
+                encode(into: commands, input: raw, output: full, cfa: cfa, gains: gains)
+            }
+            measure("Maximum, \(debayer): debayer and planes, log") { commands, _ in
+                encode(into: commands, input: raw, output: full, cfa: cfa, gains: gains)
+                    && encodeYCbCr(into: commands, image: full, luma: luma, chroma: chroma)
+            }
+            measure("Maximum, \(debayer): debayer and planes with the look") { commands, _ in
+                encode(into: commands, input: raw, output: full, cfa: cfa, gains: gains)
+                    && encodeYCbCr(into: commands, image: full, luma: luma, chroma: chroma, look: look, lut: lut)
+            }
+            measure("Maximum, \(debayer): debayer, glow and planes with the look and FX") { commands, frame in
+                guard encode(into: commands, input: raw, output: full, cfa: cfa, gains: gains),
+                    let glow = kit.glow(for: full, params: params(all, frame), commands: commands)
+                else { return false }
+                return encodeYCbCr(
+                    into: commands, image: full, luma: luma, chroma: chroma, look: look, lut: lut,
+                    effects: (glow, params(all, frame)))
+            }
+            measure("Efficient, \(debayer): planes, log") { commands, _ in
+                encodeDirect(into: commands, input: raw, luma: luma, chroma: chroma, cfa: cfa, gains: gains)
+            }
+            measure("Efficient, \(debayer): a log take, planes and the monitor image every other frame") { commands, frame in
+                (frame % 2 != 0 || encodeMonitor(into: commands, input: raw, output: monitor, cfa: cfa, gains: gains))
+                    && encodeDirect(into: commands, input: raw, luma: luma, chroma: chroma, cfa: cfa, gains: gains)
+            }
+            measure("Efficient, \(debayer): planes with the look") { commands, _ in
+                encodeDirect(
+                    into: commands, input: raw, luma: luma, chroma: chroma, cfa: cfa, gains: gains, look: look, lut: lut)
+            }
+            measure("Efficient, \(debayer): the monitor image alone") { commands, _ in
+                encodeMonitor(into: commands, input: raw, output: monitor, cfa: cfa, gains: gains)
+            }
+            measure("Efficient, \(debayer): the monitor image and its glow") { commands, frame in
+                encodeMonitor(into: commands, input: raw, output: monitor, cfa: cfa, gains: gains)
+                    && kit.glow(for: monitor, params: params(all, frame), commands: commands, reduction: 4) != nil
+            }
+            measure("Efficient, \(debayer): a baked FX take, as recorded") { commands, frame in
+                bakedFrame(commands, frame, all, luma: luma, chroma: chroma)
+            }
+            measure("Efficient, \(debayer): a baked FX take, monitor image and glow every other frame") { commands, frame in
+                bakedFrame(commands, frame, all, luma: luma, chroma: chroma, glowEvery: 2)
+            }
+            measure("Efficient, \(debayer): a baked FX take, monitor image and glow every fourth frame") { commands, frame in
+                bakedFrame(commands, frame, all, luma: luma, chroma: chroma, glowEvery: 4)
+            }
+            measure("Efficient, \(debayer): a baked FX take without grain") { commands, frame in
+                bakedFrame(commands, frame, glows, luma: luma, chroma: chroma)
+            }
+            measure("Efficient, \(debayer): a baked FX take with grain alone") { commands, frame in
+                bakedFrame(commands, frame, grain, luma: luma, chroma: chroma)
+            }
+            measure("Efficient, \(debayer): a baked FX take at 16:9") { commands, frame in
+                bakedFrame(commands, frame, all, luma: wideLuma, chroma: wideChroma)
+            }
+        }
+
+        // The debayer comes from the settings, so each is set for its round and put back after.
+        // Nothing else reads it meanwhile: the camera is stopped.
+        for method in [DemosaicMethod.malvar, .bilinear] {
+            lock.lock()
+            settings.demosaic = method
+            lock.unlock()
+            stages(method.label)
+        }
+        lock.lock()
+        settings.demosaic = chosen.demosaic
+        lock.unlock()
+        return lines
+    }
+}

@@ -1195,6 +1195,23 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Times each stage of a frame on the GPU, with the camera stopped.
+    func runCostTest() {
+        guard !isRecording, isBusy == nil, let pipeline else { return }
+        isBusy = "Releasing camera"
+        isStreaming = false
+        camera.teardown { [self] in
+            pipeline.runCostTest(progress: { text in
+                DispatchQueue.main.async { self.isBusy = text }
+            }, completion: { [self] url in
+                isBusy = nil
+                lastResult = "GPU cost test saved: probes/\(url.lastPathComponent)"
+                startStreamAfterConfigure = true
+                reconfigure()
+            })
+        }
+    }
+
     func importLUT(from url: URL) {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }

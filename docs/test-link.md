@@ -142,7 +142,7 @@ Other commands:
 | `focusAt 0.5,0.5` | Focuses and meters at a point |
 | `applyPreset <name>`, `savePreset <name>`, `defaultPreset <name or none>` | Manage presets |
 | `resetSettings` | Returns every setting to the app's own, keeping presets and the link |
-| `controlTest`, `encoderTest`, `probe` | Run the Diagnostics tests |
+| `controlTest`, `encoderTest`, `probe`, `costTest` | Run the Diagnostics tests |
 | `measureLenses` | Saves this phone's lens profiles, as **Measure Lenses** does, and their Gyroflow profiles, `gyroflow-*.json`; `listFiles` and `sendFile` reach them |
 | `sendPreview` | Sends a small JPEG of the scene |
 | `saveStill`, `sendStill` | Saves a full still, and sends the newest one |

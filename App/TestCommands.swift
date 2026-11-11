@@ -227,12 +227,13 @@ extension AppModel {
             guard !isRecording else { return refused("A take is running") }
             resetSettings()
             return done()
-        case "encoderTest", "probe", "measureLenses":
+        case "encoderTest", "probe", "measureLenses", "costTest":
             guard !isRecording else { return refused("A take is running") }
             if let cameraBlocked { return refused(cameraBlocked) }
             switch command.action {
             case "probe": runProbe()
             case "measureLenses": measureLenses()
+            case "costTest": runCostTest()
             default: runEncoderTest()
             }
             return done()
