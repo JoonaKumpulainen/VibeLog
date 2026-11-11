@@ -43,10 +43,10 @@ committed or built:
   matches what that rule made. A chosen codec and size that measured under 30 fps warns at record.
 - **Tests:** 7 new, 170 in all, none run yet, since nothing here compiles Swift.
 
-## This session: 2026-11-11, written but not built
+## This session: 2026-11-11, built as `1a1d56c`
 
 The 2026-11-10 work below was committed as `edec570` and its CI run passed on 2026-11-11. On top of
-it, uncommitted:
+it, in `1a1d56c`:
 
 - **Reset all:** a red circled arrow beside each look page's RESET clears ADJUST, COLOR, WHEELS and
   FX after asking, and leaves the look. Export's grade editor has **Reset All**, which asks too.
@@ -56,8 +56,11 @@ it, uncommitted:
   RAW brackets of one and three with `isLensStabilizationEnabled` off and on, and reports what each
   photo says of the stabilizer and the gaps between photos. It answers whether the optical
   stabilizer can be switched for RAW, and whether a bracket could feed 30 fps.
-- **Planned next, agreed in outline:** a fullscreen preview and the camera's draggable, scalable
-  scope in export, then a Gyroflow lens profile export from the Lenses page.
+- **Export preview:** the arrows at its top right fill the screen with the preview and put the
+  settings away. Its scope is now the camera's `ScopeOverlay`, which takes its layer, kind, corner
+  and scale as inputs: it drags to any corner of the preview and resizes, with its own corner and
+  scale, opening top left at the camera's size.
+- **Planned next, agreed in outline:** a Gyroflow lens profile export from the Lenses page.
 
 **iPhone 16 logs from `edec570`, read 2026-11-11:** the ladder found its setup, fast capture off,
 and short full-size takes wrote about 29.6 fps. A 71-second ProRes 422 HQ take at full size then
@@ -67,8 +70,10 @@ straight from the phone when it's plugged in here, under `/run/user/<uid>/gvfs/a
 HEVC 4:2:2 then held 80 seconds at 29.94 fps with nothing lost. Still wanted from it: a
 five-minute HEVC 4:2:2 take at full size, started cold and unplugged.
 
-**On the phone, once built:** check the arrow and dots in all four holds and the export tabs'
-width, then **Run probe** and send the newest `probes/probe_*.txt`.
+**On the phone:** check the arrow and dots in all four holds and the export tabs' width; in
+export, the fullscreen preview upright and sideways, with the crop outline, and the scope's drag,
+snap and resize, also on the camera, whose scope code changed; then **Run probe** and send the
+newest `probes/probe_*.txt`.
 
 ## Earlier session: 2026-11-08, on `947b90e`
 
