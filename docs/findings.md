@@ -457,7 +457,11 @@ an item from **Not verified** once it is.
   load is a guess. A take that reads the same GPU time with half the work would support it.
 
 
-- **Gyroflow lens profiles:** whether Gyroflow loads them, whether Apple's table describes the RAW
+- **Gyroflow lens profiles:** Gyroflow on the phone loaded the 1x open gate profile with take
+  `215524` on 2026-11-11 and stabilized with it, by the owner's word and a screen recording. Its
+  `.gcsv` is sound: 1,064 samples at an even 9.98 ms, 1.00 g. The take can't judge the profile,
+  though: its pans ran 1 to 2 rad/s, about 100 degrees a second, and it was heavily blurred.
+  Still open: whether Apple's table describes the RAW
   frame, and whether it runs undistorted to distorted, as Apple's sample code reads it and the
   fit assumes. The optical centre is used for the profile, 9 px from Apple's distortion centre.
 
