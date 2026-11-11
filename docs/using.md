@@ -40,8 +40,11 @@ shown on the picture as it reaches the middle, with that look's styles in a seco
 Tapping ACES 2.0 again picks what it bakes: SDR, HDR PQ or HDR HLG. **ADJUST**, **COLOR**,
 **WHEELS** and **FX** grade the look, colour by colour and in shadow, midtone and highlight wheels,
 and add halation, bloom, diffusion, vignette and grain, which baked takes record with **FX in baked
-takes**. **BAKE** in the header records the look into takes. **Cancel** puts back what was there,
-and **Done** or a tap outside keeps it.
+takes**. A dot over a page's name marks one that holds a change. Beside each page's **RESET**, the
+red circled arrow puts all four pages back at once, after asking, and leaves the look. **BAKE** in
+the header records the look into takes. **Cancel** puts back what was there, and **Done** or a tap
+outside keeps it. Export's grade editor marks its pages the same way and has **Reset All** at the
+bottom.
 
 ## Monitor tools and scopes
 
@@ -60,7 +63,9 @@ details. The takes and player turn with the phone.
 
 **Export** in the player opens on the camera's look with no grade, plays the take through it, with a
 scope over the preview if you pick one, and has its own grade editor with the same tabs, written to
-HEVC or ProRes in SDR or HDR.
+HEVC or ProRes in SDR or HDR. The scope works as the camera's does: tap it for the next kind, drag
+it to any corner of the preview, and drag from just outside its inner corner to resize it. The
+arrows at the preview's top right fill the screen with the preview and bring the settings back.
 
 **Export** in the player writes a copy of a log take with a look baked in, after a preview that
 plays it with the look: the Rec.709 view, an ACES look or a LUT, in HEVC 4:2:0 or ProRes 422 LT, 422

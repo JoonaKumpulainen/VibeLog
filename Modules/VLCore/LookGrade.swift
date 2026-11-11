@@ -23,6 +23,16 @@ public struct LookGrade: Codable, Equatable, Sendable {
 
     public var isNeutral: Bool { self == LookGrade() }
 
+    /// Whether each page of the grade holds a change: ADJUST's five values, COLOR's bands and
+    /// the wheels.
+    public var adjustChanged: Bool {
+        let neutral = LookGrade()
+        return exposure != neutral.exposure || contrast != neutral.contrast || temperature != neutral.temperature
+            || tint != neutral.tint || saturation != neutral.saturation
+    }
+    public var colorChanged: Bool { !bands.allSatisfy(\.isNeutral) }
+    public var wheelsChanged: Bool { !wheels.allSatisfy(\.isNeutral) }
+
     /// The values that differ from neutral, as the sidecar and Details name them.
     public var label: String {
         var parts: [String] = []

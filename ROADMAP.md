@@ -55,8 +55,9 @@ Each setting has one home. Settings can link to the format panel, but never repe
 ### How it should look
 
 - **Color has fixed meanings.** Amber is set by the user. Orange fill is a warning. Red is recording
-  only. Cyan is peaking. The one exception is the audio bar, which uses the standard green, yellow
-  and red scale. A new meaning needs a new shape, because color can't be the only signal.
+  only. Cyan is peaking. The exceptions are the audio bar, which uses the standard green, yellow
+  and red scale, and an action that discards work and asks first, such as the look panel's reset
+  all, which is red as the system's own are. A new meaning needs a new shape, because color can't be the only signal.
 - **Use `Tokens` and `CameraGeometry`,** never new sizes or colors in a view. Text sizes follow the
   hold, not a per-view shrink.
 - **Labels are plain.** Use a whole word where it fits, and an industry term where one exists. Icons

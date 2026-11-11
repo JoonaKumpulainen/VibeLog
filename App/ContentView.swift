@@ -141,7 +141,9 @@ struct CameraScreen: View {
         .frame(width: size.width, height: size.height)
         .overlay(alignment: model.scopeCorner.alignment) {
             if model.isOn(.scope), model.monitorIsProcessed {
-                ScopeOverlay(hold: hold.hold, picture: size)
+                ScopeOverlay(
+                    layer: model.scopeLayer, kind: model.scopeKind, next: { model.scopeKind = model.scopeKind.next },
+                    corner: $model.scopeCorner, kept: $model.scopeScale, hold: hold.hold, picture: size)
                     .padding(8)
             }
         }
@@ -941,9 +943,16 @@ struct StatGauges: View {
 
 /// The scope in a corner of the screen, drawn on its own layer. It stays in that corner in every
 /// hold, turned to read, with even margins. A tap moves to the next kind, a drag moves it to
-/// another corner, and the handle at its inner corner resizes it.
+/// another corner, and the handle at its inner corner resizes it. The camera gives it its own
+/// scope and export the preview's, each with the corner and scale it keeps.
 struct ScopeOverlay: View {
-    @EnvironmentObject private var model: AppModel
+    let layer: CALayer
+    let kind: ScopeKind
+    /// Shows the next kind, on a tap.
+    let next: () -> Void
+    @Binding var corner: ScreenCorner
+    /// Written when the handle is let go, not while it moves.
+    @Binding var kept: Double
     let hold: Hold
     /// The picture's size, which the scope snaps to the corners of.
     let picture: CGSize
@@ -963,7 +972,7 @@ struct ScopeOverlay: View {
 
     /// A vectorscope is round, so it's square; the others are wide.
     private var standard: CGSize {
-        model.scopeKind == .vectorscope ? CGSize(width: 110, height: 110) : CGSize(width: 176, height: 104)
+        kind == .vectorscope ? CGSize(width: 110, height: 110) : CGSize(width: 176, height: 104)
     }
 
     /// The scope's size on the screen, sideways when the phone is.
@@ -978,15 +987,15 @@ struct ScopeOverlay: View {
         return max(min(Self.maximumScale, fits), Self.minimumScale)
     }
 
-    private var scale: Double { min(max(liveScale ?? model.scopeScale, Self.minimumScale), largest) }
+    private var scale: Double { min(max(liveScale ?? kept, Self.minimumScale), largest) }
 
     private var size: CGSize { CGSize(width: standard.width * scale, height: standard.height * scale) }
 
     var body: some View {
         let turned = onScreen(size)
         ZStack(alignment: .topLeading) {
-            LayerHost(layer: model.scopeLayer)
-            Text(model.scopeKind.label)
+            LayerHost(layer: layer)
+            Text(kind.label)
                 .font(Tokens.markFont)
                 .foregroundStyle(Tokens.label)
                 .padding(3)
@@ -997,16 +1006,16 @@ struct ScopeOverlay: View {
         // Laid out at its turned size, so a sideways scope keeps the same margins in its corner.
         .frame(width: turned.width, height: turned.height)
         .contentShape(Rectangle())
-        .overlay(alignment: model.scopeCorner.opposite.alignment) { resizeHandle }
+        .overlay(alignment: corner.opposite.alignment) { resizeHandle }
         .offset(drag)
         .gesture(move)
-        .haptic(.impact(weight: .light), trigger: model.scopeCorner)
-        .haptic(.selection, trigger: model.scopeKind)
+        .haptic(.impact(weight: .light), trigger: corner)
+        .haptic(.selection, trigger: kind)
         .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isButton)
-        .accessibilityLabel("Scope, \(model.scopeKind.label)")
+        .accessibilityLabel("Scope, \(kind.label)")
         .accessibilityHint("Shows the next scope")
-        .accessibilityAction { model.scopeKind = model.scopeKind.next }
+        .accessibilityAction { next() }
     }
 
     /// One gesture for both, so a drag never also counts as a tap: a touch that stays within a
@@ -1021,14 +1030,14 @@ struct ScopeOverlay: View {
             }
             .onEnded { value in
                 guard moving else {
-                    model.scopeKind = model.scopeKind.next
+                    next()
                     return
                 }
                 moving = false
                 let end = value.predictedEndLocation
-                let corner = ScreenCorner(right: end.x > picture.width / 2, bottom: end.y > picture.height / 2)
+                let nearest = ScreenCorner(right: end.x > picture.width / 2, bottom: end.y > picture.height / 2)
                 withAnimation(.spring(duration: 0.35, bounce: 0.2)) {
-                    model.scopeCorner = corner
+                    corner = nearest
                     drag = .zero
                 }
             }
@@ -1038,7 +1047,6 @@ struct ScopeOverlay: View {
     /// corner stays put. Dragging it away from the scope's corner grows the scope, and toward it
     /// shrinks it.
     private var resizeHandle: some View {
-        let corner = model.scopeCorner
         let (x, y) = corner.signs
         let resize = DragGesture(minimumDistance: 0, coordinateSpace: .named(ScopeOverlay.space))
             .onChanged { value in
@@ -1050,7 +1058,7 @@ struct ScopeOverlay: View {
                 liveScale = min(max(scaleAtStart * (1 + Double(grow)), Self.minimumScale), largest)
             }
             .onEnded { _ in
-                if let liveScale { model.scopeScale = liveScale }
+                if let liveScale { kept = liveScale }
                 liveScale = nil
             }
         // Nothing drawn: a round target 56 points across, centred just outside the scope's
@@ -1061,7 +1069,7 @@ struct ScopeOverlay: View {
             .contentShape(Circle())
             .offset(x: -CGFloat(x) * outward, y: -CGFloat(y) * outward)
             .highPriorityGesture(resize)
-            .haptic(.impact(weight: .light), trigger: model.scopeScale)
+            .haptic(.impact(weight: .light), trigger: kept)
             .accessibilityHidden(true)
     }
 }
@@ -1344,6 +1352,10 @@ struct LookPanel: View {
             }
         }
         .onChange(of: bake) { _, on in if !model.isRecording { model.bakeLook = on } }
+        // Reset all on a page clears the grade, and a style is a grade, so the style row follows.
+        .onChange(of: model.lookGrade.isNeutral) { _, neutral in
+            if neutral { styleChoice = model.currentStyle?.name ?? Self.noStyle }
+        }
         .confirmationDialog("Dynamic Range", isPresented: $choosingRange, titleVisibility: .visible) {
             ForEach(BakeTarget.allCases) { target in
                 Button(target == model.bakeTarget ? "\(target.label) ✓" : target.label) { model.bakeTarget = target }
@@ -1375,10 +1387,10 @@ struct LookPanel: View {
             pageTab("LOOKS", on: page == .looks) { page = .looks }
             if canAdjust {
                 Group {
-                    pageTab("ADJUST", on: page == .adjust) { page = .adjust }
-                    pageTab("COLOR", on: page == .color) { page = .color }
-                    pageTab("WHEELS", on: page == .wheels) { page = .wheels }
-                    pageTab("FX", on: page == .fx) { page = .fx }
+                    pageTab("ADJUST", on: page == .adjust, changed: model.lookGrade.adjustChanged) { page = .adjust }
+                    pageTab("COLOR", on: page == .color, changed: model.lookGrade.colorChanged) { page = .color }
+                    pageTab("WHEELS", on: page == .wheels, changed: model.lookGrade.wheelsChanged) { page = .wheels }
+                    pageTab("FX", on: page == .fx, changed: !model.lookEffects.isNeutral) { page = .fx }
                 }
                 .disabled(model.isRecording)
                 .opacity(model.isRecording ? 0.4 : 1)
@@ -1391,7 +1403,9 @@ struct LookPanel: View {
         .haptic(.selection, trigger: page)
     }
 
-    private func pageTab(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
+    /// `changed` puts a dot over the name's end, for a page holding a change. A dot and not a
+    /// colour, since amber on the name already says which page is open.
+    private func pageTab(_ title: String, on: Bool, changed: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             // Turned, a name runs across the row's depth, so it's kept to that.
             Text(title)
@@ -1399,12 +1413,22 @@ struct LookPanel: View {
                 .foregroundStyle(on ? Tokens.held : Tokens.label)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
+                // Above the name, so it turns with it and stays inside the row in every hold.
+                .overlay(alignment: .topTrailing) {
+                    if changed {
+                        Circle()
+                            .fill(Tokens.held)
+                            .frame(width: 4, height: 4)
+                            .offset(y: -5)
+                    }
+                }
                 .upright(hold, depth: 28)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(on ? .isSelected : [])
+        .accessibilityValue(changed ? "changed" : "")
     }
 
     /// LOG, MONITOR and the ACES looks, then imported LUTs.
@@ -1651,6 +1675,7 @@ struct GradeActions: View {
             }
             .accessibilityLabel("Save as a style")
             PanelButton(title: "RESET", enabled: canReset, hold: hold, action: reset)
+            ResetAllButton()
         }
         .frame(maxWidth: .infinity)
         .alert("Save Style", isPresented: $naming) {
@@ -1659,6 +1684,40 @@ struct GradeActions: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Keeps this look's grade, COLOR included, under the look in LOOKS. Long-press it there to delete it.")
+        }
+    }
+}
+
+/// Beside a page's own RESET: puts ADJUST, COLOR, WHEELS and FX all back at once, after asking,
+/// and leaves the look. A style is a grade, so it comes off too. Red, as the system marks an
+/// action that discards work, and a different shape from RESET so the two aren't mistaken.
+struct ResetAllButton: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var confirming = false
+
+    var body: some View {
+        let enabled = !model.isRecording && !(model.lookGrade.isNeutral && model.lookEffects.isNeutral)
+        Button {
+            confirming = true
+        } label: {
+            Image(systemName: "arrow.counterclockwise.circle")
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(Tokens.recordText)
+                .turnedToHold()
+                .frame(width: 44, height: PanelButton.size.height)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.4)
+        .accessibilityLabel("Reset all adjustments and effects")
+        .confirmationDialog("Reset every adjustment and effect?", isPresented: $confirming, titleVisibility: .visible) {
+            Button("Reset All", role: .destructive) {
+                model.lookGrade = LookGrade()
+                model.lookEffects = LookEffects()
+            }
+        } message: {
+            Text("Puts ADJUST, COLOR, WHEELS and FX back and leaves the look. Cancel in the panel still brings back what it opened with.")
         }
     }
 }
@@ -2218,6 +2277,7 @@ struct FXPanel: View {
                     commit()
                     model.lookEffects = LookEffects()
                 }
+                ResetAllButton()
             }
             .frame(maxWidth: .infinity)
         }

@@ -19,7 +19,7 @@ conversion in export, the faster PQ export, the Fine look LUT switch and the cro
 tested over the link. Earlier sessions' work is in [history/2026-11.md](history/2026-11.md), from
 **Session on 2026-11-07, on `88728c4`** onward.
 
-## This session: 2026-11-10, written but not built
+## Session on 2026-11-10, built as `edec570`
 
 A second tester's iPhone 16 (`iPhone17,3`, iOS 26.6.2) sent three logs from `d2958aa`. What they
 show is in [findings.md](findings.md) under **iPhone 16**: the RAW photo loop hangs after its first
@@ -42,6 +42,33 @@ committed or built:
   at 2880x2160. A phone already fitted by the old rule is fitted once more, if its choice still
   matches what that rule made. A chosen codec and size that measured under 30 fps warns at record.
 - **Tests:** 7 new, 170 in all, none run yet, since nothing here compiles Swift.
+
+## This session: 2026-11-11, written but not built
+
+The 2026-11-10 work below was committed as `edec570` and its CI run passed on 2026-11-11. On top of
+it, uncommitted:
+
+- **Reset all:** a red circled arrow beside each look page's RESET clears ADJUST, COLOR, WHEELS and
+  FX after asking, and leaves the look. Export's grade editor has **Reset All**, which asks too.
+- **Change dots:** a dot over the name of each look page that holds a change, and after the name in
+  export's grade editor.
+- **Lens stabilization probe:** **Run probe** now also takes, per rear lens, plain RAW photos and
+  RAW brackets of one and three with `isLensStabilizationEnabled` off and on, and reports what each
+  photo says of the stabilizer and the gaps between photos. It answers whether the optical
+  stabilizer can be switched for RAW, and whether a bracket could feed 30 fps.
+- **Planned next, agreed in outline:** a fullscreen preview and the camera's draggable, scalable
+  scope in export, then a Gyroflow lens profile export from the Lenses page.
+
+**iPhone 16 logs from `edec570`, read 2026-11-11:** the ladder found its setup, fast capture off,
+and short full-size takes wrote about 29.6 fps. A 71-second ProRes 422 HQ take at full size then
+wrote only 14.26 fps, all lost at the encoder, as the encoder check predicted: its ProRes is
+software. Details are in [findings.md](findings.md) under **iPhone 16**. Its files can be read
+straight from the phone when it's plugged in here, under `/run/user/<uid>/gvfs/afc:*/`. Full-size
+HEVC 4:2:2 then held 80 seconds at 29.94 fps with nothing lost. Still wanted from it: a
+five-minute HEVC 4:2:2 take at full size, started cold and unplugged.
+
+**On the phone, once built:** check the arrow and dots in all four holds and the export tabs'
+width, then **Run probe** and send the newest `probes/probe_*.txt`.
 
 ## Earlier session: 2026-11-08, on `947b90e`
 

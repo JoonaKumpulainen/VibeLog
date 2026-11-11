@@ -295,12 +295,45 @@ an item from **Not verified** once it is.
     20.7, 42.6; 422 LT 24.2, 42.6; 12-bit 4444 8.5 at full size. So ProRes is far below real time
     at full size on this phone. The check ran while the stalled stream was open.
 
+  - **Fast capture off streams, on `edec570`, 2026-11-11:** the ladder ran as designed. The
+    standard setup stalled twice with 2 frames since start, and so did Apple's preview connected.
+    With zero shutter lag, responsive capture and fast priority off, the stream ran and was kept
+    after 90 frames: `capture_support.json` holds step 2, and the next launch opened on it with no
+    stall. That setup also has no `-12686` at stream start. So the fast capture options are what
+    hang this phone, not the missing preview. Only the 1x was tried.
+  - **Full-size takes hold about 30 fps there:** all 1x, Apple Log, Maximum quality, nominal heat.
+    HEVC 4:2:2 at 4032x3024: `110931`, 152 frames at 29.04 fps, 0 lost, `missed 5`, gap 200 ms;
+    `111223`, 239 frames at 29.63 fps, 0 lost, `missed 3`. ProRes 422 HQ at 4032x3024: `111419`,
+    171 frames at 29.65 fps, 1 lost at the GPU, 156.3 MB/s, `missed 1`. GPU 14 to 19 ms. All are 5
+    to 8 seconds, so nothing here shows a long or hot take.
+  - **ProRes at full size doesn't hold there, read from the phone on 2026-11-11:** take `135411`,
+    0.5x, ProRes 422 HQ at 4032x3024, charging at 70%, right after an encoder test. Over 70.7
+    seconds it wrote 1010 frames at 14.26 fps and lost 1003: 997 at the encoder, `not ready`, from
+    the first 5 seconds on, and 6 at the GPU. Capture ran 28.30 fps with `missed 121` and 14
+    duplicates. Heat reached fair at 19 seconds and serious at 29. So the short `111419` only
+    looked fine because 6 seconds fit in the encoder's queue. This phone's ProRes encoders are
+    software (`prores.sw`, not hardware accelerated), which the 14 Pro's aren't.
+  - **The encoder check is right:** run again with the stream up, it read HEVC 4:2:0, 4:2:2 and
+    4:4:4 at 30.3, 30.0 and 29.5 fps at full size and 57.3, 54.5 and 53.6 at 2880x2160; ProRes
+    422, 422 HQ and 4444 at 21.5, 17.7 and 11.1 at full size and 38.9, 33.8 and 21.7 at
+    2880x2160. That is close to the first run and to the long take's 14 fps, so `bestDefault`'s
+    HEVC 4:2:2 at 2880x2160 suits this phone. Full-size HEVC sits right at 30, with nothing spare.
+  - **Full-size HEVC 4:2:2 held 80 seconds:** take `135906`, 0.5x, 4032x3024, Apple Log 2,
+    Maximum quality, charging at 70%. 2381 frames at 29.94 fps, 0 lost at the GPU or encoder,
+    `missed 5`, 37.7 MB/s, GPU 23.4 ms, no viewfinder yields. Heat was nominal at the start, 23
+    seconds after cooling from serious, then fair at 0:29 and serious at 1:08, when the Efficient
+    path took over with no change in GPU time. Nothing was lost in the 10 seconds at serious.
+  - **The 0.5x streams on the kept setup:** that take and two stream starts ran with no stall.
+  - **Export works:** `111223` exported with ACES 2.0 and a grade to HEVC 4:2:0 at full size, 239
+    frames in 8.8 s at about 31 fps, footprint 2.47 GB.
+
 ## Not verified
 
-- **iPhone 16:** why its photo requests hang. Suspects, none tested: the session has no preview
-  since `fa15863`, the fast capture options, or the reference DNG request at each start. Whether
-  any step of `CaptureSetup.ladder` streams there, and at what frame rate. Whether the encoder
-  trial's 20 frames understate full-size HEVC, since it includes the encoder's start and finish.
+- **iPhone 16:** why the fast capture options hang its photo requests. Whether Apple's preview
+  connected alone would have streamed: it ran about 4 seconds without a stall line before the app
+  was left, then stalled on return. HEVC past 80 seconds, and how long it holds at serious heat. How fast
+  it heats from a real cold start, unplugged: both long takes followed a long stream, an encoder
+  test or a hot take, and were charging, which the tester takes to be the cause.
 
 - **From Batches 1 to 10:** what SCOPE and FX each cost the GPU in a long hot take; that grading
   sliders don't cost capture while dragging;

@@ -60,6 +60,13 @@ public enum CaptureProbe {
                 for raw in [true, false] { probeCalibration(device: device, raw: raw).forEach(add) }
             }
 
+            progress("Probing lens stabilization")
+            add("")
+            add("=== lens stabilization: whether a RAW bracket can switch the optical stabilizer")
+            for device in devices where device.position == .back && !device.isVirtualDevice {
+                probeLensStabilization(device: device).forEach(add)
+            }
+
             progress("Scanning AVCapture runtime")
             add("")
             add("=== runtime members matching /\(rawPattern)/i on AVCapture* classes")
@@ -330,6 +337,127 @@ public enum CaptureProbe {
 
         func photoOutput(_ output: AVCapturePhotoOutput, didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?) {
             if let error { append("    capture ended with error \((error as NSError).code)") }
+            done.signal()
+        }
+    }
+
+    /// Whether the optical stabilizer can be switched for Bayer RAW. The only public switch is a
+    /// bracket's `isLensStabilizationEnabled`, so each lens takes plain RAW photos as the app's
+    /// stream does, then brackets of one and of three with it off and on, one request at a time.
+    /// Each line gives what the photos said of the stabilizer and how far apart they came, which
+    /// shows whether a bracket could feed a 30 fps stream.
+    private static func probeLensStabilization(device: AVCaptureDevice) -> [String] {
+        let session = AVCaptureSession()
+        let photo = AVCapturePhotoOutput()
+        guard let input = try? AVCaptureDeviceInput(device: device), session.canAddInput(input) else {
+            return ["\(device.localizedName): cannot open"]
+        }
+        session.beginConfiguration()
+        session.addInput(input)
+        if session.canAddOutput(photo) { session.addOutput(photo) }
+        session.sessionPreset = .photo
+        session.commitConfiguration()
+        session.startRunning()
+        defer {
+            session.stopRunning()
+            session.removeInput(input)
+        }
+
+        var lines = ["\(device.localizedName) switchSupported=\(photo.isLensStabilizationDuringBracketedCaptureSupported) "
+            + "maxBracket=\(photo.maxBracketedCapturePhotoCount)"]
+        guard let bayer = photo.availableRawPhotoPixelFormatTypes.first(where: AVCapturePhotoOutput.isBayerRAWPixelFormat)
+        else { return lines + ["    no Bayer RAW here"] }
+        // Exposure settles first, so the first case isn't slowed by it.
+        Thread.sleep(forTimeInterval: 1)
+
+        let cases: [(name: String, count: Int, stabilized: Bool?, requests: Int)] = [
+            ("plain RAW", 0, nil, 8),
+            ("bracket of 1, stabilizer off", 1, false, 8),
+            ("bracket of 1, stabilizer on", 1, true, 8),
+            ("bracket of 3, stabilizer off", 3, false, 3),
+            ("bracket of 3, stabilizer on", 3, true, 3),
+        ]
+        for test in cases {
+            let catcher = StabilizationCatcher()
+            var failure: String?
+            let started = Date()
+            for _ in 0..<test.requests {
+                let raised = VLTryCatch {
+                    let settings: AVCapturePhotoSettings
+                    if test.count == 0 {
+                        settings = AVCapturePhotoSettings(rawPixelFormatType: bayer)
+                    } else {
+                        let exposures = (0..<test.count).map { _ in
+                            AVCaptureAutoExposureBracketedStillImageSettings.autoExposureSettings(exposureTargetBias: 0)
+                        }
+                        let bracket = AVCapturePhotoBracketSettings(
+                            rawPixelFormatType: bayer, processedFormat: nil, bracketedSettings: exposures)
+                        if let stabilized = test.stabilized { bracket.isLensStabilizationEnabled = stabilized }
+                        settings = bracket
+                    }
+                    photo.capturePhoto(with: settings, delegate: catcher)
+                }
+                if let raised {
+                    failure = "raised: \(raised.reason ?? "")"
+                    break
+                }
+                if catcher.done.wait(timeout: .now() + 5) == .timedOut {
+                    failure = "timed out"
+                    break
+                }
+            }
+            let seconds = Date().timeIntervalSince(started)
+            lines.append("    \(test.name): \(catcher.summary) in \(String(format: "%.2f", seconds)) s"
+                + (failure.map { ", \($0)" } ?? ""))
+        }
+        return lines
+    }
+
+    /// Collects each photo's time, size and what it says the stabilizer did.
+    private final class StabilizationCatcher: NSObject, AVCapturePhotoCaptureDelegate {
+        let done = DispatchSemaphore(value: 0)
+        private let lock = NSLock()
+        private var times: [Double] = []
+        private var statuses: [String: Int] = [:]
+        private var sizes: Set<String> = []
+        private var errors: [Int] = []
+
+        var summary: String {
+            lock.lock()
+            defer { lock.unlock() }
+            let sorted = times.sorted()
+            let gaps = zip(sorted.dropFirst(), sorted).map { String(format: "%.0f", ($0 - $1) * 1000) }
+            return "\(times.count) photos \(sizes.sorted().joined(separator: " ")), "
+                + "stabilizer \(statuses.sorted { $0.key < $1.key }.map { "\($0.key) x\($0.value)" }.joined(separator: " ")), "
+                + "gaps ms [\(gaps.joined(separator: " "))]"
+                + (errors.isEmpty ? "" : ", errors \(errors)")
+        }
+
+        func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+            let status: String
+            switch photo.lensStabilizationStatus {
+            case .unsupported: status = "unsupported"
+            case .off: status = "off"
+            case .active: status = "active"
+            case .outOfRange: status = "outOfRange"
+            case .unavailable: status = "unavailable"
+            @unknown default: status = "unknown"
+            }
+            lock.lock()
+            defer { lock.unlock() }
+            if let error { errors.append((error as NSError).code) }
+            statuses[status, default: 0] += 1
+            guard error == nil else { return }
+            times.append(photo.timestamp.seconds)
+            if let buffer = photo.pixelBuffer {
+                sizes.insert("\(CVPixelBufferGetWidth(buffer))x\(CVPixelBufferGetHeight(buffer))")
+            }
+        }
+
+        func photoOutput(_ output: AVCapturePhotoOutput, didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?) {
+            lock.lock()
+            if let error { errors.append((error as NSError).code) }
+            lock.unlock()
             done.signal()
         }
     }

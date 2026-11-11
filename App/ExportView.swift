@@ -37,6 +37,12 @@ struct ExportView: View {
         layer.magnificationFilter = .linear
         return layer
     }()
+    /// Where the scope sits over the preview and how large, export's own, apart from the camera's.
+    /// It opens at the top, clear of the player's controls, at the camera's size.
+    @State private var scopeCorner = ScreenCorner.topLeft
+    @State private var scopeScale = 1.0
+    /// The preview alone, filling the screen, with the settings put away.
+    @State private var fullscreen = false
     /// The preview's one exporter and composition, made once and given each new look in place.
     @State private var previewExporter: LookExporter?
     @State private var previewComposition: AVVideoComposition?
@@ -85,18 +91,20 @@ struct ExportView: View {
                 let layout = sideways ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
                 layout {
                     if !sideways || previewLeads { preview(sideways) }
-                    Form {
-                        if editingGrade {
-                            ExportGradeEditor(
-                                lutName: $lutName, lutMadeForRec709: $lutMadeForRec709, grade: $grade, effects: $effects,
-                                scopeKind: $scopeKind)
-                        } else {
-                            settingsSections
+                    if !fullscreen {
+                        Form {
+                            if editingGrade {
+                                ExportGradeEditor(
+                                    lutName: $lutName, lutMadeForRec709: $lutMadeForRec709, grade: $grade, effects: $effects,
+                                    scopeKind: $scopeKind)
+                            } else {
+                                settingsSections
+                            }
                         }
+                        // Grouped in every orientation, on the same ground as the preview.
+                        .formStyle(.grouped)
+                        .scrollContentBackground(.hidden)
                     }
-                    // Grouped in every orientation, on the same ground as the preview.
-                    .formStyle(.grouped)
-                    .scrollContentBackground(.hidden)
                     if sideways, !previewLeads { preview(sideways) }
                 }
                 .background(Self.ground)
@@ -105,6 +113,7 @@ struct ExportView: View {
             }
             .navigationTitle(editingGrade ? "Grade" : "Export with look")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar(fullscreen ? .hidden : .visible, for: .navigationBar)
             .toolbar {
                 if editingGrade {
                     ToolbarItem(placement: .topBarLeading) {
@@ -140,6 +149,7 @@ struct ExportView: View {
             lutMadeForRec709 = model.processing.lutExpectsRec709
             target = model.bakeTarget
             scopeKind = model.isOn(.scope) ? model.scopeKind : nil
+            scopeScale = model.scopeScale
             configureScope()
             player.replaceCurrentItem(with: AVPlayerItem(url: take.url))
             refreshPreview()
@@ -173,6 +183,7 @@ struct ExportView: View {
         .haptic(.selection, trigger: crop)
         .haptic(.selection, trigger: target)
         .haptic(.selection, trigger: editingGrade)
+        .haptic(.impact(weight: .light), trigger: fullscreen)
         .haptic(.success, trigger: job.message) { _, message in message?.hasPrefix("Saved") == true }
     }
 
@@ -203,7 +214,7 @@ struct ExportView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .aspectRatio(4 / 3, contentMode: .fit)
+            .modifier(PreviewBox(fills: fullscreen))
             // Where the crop cuts, over the picture as it plays, since the preview shows it whole.
             .overlay {
                 if let aspect = crop.aspect, previewReady {
@@ -212,36 +223,47 @@ struct ExportView: View {
                         .allowsHitTesting(false)
                 }
             }
-            // At the top, clear of the player's controls. A tap shows the next kind.
-            .overlay(alignment: .topLeading) {
-                if let kind = scopeKind, previewReady {
-                    ZStack(alignment: .topLeading) {
-                        LayerHost(layer: scopeLayer)
-                        Text(kind.label)
-                            .font(Tokens.markFont)
-                            .foregroundStyle(Tokens.label)
-                            .padding(3)
+            // The camera's scope, in any corner of the preview: a tap shows the next kind, a drag
+            // moves it and the hidden handle at its inner corner resizes it.
+            .overlay {
+                GeometryReader { box in
+                    if let kind = scopeKind, previewReady {
+                        ScopeOverlay(
+                            layer: scopeLayer, kind: kind, next: { scopeKind = kind.next },
+                            corner: $scopeCorner, kept: $scopeScale, hold: .portrait, picture: box.size)
+                            .padding(8)
+                            .frame(width: box.size.width, height: box.size.height, alignment: scopeCorner.alignment)
                     }
-                    .frame(
-                        width: kind == .vectorscope ? 110 : 176,
-                        height: kind == .vectorscope ? 110 : 104)
-                    .clipShape(RoundedRectangle(cornerRadius: Tokens.panelRadius))
-                    .contentShape(Rectangle())
-                    .onTapGesture { scopeKind = kind.next }
-                    .padding(8)
-                    .accessibilityAddTraits(.isButton)
-                    .accessibilityLabel("Scope, \(kind.label)")
                 }
             }
+            .coordinateSpace(name: ScopeOverlay.space)
+            // Above the scope, so it can always be reached, and clear of the player's controls.
+            .overlay(alignment: .topTrailing) {
+                Button {
+                    fullscreen.toggle()
+                } label: {
+                    Image(systemName: fullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Tokens.value)
+                        .frame(width: 32, height: 32)
+                        .background(.black.opacity(0.5), in: Circle())
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(fullscreen ? "Show the settings" : "Fill the screen with the preview")
+            }
+            if !fullscreen {
             Text("\(curve.label) in \(gamut.label). Plays with the look, as the export will write it"
                 + (grade.isNeutral ? "." : ", graded."))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
                 .padding(.horizontal, 12)
+            }
         }
-        .padding(.bottom, 6)
-        .frame(maxWidth: sideways ? .infinity : nil, maxHeight: sideways ? .infinity : nil)
+        .padding(.bottom, fullscreen ? 0 : 6)
+        .frame(maxWidth: sideways || fullscreen ? .infinity : nil, maxHeight: sideways || fullscreen ? .infinity : nil)
         .background(Self.ground)
     }
 
@@ -792,6 +814,7 @@ struct ExportGradeEditor: View {
     @State private var haptics = DetentHaptics()
     @State private var naming = false
     @State private var styleName = ""
+    @State private var confirmingReset = false
 
     /// Short enough for six segments across a phone held upright.
     static func scopeName(_ kind: ScopeKind) -> String {
@@ -809,7 +832,8 @@ struct ExportGradeEditor: View {
     var body: some View {
         Section {
             Picker("Page", selection: $tab.animation()) {
-                ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                // A dot after the name of each page holding a change.
+                ForEach(Tab.allCases, id: \.self) { Text(changed($0) ? "\($0.rawValue) •" : $0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
             .listRowBackground(Color.clear)
@@ -840,13 +864,31 @@ struct ExportGradeEditor: View {
                 naming = true
             }
             .disabled(grade.isNeutral)
+            Button("Reset All", role: .destructive) { confirmingReset = true }
+                .disabled(grade.isNeutral && effects.isNeutral)
+                .confirmationDialog("Reset every adjustment and effect?", isPresented: $confirmingReset, titleVisibility: .visible) {
+                    Button("Reset All", role: .destructive) {
+                        grade = LookGrade()
+                        effects = LookEffects()
+                    }
+                }
         } footer: {
-            Text("Keeps this grade, COLOR included, under \(lutName.isEmpty ? "Monitor" : lutName) in the LOOK panel's styles.")
+            Text("Save keeps this grade, COLOR included, under \(lutName.isEmpty ? "Monitor" : lutName) in the LOOK panel's styles. Reset All puts Adjust, Color, Wheels and FX back and leaves the look.")
         }
         .alert("Save Style", isPresented: $naming) {
             TextField("Name", text: $styleName)
             Button("Save") { model.saveStyle(named: styleName, look: lutName, grade: grade) }
             Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    private func changed(_ tab: Tab) -> Bool {
+        switch tab {
+        case .looks: return false
+        case .adjust: return grade.adjustChanged
+        case .color: return grade.colorChanged
+        case .wheels: return grade.wheelsChanged
+        case .fx: return !effects.isNeutral
         }
     }
 
@@ -1022,6 +1064,19 @@ struct ExportGradeEditor: View {
                     from: Int((old / step).rounded()), to: Int((value.wrappedValue / step).rounded()),
                     neutral: range.contains(0) ? 0 : Int((1 / step).rounded()))
             })
+    }
+}
+
+/// The preview's box: the 4:3 frame beside the settings, or all the room there is.
+private struct PreviewBox: ViewModifier {
+    let fills: Bool
+
+    func body(content: Content) -> some View {
+        if fills {
+            content.frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            content.aspectRatio(4 / 3, contentMode: .fit)
+        }
     }
 }
 
