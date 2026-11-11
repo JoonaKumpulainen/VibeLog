@@ -8,7 +8,8 @@ short.
 
 As of mid Phase 7. The latest build is `35d43dc`, CI run 108, version 0.1.108, which passed
 with 181 tests and one skip: a baked-FX take makes its monitor image and glow every other
-frame, untried on a phone. `907287d`, run 107, added the GPU cost test, which ran on the 14 Pro.
+frame, and the 14 Pro held 10 minutes on it with 2 frames lost and no cooling wait, take
+`212113`. `907287d`, run 107, added the GPU cost test, which ran on the 14 Pro.
 Before it,
 `b740eab`, run 106: baked-FX takes run on the Efficient path throughout, and the
 probe's crash on the 14 Pro is fixed. The 14 Pro proved the probe, and a baked-FX take with no
@@ -54,8 +55,8 @@ Files can be read straight from a phone plugged in here, under `/run/user/<uid>/
    whether it stabilizes, and whether the edge comes out straight. A bowed edge means Apple's
    table runs the other way.
 6. **`scope_cost.json` needs about 112 GB free** for its ProRes take, and the phone has 109.
-7. **The baked-FX long take on `b740eab`, with its 30 minutes of cooling.** Without cooling it
-   held 5:07, then lost about 2.7 frames a second at serious heat. To run a suite, start the server with `python3
+7. **A baked-FX take on a phone that starts hot,** such as a second 10-minute take straight
+   after the first, on `35d43dc`. A take from nominal heat held, with only 2:15 at serious. To run a suite, start the server with `python3
    tools/test_server.py serve`, turn on **Connect**, then `suite tools/suites/fx_baked.json`.
    Over the link, `set` takes name and value as two arguments.
 8. **Still waiting on the owner:** the stabilization take, slow pans and quick shakes at 1/250 s;
@@ -71,7 +72,8 @@ at 2880x2160.
 - **A cheaper baked-FX frame,** so a hot phone needs no cooling: it must fall from about 29 ms
   to about 23. The GPU cost test ran on the 14 Pro: a frame costs 12.0 ms alone, 3.3 of it the
   monitor image and glow, so those every other frame save 13%, and every fourth 20%. Every
-  other frame is in `35d43dc`, waiting on a long take; the owner chose it over every fourth. Candidates: the monitor image and glow every other frame, cheaper per-pixel FX, a
+  other frame is in `35d43dc`, and take `212113` held 10 minutes on it. What it does past 3
+  minutes at serious heat is still open; the owner chose it over every fourth. Candidates: the monitor image and glow every other frame, cheaper per-pixel FX, a
   slower viewfinder when hot.
 - **FX in baked takes: the long take on the Efficient path.** The Maximum path lost about 7
   frames a second from about 2 minutes until serious heat brought the Efficient path, which then

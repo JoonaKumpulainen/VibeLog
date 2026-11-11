@@ -425,13 +425,27 @@ an item from **Not verified** once it is.
     20% less.
   - **Other cuts:** 16:9 takes 9.8 ms, 18% less. Bilinear takes 10.6, 12% less.
 
+- **A baked-FX take held 10 minutes with no cooling wait, 14 Pro on `35d43dc`, 2026-11-11:** take
+  `212113` from `fx_baked.json` with `cool` at 0, from 60%, about 20 minutes after the cost test
+  at fair heat. Efficient throughout, with the monitor image and glow every other frame. It ran
+  10:00 and wrote 17,993 frames at 29.99 fps, with 2 lost at the GPU, in the first minute and at
+  about 5:30, and none at the encoder; `missed 7`, 366 viewfinder yields.
+  - **GPU time held 29 to 30 ms throughout,** queue about 1 ms, `draw` 5 to 15 ms.
+  - **It heated far slower than `200230`:** fair at 3:55 and serious at 7:45, against 0:40 and
+    2:00. So it spent 2:15 at serious, and `200230` stepped down after 3:07 there. This take
+    doesn't show the glow change surviving that step, only that this start no longer reaches it
+    in 10 minutes. The phone had rested longer before it, which may be all of the difference.
+  - **GPU time didn't fall with the work:** 29 ms, as before the change that the cost test puts
+    at 13% less work. That fits the GPU's speed following its load.
+
 ## Not verified
+
+- **Baked FX on a phone that starts hot:** whether the take holds once it has been at serious
+  heat for more than about 3 minutes, as a second take straight after the first would show.
 
 - **Why a take's frame reads two to three times its own cost:** the GPU's speed following the
   load is a guess. A take that reads the same GPU time with half the work would support it.
 
-- **Baked FX for a whole take:** whether the Efficient path holds 10 minutes after the suite's 30
-  minutes of cooling. Without cooling it held 5:07.
 
 - **Gyroflow lens profiles:** whether Gyroflow loads them, whether Apple's table describes the RAW
   frame, and whether it runs undistorted to distorted, as Apple's sample code reads it and the

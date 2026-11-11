@@ -175,8 +175,8 @@ or shorten recording.
   then shared the take's glow, which slowed the Maximum path from the start of a third take; the
   glow now comes from a pool and is handed over with the finished frame, proven on the phone. The
   Maximum path still fell behind from about 2 minutes, so baked-FX takes run on the Efficient
-  path throughout, with the glow made every other frame. Without cooling that held 5 minutes
-  before the glow change, which is untested.
+  path throughout, with the glow made every other frame, which held a 10-minute take from
+  nominal heat with no cooling wait. A phone that starts hot is untested.
 - Looks baked into recordings: built and proven, at no measurable GPU cost in a 60-second take, to
   HEVC or ProRes.
 - Timecode and Apple Watch control, if they prove useful.
