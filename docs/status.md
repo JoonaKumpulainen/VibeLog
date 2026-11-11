@@ -6,9 +6,10 @@ short.
 
 ## Latest build
 
-As of mid Phase 7. The latest build is `f8eb02a`, CI run 103, version 0.1.103, which passed with 180
-tests and one skip: Gyroflow lens
-profiles from the Lenses page, and overlapped bracket cases in the probe. Before it, `657767f`,
+As of mid Phase 7. The latest build is `6f4d393`, CI run 104, version 0.1.104, which passed
+with 180 tests and one skip: measuring lenses also writes their Gyroflow profiles, so the test
+link can fetch them. Before it, `f8eb02a`, run 103, added Gyroflow lens profiles from the Lenses
+page and overlapped bracket cases in the probe; `657767f`,
 run 102, versioned each build `0.1.<CI run>` for SideStore, and `1a1d56c`, run 101, added reset
 all, change dots, export's fullscreen preview and movable scope, and the lens stabilization
 probe. None of that has been tried on a phone except the first probe, on the iPhone 16. `edec570`
@@ -20,7 +21,7 @@ session is in [history/2026-11.md](history/2026-11.md); the last is **Session on
 
 Files can be read straight from a phone plugged in here, under `/run/user/<uid>/gvfs/afc:*/`.
 
-**Either phone, on `f8eb02a`:**
+**Either phone, on `6f4d393`:**
 
 1. **SideStore:** whether the build after the one installed shows as an update by itself.
 2. **Look panel:** the red arrow and the dots in all four holds, and the confirmation sideways.
@@ -34,7 +35,8 @@ Files can be read straight from a phone plugged in here, under `/run/user/<uid>/
 
 **The 14 Pro:**
 
-5. **Gyroflow:** in Lenses, **Measure Lenses** if none are saved, then **Share for Gyroflow**. Load
+5. **Gyroflow:** in Lenses, **Measure Lenses** if none are saved, then **Share for Gyroflow**; or
+   over the link, `send measureLenses`, then `listFiles` and `sendFile` for `gyroflow-*.json`. Load
    the 1x open gate profile in Gyroflow with a 1x take that has slow pans and a straight edge near
    a corner, shot at 1/250 s with lens distortion correction off. Say whether Gyroflow loads it,
    whether it stabilizes, and whether the edge comes out straight. A bowed edge means Apple's
