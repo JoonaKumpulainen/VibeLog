@@ -67,8 +67,8 @@ at 2880x2160.
 - **A stabilizer switch for takes** fails its condition on the 14 Pro: brackets reach 20.8 fps
   at best. Not yet struck off by the owner.
 - **A cheaper baked-FX frame,** so a hot phone needs no cooling: it must fall from about 29 ms
-  to about 23. **Run GPU cost test**, or `send costTest`, times each stage first, in `907287d`:
-  run it cool, then send `probes/gpu_cost_*.txt`. Candidates: the monitor image and glow every other frame, cheaper per-pixel FX, a
+  to about 23. The GPU cost test ran on the 14 Pro: a frame costs 12.0 ms alone, 3.3 of it the
+  monitor image and glow, so those every other frame save 13%, and every fourth 20%. Candidates: the monitor image and glow every other frame, cheaper per-pixel FX, a
   slower viewfinder when hot.
 - **FX in baked takes: the long take on the Efficient path.** The Maximum path lost about 7
   frames a second from about 2 minutes until serious heat brought the Efficient path, which then

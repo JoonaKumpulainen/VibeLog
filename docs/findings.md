@@ -409,7 +409,26 @@ an item from **Not verified** once it is.
     doesn't show what a cooled take does. Long take 1, without FX, held 7 minutes at serious on
     this path at 30 to 32 ms.
 
+- **What each stage costs the GPU, 14 Pro on `907287d`, 2026-11-11:** from
+  `gpu_cost_20261111_205853.txt`, at fair heat, a made-up frame run 45 times back to back with
+  the camera stopped, median ms, Malvar-He-Cutler unless said. Stage to stage the figures wander
+  by a millisecond or two: the first stage read 17.7 ms and the same work plus the look 14.9.
+  - **A frame costs far less than a take reports.** An Efficient baked-FX frame takes 12.0 ms and
+    a log one 8.2, where takes read 28 to 30 and about 25. The Maximum path's baked-FX frame
+    takes 18.7. So a take's GPU time isn't the work's own length. The likely cause, unproven, is
+    that iOS runs the GPU slower when the load leaves room, and caps it when hot.
+  - **Where an Efficient baked-FX frame's 12.0 ms goes:** the planes in log 6.9, the look 0.6,
+    the per-pixel FX about 1.3, the monitor image 1.1 and its glow 2.2. Grain is about 0.7 of
+    the FX.
+  - **Making the monitor image and glow less often:** every fourth frame, the frames between
+    take 8.8 ms, so every other frame averages about 10.4, 13% less, and every fourth about 9.6,
+    20% less.
+  - **Other cuts:** 16:9 takes 9.8 ms, 18% less. Bilinear takes 10.6, 12% less.
+
 ## Not verified
+
+- **Why a take's frame reads two to three times its own cost:** the GPU's speed following the
+  load is a guess. A take that reads the same GPU time with half the work would support it.
 
 - **Baked FX for a whole take:** whether the Efficient path holds 10 minutes after the suite's 30
   minutes of cooling. Without cooling it held 5:07.
