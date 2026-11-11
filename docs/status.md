@@ -60,7 +60,14 @@ it, in `1a1d56c`:
   settings away. Its scope is now the camera's `ScopeOverlay`, which takes its layer, kind, corner
   and scale as inputs: it drags to any corner of the preview and resizes, with its own corner and
   scale, opening top left at the camera's size.
-- **Planned next, agreed in outline:** a Gyroflow lens profile export from the Lenses page.
+
+Written after `657767f`:
+
+- **Gyroflow lens profiles:** `GyroflowProfile` in VLCore fits Apple's distortion table to
+  Gyroflow's `opencv_fisheye` model, within 0.01 px on tables like the 14 Pro's, and writes
+  `gyroflow-<lens>-<size>.json` beside the lens profiles, open gate and 16:9, for lenses with a
+  table. **Share for Gyroflow** on the Lenses page sends them. The ultra wide gets none. 6 tests.
+- **Probe:** overlapped bracket cases, described below.
 
 **iPhone 16 logs from `edec570`, read 2026-11-11:** the ladder found its setup, fast capture off,
 and short full-size takes wrote about 29.6 fps. A 71-second ProRes 422 HQ take at full size then
@@ -74,13 +81,19 @@ five-minute HEVC 4:2:2 take at full size, started cold and unplugged.
 should offer the build after it as an update without re-adding the source; that isn't confirmed.
 
 **Lens stabilization probe, iPhone 16:** the 1x's stabilizer can be switched off for RAW with a
-bracket, but brackets came too slowly one at a time; see [findings.md](findings.md). Next would be
-a probe case that overlaps brackets, to see if they reach a steady 30 fps.
+bracket, but brackets came too slowly one at a time; see [findings.md](findings.md). Written, not
+built: on a lens with the switch, **Run probe** now also overlaps requests, 2 and 4 in flight, for
+plain RAW and brackets of 1, 3 and the largest, and gives each case's rate from the photos' own
+times. A steady 30 fps with the stabilizer off there would make a stabilizer switch for takes
+worth building.
 
 **On the phone:** check the arrow and dots in all four holds and the export tabs' width; in
 export, the fullscreen preview upright and sideways, with the crop outline, and the scope's drag,
 snap and resize, also on the camera, whose scope code changed; then **Run probe** and send the
-newest `probes/probe_*.txt`.
+newest `probes/probe_*.txt`. **Gyroflow, on the 14 Pro:** open Lenses, **Measure Lenses** if none
+are saved, **Share for Gyroflow**, load the 1x open gate profile in Gyroflow with a 1x take that
+has slow pans and a straight edge near a corner, and say whether it stabilizes and whether the
+edge comes out straight. A bowed edge means Apple's table runs the other way.
 
 ## Earlier session: 2026-11-08, on `947b90e`
 

@@ -92,7 +92,8 @@ desqueeze. **File tag** under Image sets what the file tells an editor. Under Vi
 preview** shows Apple's own picture, **Look** opens the look panel, **Overlay scope channels** sets
 how RGB and YRGB draw, and **Haptics** turns every tick off, and **HDR viewfinder** shows ACES 2.0's
 HDR picture with the screen's extra brightness while its dynamic range is HDR. **Lenses** under
-Advanced measures this phone's lenses from Apple's calibration. **Bake** under Image records the
+Advanced measures this phone's lenses from Apple's calibration, and **Share for Gyroflow** there
+sends them as Gyroflow lens profiles, for the 1x and tele, open gate and 16:9. **Bake** under Image records the
 look into takes, with **Bake to ProRes**, **FX in baked takes** and **Bake as** SDR, HDR PQ or HDR
 HLG beneath it. **Lens shading correction** under Advanced brightens the corners by Apple's own lens
 shading. A switch's explanation shows while it's on, and search finds a setting by its explanation

@@ -76,12 +76,12 @@ the phone can sustain. When quality and convenience conflict, quality wins.
 | Path | Role |
 |---|---|
 | `App/` | SwiftUI UI, `AppModel`, `FrameRouter`, camera screen with the look panel and its ADJUST, COLOR and FX pages, format panel, library, export with its grade editor, Settings, Diagnostics, `DesignTokens`, `Haptics` |
-| `Modules/VLCore` | Frames, stats, DNG reader, RAW levels, logging, storage, device status, `VideoFrameSink`, `GyroLog`, `AppConfig`, `CaptureSupport`, `LookGrade`, `LookStyle`, `LookEffects` |
+| `Modules/VLCore` | Frames, stats, DNG reader, RAW levels, logging, storage, device status, `VideoFrameSink`, `GyroLog`, `AppConfig`, `CaptureSupport`, `GyroflowProfile`, `LookGrade`, `LookStyle`, `LookEffects` |
 | `Modules/VLCapture` | Session, photo RAW driver, video driver, manual controls, audio, `MotionLogger`, probe |
 | `Modules/VLProcessing` | Log curves, color math, `GamutPairing`, `.cube` parser, Metal pipeline with `LookParams`, `ACES2.swift`, `ACES13.swift`, `BuiltInLook` with the grade and HDR encodings, `LookExporter`, `LookPlayback`, `LookEffects`, `ScopeMeter`, still export, `Shaders.metal` |
 | `Modules/VLRecording` | RAW dump writer, `VideoEncoder`, encoder presets, encoder benchmark, `TakeLibrary` |
 | `Modules/ObjCGuard` | Catches Objective-C exceptions from AVFoundation, runtime scan |
-| `Tests/VLTests` | 170 tests, including real GPU tests on the simulator |
+| `Tests/VLTests` | 180 tests, including real GPU tests on the simulator |
 | `tools/inspect_clip.py` | Summarizes a RAW clip and exports a frame |
 | `tools/test_server.py` | The test link's server, which sends the phone commands and collects its files |
 | `tools/sidestore_source.py`, `tools/sidestore/icon.png` | Writes the SideStore source from the built IPA, in CI |

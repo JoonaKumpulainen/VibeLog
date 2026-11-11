@@ -343,6 +343,10 @@ an item from **Not verified** once it is.
 
 ## Not verified
 
+- **Gyroflow lens profiles:** whether Gyroflow loads them, whether Apple's table describes the RAW
+  frame, and whether it runs undistorted to distorted, as Apple's sample code reads it and the
+  fit assumes. The optical centre is used for the profile, 9 px from Apple's distortion centre.
+
 - **Lens stabilization:** whether brackets requested before the last one ends, or brackets of 8,
   give a steady 30 fps, which a take would need. What the 14 Pro's probe says. Whether switching it
   off removes the gap between the gyro and the picture's motion.

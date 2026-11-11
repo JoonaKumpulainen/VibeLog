@@ -2584,6 +2584,85 @@ final class LensProfileTests: XCTestCase {
     }
 }
 
+/// Gyroflow lens profiles: the fisheye fit follows Apple's table, and the file has what Gyroflow reads.
+final class GyroflowProfileTests: XCTestCase {
+    /// A 1x like the iPhone 14 Pro's, with a table rising to +2.09% at the farthest corner.
+    private func wide(table: [Double]) -> LensProfile {
+        LensProfile(
+            model: "Test,1", lens: "back-wide", width: 4032, height: 3024, fx: 2818.19, fy: 2818.19,
+            cx: 2007.6, cy: 1530.4, distortionCenterX: 2004.9, distortionCenterY: 1539.1,
+            distortionTable: table, fieldOfView: 71.29, source: "test", measured: "2026-11-11T10:00:00Z", captures: 5)
+    }
+
+    private let rising = (0..<42).map { 0.0209 * pow(Double($0) / 41, 2) }
+
+    func testTableReadsAsApplesSampleDoes() {
+        let table = [0, 0.01, 0.03]
+        XCTAssertEqual(GyroflowProfile.distorted(radius: 0, table: table, reach: 100), 0, accuracy: 1e-12)
+        XCTAssertEqual(GyroflowProfile.distorted(radius: 50, table: table, reach: 100), 50.5, accuracy: 1e-9)
+        XCTAssertEqual(GyroflowProfile.distorted(radius: 75, table: table, reach: 100), 76.5, accuracy: 1e-9)
+        XCTAssertEqual(GyroflowProfile.distorted(radius: 100, table: table, reach: 100), 103, accuracy: 1e-9)
+    }
+
+    func testFitFollowsTheTableWithinAHundredthOfAPixel() throws {
+        let profile = wide(table: rising)
+        let fit = try XCTUnwrap(GyroflowProfile.fit(profile))
+        XCTAssertEqual(fit.coefficients.count, 4)
+        XCTAssertLessThan(fit.rms, 0.01)
+        // A straight lens's first coefficient is a third; this one bends a little outward.
+        XCTAssertEqual(fit.coefficients[0], 0.359, accuracy: 0.005)
+        let reach = hypot(4032 - 2004.9, 1539.1)
+        for radius in stride(from: 100.0, through: reach, by: 300) {
+            XCTAssertEqual(
+                GyroflowProfile.modelled(radius: radius, focal: 2818.19, coefficients: fit.coefficients),
+                GyroflowProfile.distorted(radius: radius, table: rising, reach: reach), accuracy: 0.02)
+        }
+    }
+
+    /// A long lens has small angles, which the solve must still manage.
+    func testFitHoldsOnATele() throws {
+        var profile = wide(table: (0..<42).map { -0.0085 * pow(Double($0) / 41, 2) })
+        profile.lens = "back-tele"
+        profile.fx = 9234.62
+        profile.fy = 9234.62
+        XCTAssertLessThan(try XCTUnwrap(GyroflowProfile.fit(profile)).rms, 0.01)
+    }
+
+    func testNoTableGivesNoProfile() {
+        XCTAssertNil(GyroflowProfile.fit(wide(table: [])))
+        XCTAssertNil(GyroflowProfile.json(for: wide(table: []), widescreen: false))
+    }
+
+    func testFileHasWhatGyroflowReads() throws {
+        let profile = wide(table: rising)
+        let open = try XCTUnwrap(GyroflowProfile.json(for: profile, widescreen: false))
+        let document = try XCTUnwrap(JSONSerialization.jsonObject(with: open) as? [String: Any])
+        XCTAssertEqual(document["distortion_model"] as? String, "opencv_fisheye")
+        XCTAssertEqual(document["calib_dimension"] as? [String: Int], ["w": 4032, "h": 3024])
+        XCTAssertEqual(document["camera_model"] as? String, "Test,1")
+        XCTAssertEqual(document["date"] as? String, "2026-11-11")
+        let lens = try XCTUnwrap(document["fisheye_params"] as? [String: Any])
+        let matrix = try XCTUnwrap(lens["camera_matrix"] as? [[Double]])
+        XCTAssertEqual(matrix[0], [2818.19, 0, 2007.6])
+        XCTAssertEqual(matrix[1], [0, 2818.19, 1530.4])
+        XCTAssertEqual(matrix[2], [0, 0, 1])
+        XCTAssertEqual((lens["distortion_coeffs"] as? [Double])?.count, 4)
+        XCTAssertEqual(GyroflowProfile.fileName(profile, widescreen: false), "gyroflow-back-wide-4032x3024.json")
+    }
+
+    /// 16:9 cuts 378 rows from the top and bottom, so the centre sits 378 higher in the crop.
+    func testWidescreenMovesTheCentreWithTheCrop() throws {
+        let profile = wide(table: rising)
+        let data = try XCTUnwrap(GyroflowProfile.json(for: profile, widescreen: true))
+        let document = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(document["calib_dimension"] as? [String: Int], ["w": 4032, "h": 2268])
+        let lens = try XCTUnwrap(document["fisheye_params"] as? [String: Any])
+        let matrix = try XCTUnwrap(lens["camera_matrix"] as? [[Double]])
+        XCTAssertEqual(matrix[1][2], 1530.4 - 378, accuracy: 1e-9)
+        XCTAssertEqual(GyroflowProfile.fileName(profile, widescreen: true), "gyroflow-back-wide-4032x2268.json")
+    }
+}
+
 /// Apple's lens shading, as the iPhone 14 Pro's 1x reported it, and log written as another log.
 final class VignetteAndConversionTests: XCTestCase {
     func testVignetteReadsFromMetadataAndGainsTwoStops() throws {

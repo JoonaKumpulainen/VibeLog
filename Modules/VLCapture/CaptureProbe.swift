@@ -345,7 +345,9 @@ public enum CaptureProbe {
     /// bracket's `isLensStabilizationEnabled`, so each lens takes plain RAW photos as the app's
     /// stream does, then brackets of one and of three with it off and on, one request at a time.
     /// Each line gives what the photos said of the stabilizer and how far apart they came, which
-    /// shows whether a bracket could feed a 30 fps stream.
+    /// shows whether a bracket could feed a 30 fps stream. One at a time, brackets left 133 ms
+    /// between them on an iPhone 16, so a lens with the switch then tries brackets that overlap,
+    /// the next asked for before the last ends, and the largest bracket, with it off.
     private static func probeLensStabilization(device: AVCaptureDevice) -> [String] {
         let session = AVCaptureSession()
         let photo = AVCapturePhotoOutput()
@@ -370,18 +372,35 @@ public enum CaptureProbe {
         // Exposure settles first, so the first case isn't slowed by it.
         Thread.sleep(forTimeInterval: 1)
 
-        let cases: [(name: String, count: Int, stabilized: Bool?, requests: Int)] = [
-            ("plain RAW", 0, nil, 8),
-            ("bracket of 1, stabilizer off", 1, false, 8),
-            ("bracket of 1, stabilizer on", 1, true, 8),
-            ("bracket of 3, stabilizer off", 3, false, 3),
-            ("bracket of 3, stabilizer on", 3, true, 3),
+        var cases: [(name: String, count: Int, stabilized: Bool?, requests: Int, inFlight: Int)] = [
+            ("plain RAW", 0, nil, 8, 1),
+            ("bracket of 1, stabilizer off", 1, false, 8, 1),
+            ("bracket of 1, stabilizer on", 1, true, 8, 1),
+            ("bracket of 3, stabilizer off", 3, false, 3, 1),
+            ("bracket of 3, stabilizer on", 3, true, 3, 1),
         ]
+        if photo.isLensStabilizationDuringBracketedCaptureSupported {
+            let most = photo.maxBracketedCapturePhotoCount
+            cases += [
+                ("plain RAW, 2 in flight", 0, nil, 24, 2),
+                ("bracket of 1, off, 2 in flight", 1, false, 24, 2),
+                ("bracket of 1, off, 4 in flight", 1, false, 24, 4),
+                ("bracket of 3, off, 2 in flight", 3, false, 8, 2),
+                ("bracket of \(most), off, one at a time", most, false, 3, 1),
+                ("bracket of \(most), off, 2 in flight", most, false, 4, 2),
+                ("bracket of \(most), on, 2 in flight", most, true, 4, 2),
+            ]
+        }
         for test in cases {
-            let catcher = StabilizationCatcher()
+            let catcher = StabilizationCatcher(inFlight: test.inFlight)
             var failure: String?
             let started = Date()
             for _ in 0..<test.requests {
+                // A request waits for a free place, so no more than `inFlight` are out at once.
+                if catcher.places.wait(timeout: .now() + 5) == .timedOut {
+                    failure = "timed out"
+                    break
+                }
                 let raised = VLTryCatch {
                     let settings: AVCapturePhotoSettings
                     if test.count == 0 {
@@ -398,13 +417,14 @@ public enum CaptureProbe {
                     photo.capturePhoto(with: settings, delegate: catcher)
                 }
                 if let raised {
+                    catcher.places.signal()
                     failure = "raised: \(raised.reason ?? "")"
                     break
                 }
-                if catcher.done.wait(timeout: .now() + 5) == .timedOut {
-                    failure = "timed out"
-                    break
-                }
+            }
+            // Every place free again means every request has ended.
+            for _ in 0..<test.inFlight where catcher.places.wait(timeout: .now() + 5) == .timedOut {
+                failure = failure ?? "timed out at the end"
             }
             let seconds = Date().timeIntervalSince(started)
             lines.append("    \(test.name): \(catcher.summary) in \(String(format: "%.2f", seconds)) s"
@@ -415,19 +435,27 @@ public enum CaptureProbe {
 
     /// Collects each photo's time, size and what it says the stabilizer did.
     private final class StabilizationCatcher: NSObject, AVCapturePhotoCaptureDelegate {
-        let done = DispatchSemaphore(value: 0)
+        /// One place for each request allowed out at once, given back as each ends.
+        let places: DispatchSemaphore
         private let lock = NSLock()
         private var times: [Double] = []
         private var statuses: [String: Int] = [:]
         private var sizes: Set<String> = []
         private var errors: [Int] = []
 
+        init(inFlight: Int) {
+            places = DispatchSemaphore(value: inFlight)
+        }
+
         var summary: String {
             lock.lock()
             defer { lock.unlock() }
             let sorted = times.sorted()
             let gaps = zip(sorted.dropFirst(), sorted).map { String(format: "%.0f", ($0 - $1) * 1000) }
-            return "\(times.count) photos \(sizes.sorted().joined(separator: " ")), "
+            // The rate the photos' own times give, first to last, which is what a take would see.
+            let span = (sorted.last ?? 0) - (sorted.first ?? 0)
+            let rate = span > 0 ? String(format: " at %.1f fps", Double(sorted.count - 1) / span) : ""
+            return "\(times.count) photos\(rate) \(sizes.sorted().joined(separator: " ")), "
                 + "stabilizer \(statuses.sorted { $0.key < $1.key }.map { "\($0.key) x\($0.value)" }.joined(separator: " ")), "
                 + "gaps ms [\(gaps.joined(separator: " "))]"
                 + (errors.isEmpty ? "" : ", errors \(errors)")
@@ -458,7 +486,7 @@ public enum CaptureProbe {
             lock.lock()
             if let error { errors.append((error as NSError).code) }
             lock.unlock()
-            done.signal()
+            places.signal()
         }
     }
 

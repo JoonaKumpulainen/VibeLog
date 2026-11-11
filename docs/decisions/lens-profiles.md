@@ -1,4 +1,4 @@
-# Planned: per-phone lens profiles, not started
+# Per-phone lens profiles: Apple's calibration and Gyroflow export built, colour not started
 
 The app is for every iPhone, so lens data is per device, in layers from free to manual. Apple's
 per-frame metadata already gives the color matrices, `FixVignetteRadial` and the 35 mm focal length

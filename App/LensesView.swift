@@ -8,6 +8,8 @@ struct LensesView: View {
     @EnvironmentObject private var model: AppModel
     let close: () -> Void
     @State private var profiles: [LensProfile] = []
+    /// The same lenses written as Gyroflow lens profiles, for the lenses Apple gave a table for.
+    @State private var gyroflowFiles: [URL] = []
     @State private var confirmingDelete = false
 
     var body: some View {
@@ -49,6 +51,15 @@ struct LensesView: View {
                     LabeledContent("Measured", value: profile.measured)
                 }
             }
+            if !gyroflowFiles.isEmpty {
+                Section {
+                    ShareLink(items: gyroflowFiles) {
+                        Label("Share for Gyroflow", systemImage: "gyroscope")
+                    }
+                } footer: {
+                    Text("Lens profiles Gyroflow loads, one for open gate and one for 16:9 for each lens with Apple's calibration, for takes with lens distortion correction off. Gyroflow fits them to smaller sizes itself. The ultra wide has none, and the readout time is left for Gyroflow to estimate.")
+                }
+            }
             if !profiles.isEmpty {
                 Section {
                     ShareLink(items: profiles.map { LensProfile.folder.appendingPathComponent($0.fileName) }) {
@@ -62,11 +73,15 @@ struct LensesView: View {
         }
         .navigationTitle("Lenses")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { profiles = LensProfile.saved() }
+        .onAppear {
+            profiles = LensProfile.saved()
+            gyroflowFiles = GyroflowProfile.write(profiles)
+        }
         .confirmationDialog("Delete this phone's lens profiles?", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
                 LensProfile.removeAll()
                 profiles = []
+                gyroflowFiles = []
             }
         }
     }
