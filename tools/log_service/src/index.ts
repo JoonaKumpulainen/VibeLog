@@ -8,9 +8,12 @@ import { env } from "cloudflare:workers";
 //   POST /delete   for the owner: one upload, once pulled
 //
 // No IP address, header or time of day is stored with an upload, only what the app sent, which it
-// has already made anonymous. Uploads are kept until the owner deletes them.
+// has already made anonymous. Uploads are deleted after 90 days, or sooner once the owner pulls
+// them with --delete.
 
 const MAX_BODY = 4 * 1024 * 1024;
+// Each upload is deleted this long after it arrives, pulled or not, so nothing is kept for long.
+const KEEP_SECONDS = 90 * 24 * 60 * 60;
 // An upload unpacked: logs compress about tenfold, so this is what 4 MB packed can hold.
 const MAX_UNPACKED = 24 * 1024 * 1024;
 const MAX_FILE = 2 * 1024 * 1024;
@@ -136,6 +139,7 @@ async function upload(request: Request): Promise<Response> {
 	const files = JSON.stringify({ files: body.files.map((f) => ({ name: f.name, text: f.text })) });
 	const stored = packed ? await deflate(files) : files;
 	await env.LOGS.put(key, stored, {
+		expirationTtl: KEEP_SECONDS,
 		metadata: { files: body.files.length, bytes: raw.length, encoding: packed ? "deflate-raw" : "json" },
 	});
 	return reply(200, { stored: body.files.length });

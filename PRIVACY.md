@@ -51,7 +51,7 @@ also allows a hotspot. Never in Low Data Mode. Uploads are small: a session's lo
 under 1 MB.
 
 **On the service:** each upload is kept, sorted by phone model, until the developer downloads
-and deletes it. The service sees your IP address while it answers, as every web server does,
+and deletes it, and for 90 days at most: the service deletes it by itself after that. The service sees your IP address while it answers, as every web server does,
 and doesn't store it. Cloudflare runs the service, under its own privacy policy. Only the
 developer can read the uploads; nothing is published, sold or shared.
 
