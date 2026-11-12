@@ -3,11 +3,8 @@
 iPhone 14 Pro camera app that captures 12 MP RAW Bayer frames at up to 30 fps, processes them on the
 GPU and records log video in ProRes or HEVC, or a look baked in. The goal is the full quality of the
 sensor, and where quality and convenience conflict, quality wins.
-[docs/findings.md](docs/findings.md) records what's been proven on the phone.
 
-See [ROADMAP.md](ROADMAP.md) for the plan, and [PRIVACY.md](PRIVACY.md) for what stays on the
-phone and what can leave it. Working on it with an AI agent? Start with
-[AGENTS.md](AGENTS.md).
+See [PRIVACY.md](PRIVACY.md) for what stays on the phone and what can leave it.
 
 ## Install on the phone
 
@@ -44,9 +41,7 @@ keeps Documents as long as the bundle ID stays the same.
 
 ## Using it
 
-Turn the ring/silent switch to silent first, then open VibeLog: the camera starts live.
-[docs/using.md](docs/using.md) walks through the camera screen, looks, export, settings,
-recording limits and where files go. Export can also steady a take from its gyro log, a first
+Turn the ring/silent switch to silent first, then open VibeLog: the camera starts live. Export can also steady a take from its gyro log, a first
 version that hasn't yet been proven on the phone.
 
 ## Project layout

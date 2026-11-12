@@ -17,8 +17,8 @@ record, and Local Network only for the test link.
 
 Off at every launch, and only you can turn it on, in Diagnostics. While connected, a computer
 you choose can change settings, start takes, take stills of what the camera sees and fetch files.
-[docs/test-link.md](docs/test-link.md) says exactly what it sends, how to keep it private and how
-to build the app without it.
+It sends only to that computer, over your own network or a tunnel you set up, and nothing at
+all while it's off.
 
 ## Log sharing, for testers
 
@@ -59,9 +59,6 @@ developer can read the uploads; nothing is published, sold or shared.
 means what you sent before can't be linked to what you send next. To have what you sent deleted,
 send the developer the **Anonymous ID** shown in Diagnostics; they delete every upload with it,
 on the service and their computer.
-
-The design and how to remove it from the app are in
-[docs/decisions/log-service.md](docs/decisions/log-service.md).
 
 ## In this repository
 

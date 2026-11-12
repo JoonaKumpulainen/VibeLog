@@ -13,3 +13,9 @@ __pycache__/
 .vibelog_logs*
 token
 public_token
+# Private docs, kept only in the local repository .git-docs (tools/docs_git.sh), never on GitHub.
+/docs/
+/ROADMAP.md
+/AGENTS.md
+/CLAUDE.md
+/.git-docs/

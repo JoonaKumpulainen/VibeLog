@@ -109,8 +109,14 @@ def tracked_files():
     return [line for line in out.splitlines() if line]
 
 
+# The private docs live in a local repository only; the public one must never take them again.
+PRIVATE_DOCS = re.compile(r"^(docs/|ROADMAP\.md$|AGENTS\.md$|CLAUDE\.md$|\.git-docs/)")
+
+
 def check(path, text, secrets):
     findings = []
+    if not Path(path).is_absolute() and PRIVATE_DOCS.search(path):
+        findings.append(f"{path}: a private doc, kept in the local docs repository only (tools/docs_git.sh)")
     if FORBIDDEN_NAMES.search(path) and not ALLOWED_NAMES.search(path):
         findings.append(f"{path}: a file that holds secrets")
     for number, line in enumerate(text.splitlines(), 1):
