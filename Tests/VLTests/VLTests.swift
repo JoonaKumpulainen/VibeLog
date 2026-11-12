@@ -2803,7 +2803,9 @@ final class ScopeTests: XCTestCase {
 /// The FX kernels: a flat gray has no highlights to glow and nothing for diffusion to soften, so
 /// bloom, halation and diffusion leave it as it is, and a vignette darkens only the corners.
 final class EffectsTests: XCTestCase {
-    private func run(_ effects: LookEffects, light: Bool = false) throws -> (center: Float, corner: Float, beside: Float, expected: Float) {
+    private func run(
+        _ effects: LookEffects, light: Bool = false, curve: LogCurve = .sLog3, fill: Float? = nil
+    ) throws -> (center: Float, corner: Float, beside: Float, expected: Float) {
         let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
         let kit = try XCTUnwrap(EffectsKit(device: device))
         let queue = try XCTUnwrap(device.makeCommandQueue())
@@ -2814,18 +2816,18 @@ final class EffectsTests: XCTestCase {
         descriptor.usage = [.shaderRead, .shaderWrite]
         let image = try XCTUnwrap(device.makeTexture(descriptor: descriptor))
         let output = try XCTUnwrap(device.makeTexture(descriptor: descriptor))
-        let gray = Float(LogCurve.sLog3.encode(0.18))
+        let gray = fill ?? Float(curve.encode(0.18))
         let code = UInt16((gray * 65535).rounded())
         var pixels = [UInt16](repeating: code, count: size * size * 4)
         if light {
             // A light, four stops over gray, filling the middle eighth-size texels.
-            let bright = UInt16((LogCurve.sLog3.encode(0.18 * 16) * 65535).rounded())
+            let bright = UInt16((curve.encode(0.18 * 16) * 65535).rounded())
             for y in 24..<40 { for x in 24..<40 { for c in 0..<3 { pixels[(y * size + x) * 4 + c] = bright } } }
         }
         pixels.withUnsafeBytes { bytes in
             image.replace(region: MTLRegionMake2D(0, 0, size, size), mipmapLevel: 0, withBytes: bytes.baseAddress!, bytesPerRow: size * 8)
         }
-        let params = EffectsParams(effects, curve: .sLog3, frame: 1)
+        let params = EffectsParams(effects, curve: curve, frame: 1)
         let commands = try XCTUnwrap(queue.makeCommandBuffer())
         let glow = try XCTUnwrap(kit.glow(for: image, params: params, commands: commands))
         XCTAssertTrue(kit.apply(image, into: output, glow: glow, params: params, commands: commands))
@@ -2890,6 +2892,17 @@ final class EffectsTests: XCTestCase {
         let result = try run(effects)
         XCTAssertEqual(result.center, result.expected, accuracy: 2 / 1023)
         XCTAssertLessThan(result.corner, result.expected - 0.02)
+    }
+
+    /// Shadows below zero light must keep their codes with FX on. Clamping them lifted Apple Log's
+    /// code 0 to about 0.15, which turned a dark take's preview flat and grey on the iPhone 16.
+    func testEffectsKeepLightBelowZero() throws {
+        var effects = LookEffects()
+        effects.vignette = 0.01
+        for curve in [LogCurve.appleLog, .sLog3, .logC3] {
+            let result = try run(effects, curve: curve, fill: 0.02)
+            XCTAssertEqual(result.center, 0.02, accuracy: 2 / 1023, "\(curve)")
+        }
     }
 
     func testOlderSettingsReadWithoutEffects() throws {

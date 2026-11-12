@@ -409,7 +409,9 @@ static inline float3 applyEffectsLinear(float3 linear, float2 uv, float2 pixel, 
 static inline float3 applyEffects(float3 logColor, float2 uv, float2 pixel, texture2d<float, access::sample> glow,
                                   constant EffectsParams &e) {
     float3 linear = applyEffectsLinear(decodeLog3(saturate(logColor), e.curve), uv, pixel, glow, e);
-    return saturate(encodeLog3(max(linear, 0.0), e.curve));
+    // Light below zero stays, as it does without FX. Clamping it lifted every dark, noisy or
+    // saturated pixel to the curve's code for zero, which turned a dark picture flat and grey.
+    return saturate(encodeLog3(linear, e.curve));
 }
 
 // The direct kernels' pixel, from linear light: the FX on it when baked, then the curve once.
@@ -418,7 +420,7 @@ static inline float3 directColor(float3 linear, int2 at, int2 size, texture2d<fl
     // Without FX, exactly as before: the curve takes negative light as it always has.
     if (e.enabled == 0) return saturate(encodeLog3(linear, curve));
     float3 shown = applyEffectsLinear(linear, (float2(at) + 0.5) / float2(size), float2(at), glow, e);
-    return saturate(encodeLog3(max(shown, 0.0), curve));
+    return saturate(encodeLog3(shown, curve));
 }
 
 // The log colour a take records at `uv` of the log image, with the FX on it when they're baked:

@@ -533,6 +533,9 @@ final class AppModel: ObservableObject {
     }
 
     func enteredForeground() {
+        // Time away isn't idle time on the camera. Without this, coming back after two minutes
+        // restarted the stream and the idle pause stopped it again within a second.
+        lastTouch = Date()
         guard resumeInForeground else { return }
         resumeInForeground = false
         if !isStreaming { toggleStream() }
