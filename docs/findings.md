@@ -609,6 +609,13 @@ an item from **Not verified** once it is.
   encoder, with the GPU at 32.6 ms a frame against the 33.3 a frame has at 30 fps. The careful
   encoder test read it at 29.7 fps.
 
+- **Maximum log can't hold a warm 14 Pro at serious heat without its fallback:** a 170-second
+  log take, HEVC 4:2:0 at full size, Malvar-He-Cutler, with **Efficient when hot** and **Bilinear
+  when hot** off, started at fair heat on a charging phone after an hour of tests. It reached
+  serious heat at 49 s and lost 203 of 5,098 frames, all on the GPU. The cost test reads that
+  setup at 12.6 ms a frame, so the isolated cost says little about a hot take; the heat fallback
+  is what keeps Maximum takes whole.
+
 ## Not verified
 
 - **What the 16's tester saw as added shake on the ultra wide:** take `140255`'s copy added none

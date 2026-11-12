@@ -3349,7 +3349,12 @@ final class GPUSupportTests: XCTestCase {
         // Heavier than anything proven warns; within a tenth doesn't.
         XCTAssertNotNil(gpu.warning(for: "efficient-fx-malvar"))
         XCTAssertNil(gpu.warning(for: "efficient-log-malvar"))
-        // A take that fell behind always warns.
+        // Falling behind at serious heat only warns without the heat fallback: the 14 Pro's
+        // 170 s Maximum log take, 2026-11-12, with Efficient when hot off.
+        gpu.record(take: "maximum-log-malvar", seconds: 170, frames: 4895, gpuDropped: 203, reachedSerious: true)
+        XCTAssertNil(gpu.warning(for: "maximum-log-malvar", hotFallback: true))
+        XCTAssertNotNil(gpu.warning(for: "maximum-log-malvar", hotFallback: false))
+        // A take that fell behind while not seriously hot always warns.
         gpu.record(take: "maximum-log-malvar", seconds: 120, frames: 3400, gpuDropped: 200)
         XCTAssertTrue(gpu.warning(for: "maximum-log-malvar")!.contains("fell behind"))
     }

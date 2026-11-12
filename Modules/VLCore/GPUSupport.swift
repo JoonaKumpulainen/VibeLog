@@ -16,8 +16,13 @@ public struct GPUSupport: Codable, Equatable, Sendable {
     public var measuredAt: Date?
     /// Setups a take of `provingSeconds` or more held with almost nothing lost on the GPU.
     public var proven: Set<String> = []
-    /// Setups whose take lost more than `strainedShare` of its frames on the GPU.
+    /// Setups whose take lost more than `strainedShare` of its frames on the GPU without the
+    /// phone getting seriously hot. These always warn.
     public var strained: Set<String> = []
+    /// Setups that fell behind only in a take that reached serious heat. These warn only when the
+    /// setup has no heat fallback on: **Efficient when hot** for the Maximum path, **Bilinear when
+    /// hot** for the Efficient one, which move a hot take onto lighter work.
+    public var strainedHot: Set<String> = []
 
     public init(device: String, system: String) {
         self.device = device
@@ -25,7 +30,7 @@ public struct GPUSupport: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case device, system, costs, heat, measuredAt, proven, strained
+        case device, system, costs, heat, measuredAt, proven, strained, strainedHot
     }
 
     public init(from decoder: Decoder) throws {
@@ -37,6 +42,7 @@ public struct GPUSupport: Codable, Equatable, Sendable {
         measuredAt = try? values.decodeIfPresent(Date.self, forKey: .measuredAt)
         proven = (try? values.decodeIfPresent(Set<String>.self, forKey: .proven)) ?? []
         strained = (try? values.decodeIfPresent(Set<String>.self, forKey: .strained)) ?? []
+        strainedHot = (try? values.decodeIfPresent(Set<String>.self, forKey: .strainedHot)) ?? []
     }
 
     /// Baked FX fell behind after about two minutes on the 14 Pro, so a take proves its setup
@@ -86,20 +92,23 @@ public struct GPUSupport: Codable, Equatable, Sendable {
     }
 
     /// What a take showed about its setup.
-    public mutating func record(take key: String, seconds: Double, frames: Int, gpuDropped: Int) {
+    public mutating func record(take key: String, seconds: Double, frames: Int, gpuDropped: Int, reachedSerious: Bool = false) {
         let total = frames + gpuDropped
         guard total > 0 else { return }
         let share = Double(gpuDropped) / Double(total)
         if share > Self.strainedShare, seconds >= 30 {
-            strained.insert(key)
+            if reachedSerious { strainedHot.insert(key) } else { strained.insert(key) }
         } else if seconds >= Self.provingSeconds, share <= Self.strainedShare / 5 {
             proven.insert(key)
         }
     }
 
     /// Why this setup may fall behind on the GPU, or nil when nothing says so.
-    public func warning(for key: String) -> String? {
+    public func warning(for key: String, hotFallback: Bool = false) -> String? {
         if strained.contains(key) { return "This setup fell behind on the GPU in an earlier take" }
+        if strainedHot.contains(key), !hotFallback {
+            return "This setup fell behind on the GPU once the phone got hot, and its fallback for heat is off"
+        }
         if proven.contains(key) { return nil }
         guard let cost = costs[key] else { return nil }
         let heaviestHeld = proven.compactMap { costs[$0] }.max()

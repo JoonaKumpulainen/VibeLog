@@ -167,7 +167,9 @@ leaves the standard setup on its own evidence, so a workaround for one never rea
   after the encoders. Its time alone can't say whether a take will hold, since a take's GPU time
   reads two to three times it and heat decides over minutes, so takes decide: a take of 150 s or
   more that lost under 0.2% of its frames on the GPU proves its setup, and one that lost over 1%
-  strains it. A setup warns only when strained, or when it costs more than a tenth over the
+  strains it. A take that fell behind after reaching serious heat strains it only when hot: that
+  warns only while the setup's heat fallback, **Efficient when hot** or **Bilinear when hot**, is
+  off. A setup warns only when strained, or when it costs more than a tenth over the
   heaviest proven one. With no takes yet, nothing warns. A take whose path or debayer changed for
   heat proves nothing.
 - **Adding a fallback:** give it a step on the ladder or a measured trial, never a model name, and

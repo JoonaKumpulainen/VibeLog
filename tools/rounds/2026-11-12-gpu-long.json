@@ -1,0 +1,9 @@
+[
+  {"needs": "0.1.121"},
+  {"set": {"lens": "1x", "codec": "hevc420", "size": "4032x3024", "aspect": "4:3", "bakeLook": false, "pipeline": "maximum", "debayer": "Malvar-He-Cutler", "efficientWhenHot": false, "bilinearWhenHot": false, "tools": "none"}},
+  {"status": {"gpuSetup": "maximum-log-malvar"}, "label": "Setup to prove"},
+  {"pause": "Long take: lay the phone still on a table, pointing at anything, and leave it for 3 minutes. Starts on Enter."},
+  {"take": 170, "label": "Maximum log, 170 s", "gbPerSecond": 0.035, "expect": {"written": ">=29"}},
+  {"status": {"gpuLimits": "~proven by takes"}, "label": "The take proved its GPU setup"},
+  {"log": true, "label": "Session log"}
+]

@@ -1067,7 +1067,7 @@ final class AppModel: ObservableObject {
         if !bakeLook, let warning = encoderSupport.warning(for: encoderKey, size: encoderSize.label) {
             return warning
         }
-        if let warning = gpuSupport.warning(for: gpuSetupKey) { return warning }
+        if let warning = gpuSupport.warning(for: gpuSetupKey, hotFallback: gpuHotFallback) { return warning }
         return nil
     }
 
@@ -1257,6 +1257,11 @@ final class AppModel: ObservableObject {
         return GPUSupport.key(path: path, work: work, debayer: processing.demosaic == .bilinear ? "bilinear" : "malvar")
     }
 
+    /// Whether the current setup moves onto lighter work when the phone gets hot.
+    var gpuHotFallback: Bool {
+        gpuSetupKey.hasPrefix("maximum") ? processing.efficientWhenHot : processing.bilinearWhenHot
+    }
+
     /// The key a take's codec has in `EncoderSupport`, with 12-bit ProRes apart.
     var encoderKey: String { twelveBitProRes ? EncoderSupport.twelveBitID : encoderPreset.id }
 
@@ -1327,6 +1332,7 @@ final class AppModel: ObservableObject {
         if let date = gpuSupport.measuredAt { text += ", " + date.formatted(date: .abbreviated, time: .omitted) }
         if !gpuSupport.proven.isEmpty { text += "; \(gpuSupport.proven.count) proven by takes" }
         if !gpuSupport.strained.isEmpty { text += "; \(gpuSupport.strained.count) fell behind" }
+        if !gpuSupport.strainedHot.isEmpty { text += "; \(gpuSupport.strainedHot.count) fell behind when hot" }
         return text
     }
 
@@ -1616,6 +1622,7 @@ final class AppModel: ObservableObject {
     /// The picture can change at these moments, so the take's details keep them.
     private func noteHeatChange(hot: Bool) {
         guard isRecording else { return }
+        if hot { takeReachedSerious = true }
         let seconds = Int(Date().timeIntervalSince(recordStart))
         let event = String(format: "%d:%02d %@", seconds / 60, seconds % 60, hot ? "hot: \(hotChanges)" : "cool")
         takeHeatEvents.append(event)
@@ -2042,6 +2049,8 @@ final class AppModel: ObservableObject {
     private var takeChosenSize = ""
     private var takeEncoderKey = ""
     private var takeGPUSetup = ""
+    /// The take reached serious heat, which changes what falling behind says about its setup.
+    private var takeReachedSerious = false
 
     private func startEncoding() {
         guard let pipeline, processing.enabled, method.isPhoto else {
@@ -2055,6 +2064,7 @@ final class AppModel: ObservableObject {
         takeChosenSize = encoderSize.label
         takeEncoderKey = encoderKey
         takeGPUSetup = gpuSetupKey
+        takeReachedSerious = isHot
         let name = "video_\(Storage.timestamp())"
         let url = Storage.videos.appendingPathComponent(name + ".mov")
         let metadata: [String: String] = [
@@ -2178,7 +2188,7 @@ final class AppModel: ObservableObject {
             let changedForHeat = takeHeatEvents.contains { $0.contains("hot:") && !$0.contains("no change") }
             if !changedForHeat {
                 gpuSupport.record(take: takeGPUSetup, seconds: finished.seconds, frames: finished.framesWritten,
-                                  gpuDropped: gpu.dropped)
+                                  gpuDropped: gpu.dropped, reachedSerious: takeReachedSerious)
                 gpuSupport.save()
             }
             if !takeBaked, takeSize == takeChosenSize {
