@@ -3233,6 +3233,8 @@ final class LogSharingTests: XCTestCase {
         XCTAssertTrue(loaded.on)
         XCTAssertEqual(loaded.inviteCode, "abc123")
         XCTAssertFalse(loaded.gyro)
+        XCTAssertFalse(loaded.mobileData)
+        XCTAssertTrue(loaded.server.hasPrefix("https://"))
         XCTAssertEqual(loaded.installID.count, 36)
         var fresh = loaded
         fresh.startAfresh()

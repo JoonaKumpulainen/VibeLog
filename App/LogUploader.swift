@@ -4,7 +4,8 @@ import UIKit
 import VLCore
 
 /// Sends test logs to the owner's log service, when the tester has turned it on. It never runs
-/// during a take, only on Wi-Fi or another network that isn't metered, and only sends what's new
+/// during a take, only on Wi-Fi unless the tester allows mobile data, never in Low Data Mode, and
+/// only sends what's new
 /// or grown since the last time. Everything is made anonymous by `LogSanitizer` first.
 /// See docs/decisions/log-service.md.
 final class LogUploader: ObservableObject {
@@ -13,11 +14,13 @@ final class LogUploader: ObservableObject {
 
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "log-uploader", qos: .utility)
-    private var unmetered = false
+    /// The current network: connected at all, metered (mobile data or a hotspot), Low Data Mode.
+    private var connected = false
+    private var metered = true
+    private var lowData = false
     private let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 60
-        configuration.allowsExpensiveNetworkAccess = false
         configuration.allowsConstrainedNetworkAccess = false
         configuration.httpCookieStorage = nil
         configuration.urlCache = nil
@@ -26,8 +29,11 @@ final class LogUploader: ObservableObject {
 
     init() {
         monitor.pathUpdateHandler = { [weak self] path in
-            let ok = path.status == .satisfied && !path.isExpensive && !path.isConstrained
-            DispatchQueue.main.async { self?.unmetered = ok }
+            DispatchQueue.main.async {
+                self?.connected = path.status == .satisfied
+                self?.metered = path.isExpensive
+                self?.lowData = path.isConstrained
+            }
         }
         monitor.start(queue: queue)
     }
@@ -43,7 +49,7 @@ final class LogUploader: ObservableObject {
         if !settings.on { return "Off" }
         if settings.inviteCode.isEmpty || settings.server.isEmpty { return "Needs a server and an invite code" }
         if !settings.lastResult.isEmpty { return settings.lastResult }
-        return "Waiting for Wi-Fi"
+        return settings.mobileData ? "Waiting for a connection" : "Waiting for Wi-Fi"
     }
 
     /// Sends what's new, if sharing is on and nothing stands in the way. `names` are the names
@@ -53,8 +59,11 @@ final class LogUploader: ObservableObject {
         guard settings.on, !settings.inviteCode.isEmpty, let base = URL(string: settings.server),
               base.scheme == "https", !recording, !busy
         else { completion?(); return }
-        guard unmetered else {
-            update { $0.lastResult = "Waiting for Wi-Fi" }
+        let waiting = !connected ? (settings.mobileData ? "Waiting for a connection" : "Waiting for Wi-Fi")
+            : lowData ? "Waiting: Low Data Mode is on"
+            : (metered && !settings.mobileData) ? "Waiting for Wi-Fi" : nil
+        if let waiting {
+            update { $0.lastResult = waiting }
             completion?()
             return
         }
@@ -103,6 +112,8 @@ final class LogUploader: ObservableObject {
             ]
             var request = URLRequest(url: base.appendingPathComponent("upload"))
             request.httpMethod = "POST"
+            request.allowsExpensiveNetworkAccess = settings.mobileData
+            request.allowsConstrainedNetworkAccess = false
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue("Bearer \(settings.inviteCode)", forHTTPHeaderField: "Authorization")
             request.httpBody = try? JSONSerialization.data(withJSONObject: body)

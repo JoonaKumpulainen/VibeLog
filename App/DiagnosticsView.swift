@@ -217,6 +217,7 @@ private struct LogSharingSection: View {
                     .keyboardType(.URL)
                 SecureField("Invite code", text: binding(\.inviteCode))
                 Toggle("Include gyro logs", isOn: binding(\.gyro))
+                Toggle("Use mobile data", isOn: binding(\.mobileData))
                 LabeledContent("State", value: uploader.stateText)
                 // The first part of the random ID, to quote when asking for uploads to be deleted.
                 LabeledContent("Anonymous ID", value: String(uploader.settings.installID.prefix(8)))
@@ -231,7 +232,7 @@ private struct LogSharingSection: View {
         } header: {
             Text("Log sharing")
         } footer: {
-            Text("Sends session logs, take details, test reports and lens profiles to the VibeLog test service, on Wi-Fi and never during a take. Never videos, stills or what the camera sees. Dates, network addresses and names you typed are taken out first, and the phone is known only by a random ID. Gyro logs, which describe how the phone moved, only go with their switch on.")
+            Text("Sends session logs, take details, test reports and lens profiles to the VibeLog test service, never during a take, on Wi-Fi, or on mobile data too with its switch on, and never in Low Data Mode. Never videos, stills or what the camera sees. Dates, network addresses and names you typed are taken out first, and the phone is known only by a random ID. Gyro logs, which describe how the phone moved, only go with their switch on.")
         }
         .alert("Share test logs?", isPresented: $asksFirst) {
             Button("Share") { uploader.update { $0.on = true } }

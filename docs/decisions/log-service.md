@@ -10,6 +10,7 @@ asking for files, which [per-phone-fitting.md](per-phone-fitting.md) depends on.
 - **Off until turned on,** in Settings, **Advanced**, **Diagnostics**, **Log sharing**, after a
   confirmation that says what goes. It also needs an invite code from the owner.
 - **Gyro logs** have their own switch, off: they describe how the phone moved.
+- **Use mobile data**, off: lets uploads go over cellular and hotspots too.
 - **New anonymous ID** starts afresh, so what was sent can't be linked to what's sent next.
 - Turning it off stops everything from then on.
 
@@ -19,8 +20,9 @@ asking for files, which [per-phone-fitting.md](per-phone-fitting.md) depends on.
   profiles, `capture_support.json`, `encoder_support.json` and `benchmarks.csv`. Files over
   1.5 MB are left out. Never videos, stills, previews or RAW clips.
 - Only files new or grown since the last upload, in batches under 2.5 MB.
-- Thirty seconds after launch and on leaving the app, never during a take, and only on a network
-  that isn't metered or in Low Data Mode, so not over cellular or a hotspot.
+- Thirty seconds after launch and on leaving the app, never during a take. On Wi-Fi only,
+  unless the tester turns on **Use mobile data** (added on 2026-11-12 at the owner's request),
+  which also allows a hotspot. Never in Low Data Mode.
 
 ## Anonymous
 

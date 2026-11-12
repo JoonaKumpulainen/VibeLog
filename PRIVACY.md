@@ -42,8 +42,10 @@ saw or the microphone heard.
 - Network addresses, such as a test server's, are taken out.
 - Names you typed, for LUTs, presets and styles, are replaced.
 
-**When:** on Wi-Fi only, not over cellular, a hotspot or Low Data Mode, 30 seconds after the app
-opens and when you leave it, never during a take. Only what's new since the last time.
+**When:** 30 seconds after the app opens and when you leave it, never during a take, and only
+what's new since the last time. On Wi-Fi only, unless you turn on **Use mobile data**, which
+also allows a hotspot. Never in Low Data Mode. Uploads are small: a session's logs are usually
+under 1 MB.
 
 **On the service:** each upload is kept, sorted by phone model, until the developer downloads
 and deletes it. The service sees your IP address while it answers, as every web server does,

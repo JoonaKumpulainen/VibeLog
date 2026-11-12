@@ -12,6 +12,8 @@ public struct LogSharingSettings: Codable, Equatable, Sendable {
     public var on = false
     /// The `.gcsv` gyro logs too, which describe how the phone moved.
     public var gyro = false
+    /// Over mobile data and hotspots too, not only Wi-Fi. Low Data Mode still stops it.
+    public var mobileData = false
     public var inviteCode = ""
     public var server = LogSharing.defaultServer
     /// A random ID with nothing of the phone or its owner in it. A new one starts afresh.
@@ -33,6 +35,7 @@ public struct LogSharingSettings: Codable, Equatable, Sendable {
         }
         on = read(.on, defaults.on)
         gyro = read(.gyro, defaults.gyro)
+        mobileData = read(.mobileData, defaults.mobileData)
         inviteCode = read(.inviteCode, defaults.inviteCode)
         server = read(.server, defaults.server)
         installID = read(.installID, defaults.installID)
@@ -85,7 +88,7 @@ public struct LogShareFile: Equatable, Sendable {
 
 public enum LogSharing {
     /// The owner's service. Empty until it's deployed; the tester can enter another.
-    public static let defaultServer = ""
+    public static let defaultServer = "https://vibelog-logs.vibelog-testing.workers.dev"
     /// A file bigger than this is left out. Session logs run to about 100 KB, probes 300 KB.
     public static let largestFile = 1_500_000
     /// One upload's files together, which keeps each request well under the service's 4 MB.
