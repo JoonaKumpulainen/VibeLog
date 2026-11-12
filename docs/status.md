@@ -40,54 +40,27 @@ which ends with the base 16 over the internet link.
 
 ## Start here next session
 
-1. **Ask for the 14 Pro's results of [next-tests.md](next-tests.md)** on 0.1.116: Tests 1 to 3
-   close `eed6df9` and `8c7f7d5`, Test 5 the ultra wide's edges, Test 6 Stabilize's timing fix.
-2. **Ask the base 16's tester** Test 4's two questions, which build made the shaky copy and
-   whether 0.1.116's copies still look shaky, and for Test 7's straight and diagonal drags.
-3. **If Test 7's diagonal drags stick,** fix the sliders: keep Export's form from scrolling while
-   one is held, or lay the grade editor out without scrolling. A screen-only change, at no risk
-   to recording.
-4. **Then pick from Still to build.** Measure stabilizer, per lens, is the natural next step; lens
-   distortion in the warp if Test 5's edges bend while the middle holds; rolling shutter if lines
-   lean in its fast pans.
+1. **If 0.1.118 isn't built yet:** the owner redeploys the log service (`cf deploy` in
+   `tools/log_service`, as in [decisions/log-service.md](decisions/log-service.md)), then push
+   `a533f05` and later commits and build.
+2. **Ask for [next-tests.md](next-tests.md)'s results** on 0.1.118: Tests 1 to 3 on both phones,
+   Tests 4 to 6 from the base 16's tester. Then run `tools/pull_logs.py` and
+   `tools/check_benchmark.py`.
+3. **Then the benchmark plan below,** in order: the first-launch offer, GPU timing per setup, real
+   20 s trial takes, notices in the format panel, internal limits.
 
 ## Waiting on the phone
 
-A phone elsewhere, such as the iPhone 16, can join the test link through ngrok with **Over the
-internet** on, from 0.1.116: see
-**A phone elsewhere, through ngrok** in [test-link.md](test-link.md).
-Files can be read straight from a phone plugged in here, under `/run/user/<uid>/gvfs/afc:*/`.
-The test server is `python3 tools/test_server.py serve`; the phone then needs **Connect** on in
-Diagnostics. The server prints its address and token, which have stayed the same across restarts
-and are kept out of this public repo. Over the link,
-`set` takes name and value as two arguments, and `sendFile` fetches a take whole.
+Step-by-step instructions, with what to send, are in [next-tests.md](next-tests.md). In short:
+**Measure encoders again** and a take proving a codec, on both phones; log sharing's batching; the
+base 16's ultra wide questions, slider drags and a 5-minute cold take.
 
-Step-by-step instructions for every test below, with what to send, are in
-[next-tests.md](next-tests.md).
+The 14 Pro fetches over USB when plugged in: see **Before you start** in next-tests.md. The test
+server is `python3 tools/test_server.py serve`; the phone then needs **Connect** on in
+Diagnostics.
 
-**The 14 Pro, on 0.1.116:**
-
-1. **Tests 1 to 3:** FX keep the shadows, the camera keeps running after leaving the app, and
-   Stabilize keeps a baked take's codec.
-2. **Test 5:** the ultra wide's edges, with a take for its readout time.
-3. **Test 6:** Stabilize with its timing fixed, on `000714` and `220644`, and on a log take.
-4. **Gyroflow's axes:** a take held sideways, with a few seconds held still, played in Gyroflow,
-   to check `yXZ` is right there. Upright takes are corrected a quarter-turn off until the
-   `.gcsv` says how the phone was held.
-5. **Look panel:** the red reset arrow and the change dots in all four holds, and the
-   confirmation sideways.
-6. **Export:** whether "Wheels •" fits its tab upright; the fullscreen preview upright and
-   sideways, with a crop outline on; the scope's drag, snap and resize, on the camera too.
-7. **SideStore:** whether a new build shows as an update by itself.
-8. **Later:** a colour chart shot; the matched pair for Apple's preview; ARRI Wide Gamut 3;
-   `scope_cost.json`, which needs about 112 GB free.
-
-**The iPhone 16, base model, on 0.1.116:** Tests 1 and 2, Test 4's two questions and Test 7's
-drags. Test 4's take, the probe, the GPU cost test and its lens profiles were done over the
-internet link on 2026-11-12. Still owed: a five-minute HEVC 4:2:2 take at full size, started cold
-and unplugged, and one at 2880x2160.
-
-**Friends' 15 Pro, 16 Pro and 17 Pro:** nothing yet. The probe must first list video formats.
+**Unanalysed:** Test 5's take B (`video_20261112_192135`), fast pans at 1/1000 s past vertical
+lines, for the sensor's readout time, which rolling-shutter correction needs.
 
 ## Still to build
 
