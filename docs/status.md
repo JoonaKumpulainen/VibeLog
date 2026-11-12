@@ -6,17 +6,24 @@ short.
 
 ## Latest build
 
-As of mid Phase 7, with Phase 8's stabilized export begun. The latest build is `b1cc9a8`, CI run
-116, version 0.1.116, which passed with 189 tests and one skip. **Over the internet** in
-Diagnostics is now its own switch for the ngrok link, and `MainThreadWatch` logs main-thread
-stalls for the base iPhone 16's laggy sliders. On the base 16, 0.1.116 ran a whole session over
-the internet link: the main-thread check, the over-internet switch and Stabilize on its ultra
-wide all worked there. The 14 Pro hasn't tried anything from 0.1.113 on.
+The latest build is `db879ba`, CI run 117, version 0.1.117, which passed with 194 tests and one
+skip. It adds what automated testing needs from the app: the version and newest take in the test
+link's status, leaving and returning to the app and each Export slider drag in the log. It also
+adds **Log sharing** in Diagnostics, off until turned on with an invite code, sending anonymized
+logs to the log service at `https://vibelog-logs.vibelog-testing.workers.dev`, with **Use mobile
+data** as an option. See [decisions/automated-testing.md](decisions/automated-testing.md) and
+[decisions/log-service.md](decisions/log-service.md). The service was checked live: refusals,
+upload, pull and `--forget`. Nothing from 0.1.113 on has run on the 14 Pro yet.
+
+On this computer: `tools/test_server.py round tools/rounds/2026-11-13.json` runs Tests 1, 2, 3,
+5 and 6 on the 14 Pro and writes `round_*.md`; `tools/pull_logs.py` pulls shared logs into
+`phones/`; `tools/check_secrets.py` runs as the pre-commit hook and in CI.
 
 The builds before it, all from the sessions of 2026-11-11 and 12:
 
 | Build | Run | What it added | On the phone |
 |---|---|---|---|
+| `b1cc9a8` | 116 | **Over the internet** as its own switch, main-thread stall logging | Proven on the base 16 |
 | `d232d7e` | 115 | The test link reaches a phone elsewhere through ngrok, `serve --public` | Proven on the base 16, with 0.1.116's switch |
 | `8c7f7d5` | 114 | A baked take's stabilized copy keeps its own codec | Not yet |
 | `eed6df9` | 113 | FX keep light below zero; returning to the app no longer idle-pauses the camera | Not yet |

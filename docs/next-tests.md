@@ -154,6 +154,24 @@ scrolling form the sliders sit in, which may take a drag that moves even slightl
 0.1.117 the log counts the drags each slider took, so a drag the scroll took shows as missing.
 If only the diagonal drags go missing, the scroll is taking them.
 
+## Test 8: log sharing (both phones, 0.1.117)
+
+New in 0.1.117. Checks that logs reach the test service, made anonymous, and only when allowed.
+
+1. In Settings, **Advanced**, **Diagnostics**, turn on **Share test logs** and confirm. Check the
+   server reads `https://vibelog-logs.vibelog-testing.workers.dev`, and enter the invite code
+   the owner sends privately.
+2. On Wi-Fi, tap **Send now**. **State** should read "Sent N files" within a minute.
+3. Turn Wi-Fi off, leaving mobile data on, and tap **Send now**: it should read "Waiting for
+   Wi-Fi". Turn on **Use mobile data**, record a 5-second take, and tap **Send now**: it should
+   send the new files.
+4. Note the **Anonymous ID** shown, and say it to the owner.
+
+**Owner:** `python3 tools/pull_logs.py`, then check `phones/report.md` lists the phone, and that
+no file under `phones/` holds a date like `20261113_`, a network address or a preset name.
+
+**Send:** what **State** read at each step.
+
 ## What the results decide
 
 - **Tests 1 to 3** close `eed6df9` and `8c7f7d5`, or show what's still wrong.
