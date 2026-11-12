@@ -309,7 +309,7 @@ extension AppModel {
 
     private var testStatus: [String: String] {
         [
-            "app": SystemStatus.appVersion, "phone": SystemStatus.deviceModel, "encoderLimits": encoderLimitsText, "gpuLimits": gpuLimitsText, "gpuSetup": gpuSetupKey, "trials": trialState.map { "\($0.index) of \($0.plan.count)" } ?? "",
+            "app": SystemStatus.appVersion, "phone": SystemStatus.deviceModel, "encoderLimits": encoderLimitsText, "gpuLimits": gpuLimitsText, "gpuSetup": gpuSetupKey, "trials": trialProgress,
             "recording": String(isRecording), "streaming": String(isStreaming),
             "screen": playingTake == nil ? openScreen : "player", "busy": isBusy ?? "",
             "method": method.rawValue, "encodeVideo": String(recordEncoded),

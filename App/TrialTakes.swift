@@ -12,6 +12,12 @@ import VLRecording
 extension AppModel {
     static let trialSeconds = 20.0
 
+    /// "2 of 3" while trial takes run, else empty; the test link reports it.
+    var trialProgress: String {
+        guard let state = trialState else { return "" }
+        return "\(state.index) of \(state.plan.count)"
+    }
+
     /// One trial: what it changes before recording.
     struct Trial {
         let label: String
