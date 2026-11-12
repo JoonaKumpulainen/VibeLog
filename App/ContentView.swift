@@ -73,21 +73,21 @@ struct CameraScreen: View {
         .haptic(.selection, trigger: model.lensID)
         .haptic(.warning, trigger: model.takeAlert) { _, alert in alert != nil }
         // Offered once per phone and iOS version, never started unasked.
-        .alert("Measure this phone?", isPresented: $model.benchmarkOffer) {
+        .alert("Run the benchmark?", isPresented: $model.benchmarkOffer) {
             Button("Start") { model.startBenchmark(fresh: false) }
             Button("Later", role: .cancel) { model.declineBenchmark() }
         } message: {
-            Text("VibeLog measures what this iPhone records without dropping frames: each lens, the encoders, the GPU and a few short test takes, which are deleted after. It takes about 5 minutes. Lay the phone down still, pointing at anything, with 50% battery or more. You can cancel and carry on later in Settings, Advanced, Diagnostics.")
+            Text("The benchmark finds what this iPhone records without dropping frames: each lens, the encoders, the GPU and a few short test takes, which are deleted after. It takes about 5 minutes. Lay the phone down still, pointing at anything, with 50% battery or more. You can cancel and carry on later in Settings, Advanced, Diagnostics.")
         }
-        .alert("This iPhone, measured", isPresented: $model.benchmarkSummaryShown) {
+        .alert("Benchmark results", isPresented: $model.benchmarkSummaryShown) {
             Button("OK", role: .cancel) { model.benchmarkSummaryClosed() }
         } message: {
             Text(model.benchmark.summary)
         }
-        .alert("Share how it went?", isPresented: $model.benchmarkAsksSharing) {
+        .alert("Share the benchmark?", isPresented: $model.benchmarkAsksSharing) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("If you test VibeLog for its developer, turn on Log sharing in Settings, Advanced, Diagnostics, with the invite code you were given. It sends this phone's measurements and logs without anything that identifies you, so problems on this model can be fixed.")
+            Text("If you test VibeLog for its developer, turn on Log sharing in Settings, Advanced, Diagnostics, with the invite code you were given. It sends this phone's benchmark and logs without anything that identifies you, so problems on this model can be fixed.")
         }
         .modifier(VolumeRecord {
             if !showSettings, model.playingTake == nil, model.isBusy == nil { model.toggleRecord() }

@@ -34,7 +34,7 @@ fix. A build cycle takes about 3 minutes to the IPA since the tests and the IPA 
 3. **The first-launch offer:** capture, lens profiles, encoders, GPU, trial takes and the probe
    in one guided run of about 5 minutes, the phone lying still. Offered at first launch and
    after an iOS update, never started unasked, resumable, cancellable; an unfinished run leaves
-   the defaults alone. **Measure this phone again** runs it all later.
+   the defaults alone. **Run benchmark** runs it all later.
 4. **Defaults fitted from the careful figures:** codec, size, frame rate, pipeline and the hot
    paths, moving only settings nobody has touched, and saying what moved.
 5. **Showing it:** the format panel marks codecs and sizes at or over the limit, and a one-time
@@ -59,7 +59,7 @@ fix. A build cycle takes about 3 minutes to the IPA since the tests and the IPA 
 - **Built on 2026-11-12, untested on a phone:** the benchmark runner (`App/Benchmark.swift`,
   `BenchmarkProgress` in VLCore) with capture on each lens, memory sampled, 24 fps tried where 30
   won't hold, trial takes, lens profiles, encoders and GPU, and the probe; the offer at first
-  launch and after an iOS update; **Measure this phone again** running all of it; defaults
+  launch and after an iOS update; **Run benchmark** running all of it; defaults
   fitted for untouched settings (codec, size, frame rate, the Efficient path for little memory
   or a Maximum path that fell behind); the one-time summary; "!" on format choices past the
   limit; `Benchmark:` log lines that `read_log.py` reads; `benchmark.json` with shared logs.

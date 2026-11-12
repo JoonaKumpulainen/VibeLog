@@ -52,7 +52,7 @@ extension AppModel {
         Log.shared.info("Benchmark: offered, and put off until asked or the next iOS version")
     }
 
-    /// Starts or resumes the benchmark. `fresh` forgets earlier results, for Measure this phone again.
+    /// Starts or resumes the benchmark. `fresh` forgets earlier results, for Run benchmark.
     func startBenchmark(fresh: Bool) {
         guard !isRecording, isBusy == nil, !benchmarkRunning else { return }
         benchmarkOffer = false
@@ -84,7 +84,7 @@ extension AppModel {
         let started = Date()
         let name = Self.benchmarkStepNames[step] ?? step
         let index = (Self.benchmarkSteps.firstIndex(of: step) ?? 0) + 1
-        showNotice("Measuring this phone, \(index) of \(Self.benchmarkSteps.count): \(name)", seconds: 4)
+        showNotice("Benchmark, \(index) of \(Self.benchmarkSteps.count): \(name)", seconds: 4)
         Log.shared.info("Benchmark: \(step) started")
         let finish: (String, String) -> Void = { [self] status, detail in
             let result = BenchmarkProgress.StepResult(
@@ -376,7 +376,7 @@ extension AppModel {
         if !benchmark.fitted.isEmpty { lines.append("Changed for you: " + benchmark.fitted.joined(separator: "; ") + ".") }
         if !failed.isEmpty {
             lines.append("Not measured: " + failed.map { Self.benchmarkStepNames[$0] ?? $0 }.joined(separator: ", ")
-                + ". Try Measure this phone again in Settings, Advanced, Diagnostics.")
+                + ". Try Run benchmark in Settings, Advanced, Diagnostics.")
         }
         lines.append("Every codec and setting stays available; ones past this phone's limit warn before a take.")
         return lines.joined(separator: "\n")

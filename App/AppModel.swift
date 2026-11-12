@@ -1278,10 +1278,10 @@ final class AppModel: ObservableObject {
     /// The key a take's codec has in `EncoderSupport`, with 12-bit ProRes apart.
     var encoderKey: String { twelveBitProRes ? EncoderSupport.twelveBitID : encoderPreset.id }
 
-    /// How long **Measure this phone again** waits for the phone to cool before measuring anyway.
+    /// How long **Run benchmark** waits for the phone to cool before measuring anyway.
     static let encoderCoolingLimit: TimeInterval = 300
 
-    /// **Measure this phone again**: stops the camera, waits up to five minutes for nominal heat,
+    /// **Run benchmark**: stops the camera, waits up to five minutes for nominal heat,
     /// writes the full encoder report, and replaces the quick first-launch figures with careful
     /// ones, which the warnings and defaults then use. What real takes showed is kept, since a
     /// take outranks any trial.
