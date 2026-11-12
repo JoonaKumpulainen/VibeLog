@@ -3317,7 +3317,8 @@ final class GPUSupportTests: XCTestCase {
     Efficient, Malvar-He-Cutler: a log take, planes and the monitor image every other frame, 8.2, 6.9 to 8.4
     Efficient, Malvar-He-Cutler: planes with the look, 7.5, 7.5 to 7.8
     Efficient, Malvar-He-Cutler: a baked FX take, monitor image and glow every other frame, 11.9, 8.7 to 12.9
-    Efficient, Bilinear: a baked FX take, monitor image and glow every other frame, 10.5, 7.4 to 10.7
+    Efficient, Bilinear: a baked FX take as recorded, monitor image and glow every other frame, 10.5, 7.4 to 10.7
+    Efficient, Bilinear: a baked FX take, monitor image and glow every frame, 12.0, 11.9 to 12.9
     thermal at end=fair
     """
 

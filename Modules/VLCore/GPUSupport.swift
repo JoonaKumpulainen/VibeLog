@@ -60,6 +60,8 @@ public struct GPUSupport: Codable, Equatable, Sendable {
         ("maximum", "debayer, glow and planes with the look and FX", "fx"),
         ("efficient", "a log take, planes and the monitor image every other frame", "log"),
         ("efficient", "planes with the look", "look"),
+        ("efficient", "a baked FX take as recorded, monitor image and glow every other frame", "fx"),
+        // The same stage's name in reports from before 0.1.110.
         ("efficient", "a baked FX take, monitor image and glow every other frame", "fx"),
     ]
 
