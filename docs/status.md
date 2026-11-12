@@ -6,16 +6,16 @@ short.
 
 ## Latest build
 
-As of mid Phase 7, with Phase 8's stabilized export begun. The latest build is `eed6df9`, CI run
-113, version 0.1.113. It keeps light below zero through FX, so a dark picture no longer turns flat
-and grey with any FX on, and stops the idle pause from stopping the camera right after returning
-to the app. Both came from the iPhone 16's logs and screen recording. None of it has been tried
-on a phone, and nor has `2368f1d`'s Stabilize timing fix.
+As of mid Phase 7, with Phase 8's stabilized export begun. The latest build is `8c7f7d5`, CI run
+114, version 0.1.114, which passed with 189 tests and one skip. A baked take's Stabilize screen no
+longer offers a codec: the copy keeps the take's own. None of it, nor `eed6df9` before it, has
+been tried on a phone.
 
 The builds before it, all from the sessions of 2026-11-11 and 12:
 
 | Build | Run | What it added | On the phone |
 |---|---|---|---|
+| `eed6df9` | 113 | FX keep light below zero; returning to the app no longer idle-pauses the camera | Not yet |
 | `2368f1d` | 112 | Stabilize's timing fixed, its limit eased at 130%, a Stabilize screen for baked takes | Not yet |
 | `652ba7a` | 111 | Ultra wide corrects every speed, maker note probe, legal and Gyroflow wording | Probe ran; stabilized copies measured |
 | `7e2b514` | 110 | Stabilized export, its preview, stabilized copies of baked takes, stabilizer names in the probe | Probe ran |
@@ -28,12 +28,17 @@ Run 109 never started and can be ignored. Every session is in
 
 ## Start here next session
 
-1. **Ask how FX on a dark take looks on 0.1.113,** on both phones, then **how Stabilize looks,**
+1. **Ask how FX on a dark take looks on 0.1.114,** on both phones, then **how Stabilize looks,**
    on takes `000714` (0.5x) and `220644` (1x), both upright and baked, still on the phone. The 0.5x's first copy kept two thirds of its
    shake; the timing fix should remove most of that.
 2. **If the phone is linked, measure the new copies** against their gyro logs, as was done for
    the first ones. The method is under **How the copies were measured** below.
-3. **Then pick from Still to build.** Measure stabilizer, per lens, is the natural next step if
+3. **The ultra wide's stabilization:** on the iPhone 16 it adds small fast shake, and on the 14
+   Pro its edges shake and bend. The plan, not yet agreed, is in **Still to build**. First ask
+   the 16's tester for an ultra wide take with small fast shake and slow pans, its `.gcsv` and
+   its stabilized copy, and fit them as under **How the copies were measured**, at lags of
+   ±100 ms and both signs.
+4. **Then pick from Still to build.** Measure stabilizer, per lens, is the natural next step if
    Stabilize now works; rolling shutter if fast moves still lean or wobble.
 
 ## Waiting on the phone
@@ -44,7 +49,7 @@ Diagnostics. The server prints its address and token, which have stayed the same
 and are kept out of this public repo. Over the link,
 `set` takes name and value as two arguments, and `sendFile` fetches a take whole.
 
-**The 14 Pro, on 0.1.113:**
+**The 14 Pro, on 0.1.114:**
 
 1. **FX on a dark scene:** in export's grade editor, or the look panel's FX page, raise any FX
    slider on a dark take and check the shadows stay where they were, with no grey veil. Then
@@ -65,7 +70,7 @@ and are kept out of this public repo. Over the link,
 8. **Later:** a colour chart shot; the matched pair for Apple's preview; ARRI Wide Gamut 3;
    `scope_cost.json`, which needs about 112 GB free.
 
-**The iPhone 16:** on 0.1.113, the same dark take with FX on as in the screen recording, and a
+**The iPhone 16:** on 0.1.114, the same dark take with FX on as in the screen recording, and a
 return to the app after two minutes away; then **Run probe**, phone still, for its overlapped bracket cases and stabilizer
 names; a five-minute HEVC 4:2:2 take at full size, started cold and unplugged, and one at
 2880x2160.
@@ -76,6 +81,11 @@ names; a five-minute HEVC 4:2:2 take at full size, started cold and unplugged, a
 
 In rough order of what's most useful next:
 
+- **The ultra wide's stabilization, proposed:** measure the 16's take first; then build Measure
+  stabilizer below, saving each lens's timing offset, direction and optics share, with fast
+  correction off for a lens whose fit is poor; then lens distortion in the warp, from a Gyroflow
+  calibration import for the ultra wide, which Apple gives no table for in RAW; then rolling
+  shutter, once the readout time is measured.
 - **Stabilize, after the phone's verdict:** see
   [decisions/stabilized-export.md](decisions/stabilized-export.md) for the design and its
   limits. Left: rolling-shutter correction, lens distortion in the warp, a horizon lock, a view
