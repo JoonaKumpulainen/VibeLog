@@ -911,8 +911,8 @@ def main():
     rounding = commands.add_parser("round", help="a suite that checks results, puts settings back and writes a report")
     rounding.add_argument("plan", type=Path)
     rounding.add_argument("--timeout", type=float, default=30)
-    rounding.add_argument("--go", type=int, nargs="?", const=5, default=0, metavar="SECONDS",
-                          help="don't wait for Enter at pauses: the phone is ready; count down instead (5 s)")
+    rounding.add_argument("--go", action="store_const", const=5, default=0,
+                          help="don't wait for Enter at pauses: the phone is ready; count down 5 s instead")
     rounding.set_defaults(run=round_)
     options = parser.parse_args()
     options.run(options)
