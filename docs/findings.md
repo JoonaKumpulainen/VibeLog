@@ -619,6 +619,12 @@ an item from **Not verified** once it is.
   unplugged, on 0.1.124 with **Efficient when hot** on, wrote 5,094 frames at 29.99 fps and lost
   none, with no heat change. It's the first setup proven in GPU limits.
 
+- **The first trial takes, 14 Pro on 0.1.126, 2026-11-12:** ProRes 422 HQ at full size in log
+  wrote 29.75 fps and lost nothing, which proved it in the encoder limits; the same with ACES 2.0
+  baked in wrote HEVC 4:2:0, as BAKE does, at 29.95 fps with 1 frame lost on the GPU. Both takes
+  were deleted. The run left the codec on ProRes 422 HQ instead of HEVC 4:2:0, since turning
+  BAKE off swaps the codec back after the codec was restored; fixed in `a41f122`.
+
 ## Not verified
 
 - **What the 16's tester saw as added shake on the ultra wide:** take `140255`'s copy added none
