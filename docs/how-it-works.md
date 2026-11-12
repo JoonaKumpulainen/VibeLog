@@ -155,12 +155,20 @@ leaves the standard setup on its own evidence, so a workaround for one never rea
   more, otherwise the most pixels, then room to spare, then the same chroma. Only an untouched
   default moves. The first launch's check is quick, with the camera running and 20 frames, and
   under-reads: on the 14 Pro, HEVC at full size read 27.5 fps against 30.5 with the camera
-  stopped, ProRes 422 HQ 81 against 194. **Measure encoders again** in Diagnostics measures with
+  stopped, ProRes 422 HQ 81 against 194. **Measure this phone again** in Diagnostics measures with
   the camera stopped, 45 frames, at nominal heat when it can, and records the method and heat.
 - **Takes outrank trials:** a log take in the chosen size, five seconds or more, that held 29.5
   fps with the encoder refusing nothing goes into `proven`, and that codec and size never warns
   again; one whose encoder refused frames goes into `strained` and always warns.
   `tools/check_benchmark.py` lists where a phone's figures disagree with its takes.
+- **GPU:** `GPUSupport` keeps the GPU cost test's median per recording setup, by path, work (log,
+  baked look, baked FX) and debayer, in `gpu_support.json`. **Measure this phone again** runs it
+  after the encoders. Its time alone can't say whether a take will hold, since a take's GPU time
+  reads two to three times it and heat decides over minutes, so takes decide: a take of 150 s or
+  more that lost under 0.2% of its frames on the GPU proves its setup, and one that lost over 1%
+  strains it. A setup warns only when strained, or when it costs more than a tenth over the
+  heaviest proven one. With no takes yet, nothing warns. A take whose path or debayer changed for
+  heat proves nothing.
 - **Adding a fallback:** give it a step on the ladder or a measured trial, never a model name, and
   put the costlier change later.
 

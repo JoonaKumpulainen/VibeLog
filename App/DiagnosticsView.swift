@@ -40,11 +40,12 @@ struct DiagnosticsView: View {
                     close()
                     model.runProbe()
                 }
-                Button("Measure encoders again") {
+                Button("Measure this phone again") {
                     close()
                     model.runEncoderTest()
                 }
                 LabeledContent("Encoder limits", value: model.encoderLimitsText)
+                LabeledContent("GPU limits", value: model.gpuLimitsText)
                 Button("Run GPU cost test") {
                     close()
                     model.runCostTest()

@@ -276,6 +276,8 @@ final class AppModel: ObservableObject {
     /// What this phone's encoders can do: the codec list at once, then trial encodes, measured
     /// once per phone and iOS version.
     @Published private(set) var encoderSupport = EncoderSupport.saved() ?? EncoderSupport.codecList()
+    /// The GPU's cost per recording setup on this phone, and what takes showed about them.
+    @Published private(set) var gpuSupport = GPUSupport.saved()
     /// How this phone's RAW stream is set up: the standard way until its own stream stalls.
     @Published private(set) var captureSupport = CaptureSupport.saved()
     /// The current step was reached after a stall and hasn't streamed long enough to keep.
@@ -1065,6 +1067,7 @@ final class AppModel: ObservableObject {
         if !bakeLook, let warning = encoderSupport.warning(for: encoderKey, size: encoderSize.label) {
             return warning
         }
+        if let warning = gpuSupport.warning(for: gpuSetupKey) { return warning }
         return nil
     }
 
@@ -1245,13 +1248,22 @@ final class AppModel: ObservableObject {
         return text
     }
 
+    /// The recording setup a take would run, as `GPUSupport` keys it: baked FX always run on the
+    /// Efficient path.
+    var gpuSetupKey: String {
+        let fx = bakeLook && processing.bakeEffects && !lookEffects.isNeutral
+        let path = fx ? "efficient" : (processing.pipeline == .efficient ? "efficient" : "maximum")
+        let work = fx ? "fx" : bakeLook ? "look" : "log"
+        return GPUSupport.key(path: path, work: work, debayer: processing.demosaic == .bilinear ? "bilinear" : "malvar")
+    }
+
     /// The key a take's codec has in `EncoderSupport`, with 12-bit ProRes apart.
     var encoderKey: String { twelveBitProRes ? EncoderSupport.twelveBitID : encoderPreset.id }
 
-    /// How long **Measure encoders again** waits for the phone to cool before measuring anyway.
+    /// How long **Measure this phone again** waits for the phone to cool before measuring anyway.
     static let encoderCoolingLimit: TimeInterval = 300
 
-    /// **Measure encoders again**: stops the camera, waits up to five minutes for nominal heat,
+    /// **Measure this phone again**: stops the camera, waits up to five minutes for nominal heat,
     /// writes the full encoder report, and replaces the quick first-launch figures with careful
     /// ones, which the warnings and defaults then use. What real takes showed is kept, since a
     /// take outranks any trial.
@@ -1272,14 +1284,50 @@ final class AppModel: ObservableObject {
                         encoderSupport = support
                         support.save()
                         fitToPhone(choosingDefaults: false)
-                        isBusy = nil
-                        lastResult = "Encoders measured at \(support.heat) heat; report in probes/\(url.lastPathComponent)"
-                        startStreamAfterConfigure = true
-                        reconfigure()
+                        // The GPU's setups next, with the camera still stopped.
+                        guard let pipeline else {
+                            isBusy = nil
+                            startStreamAfterConfigure = true
+                            reconfigure()
+                            return
+                        }
+                        pipeline.runCostTest(progress: { text in
+                            DispatchQueue.main.async { self.isBusy = text }
+                        }, completion: { [self] gpuReport in
+                            saveGPUCosts(from: gpuReport)
+                            isBusy = nil
+                            lastResult = "Measured at \(support.heat) heat; reports in probes/\(url.lastPathComponent) and \(gpuReport.lastPathComponent)"
+                            startStreamAfterConfigure = true
+                            reconfigure()
+                        })
                     }
                 })
             }
         }
+    }
+
+    /// Keeps the cost test's figures per setup, with the heat they were measured at. What takes
+    /// showed is kept.
+    private func saveGPUCosts(from report: URL) {
+        let lines = ((try? String(contentsOf: report, encoding: .utf8)) ?? "").components(separatedBy: "\n")
+        let costs = GPUSupport.costs(fromReport: lines)
+        guard !costs.isEmpty else { return }
+        gpuSupport.costs = costs
+        gpuSupport.heat = SystemStatus.thermalName
+        gpuSupport.measuredAt = Date()
+        gpuSupport.save()
+        Log.shared.info("GPU limits saved: " + costs.sorted { $0.key < $1.key }
+            .map { String(format: "%@ %.1f ms", $0.key, $0.value) }.joined(separator: ", "))
+    }
+
+    /// How the GPU limits stand, for Diagnostics.
+    var gpuLimitsText: String {
+        guard !gpuSupport.costs.isEmpty else { return "Not measured yet" }
+        var text = "\(gpuSupport.costs.count) setups timed"
+        if let date = gpuSupport.measuredAt { text += ", " + date.formatted(date: .abbreviated, time: .omitted) }
+        if !gpuSupport.proven.isEmpty { text += "; \(gpuSupport.proven.count) proven by takes" }
+        if !gpuSupport.strained.isEmpty { text += "; \(gpuSupport.strained.count) fell behind" }
+        return text
     }
 
     /// Calls back on the main queue once the phone is at nominal heat, or at the deadline.
@@ -1305,6 +1353,7 @@ final class AppModel: ObservableObject {
             pipeline.runCostTest(progress: { text in
                 DispatchQueue.main.async { self.isBusy = text }
             }, completion: { [self] url in
+                saveGPUCosts(from: url)
                 isBusy = nil
                 lastResult = "GPU cost test saved: probes/\(url.lastPathComponent)"
                 startStreamAfterConfigure = true
@@ -1992,6 +2041,7 @@ final class AppModel: ObservableObject {
     private var takeSize = ""
     private var takeChosenSize = ""
     private var takeEncoderKey = ""
+    private var takeGPUSetup = ""
 
     private func startEncoding() {
         guard let pipeline, processing.enabled, method.isPhoto else {
@@ -2004,6 +2054,7 @@ final class AppModel: ObservableObject {
         takeSize = outputSize.label
         takeChosenSize = encoderSize.label
         takeEncoderKey = encoderKey
+        takeGPUSetup = gpuSetupKey
         let name = "video_\(Storage.timestamp())"
         let url = Storage.videos.appendingPathComponent(name + ".mov")
         let metadata: [String: String] = [
@@ -2123,6 +2174,13 @@ final class AppModel: ObservableObject {
             // What the take showed about its encoder, for log takes in the chosen size only: a
             // baked take adds GPU work and may write another codec, and 16:9 is a smaller size.
             logUploader.takeFinished()
+            // A take whose path or debayer changed for heat mixes two setups, so it says nothing.
+            let changedForHeat = takeHeatEvents.contains { $0.contains("hot:") && !$0.contains("no change") }
+            if !changedForHeat {
+                gpuSupport.record(take: takeGPUSetup, seconds: finished.seconds, frames: finished.framesWritten,
+                                  gpuDropped: gpu.dropped)
+                gpuSupport.save()
+            }
             if !takeBaked, takeSize == takeChosenSize {
                 encoderSupport.record(take: takeEncoderKey, size: takeChosenSize, seconds: finished.seconds,
                                       fps: finished.fps, encoderDrops: encoderDrops)

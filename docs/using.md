@@ -174,10 +174,13 @@ sidecar names both. Curve constants match colour-science's implementations of th
 
 With **Encode video** on, recording writes the log image to `videos/video_*.mov` with stereo
 microphone audio, plus a `.json` sidecar naming the curve, gamut, look, and the take's shutter, ISO
-and white balance with how each behaved. **Measure encoders again** stops the camera, lets the phone
+and white balance with how each behaved. **Measure this phone again** stops the camera, lets the phone
 cool to nominal heat for up to five minutes, times every codec and size on synthetic frames, saves
-`probes/encoders_*.txt`, and replaces the quick first-launch figures the warnings use. **Encoder
-limits** below it says how and when they were measured. A take of five seconds or more that holds
+`probes/encoders_*.txt`, and replaces the quick first-launch figures the warnings use. It then
+times the GPU for each recording setup, as **Run GPU cost test** does. **Encoder limits** and
+**GPU limits** below it say how and when they were measured, and what takes proved. A take of
+two and a half minutes or more that keeps nearly every frame proves its setup on the GPU; one
+that falls behind makes that setup warn. A take of five seconds or more that holds
 30 fps in a codec and size proves it, and its warning stops for good; a take whose encoder drops
 frames makes it warn from then on. **Run GPU cost test** times each stage of a frame on the
 GPU the same way, for both pipelines and debayers, and saves `probes/gpu_cost_*.txt`.

@@ -16,7 +16,7 @@ public struct EncoderSupport: Codable, Equatable, Sendable {
     /// The trial encodes have run, so `fps` is the whole answer.
     public var measured: Bool
     /// How `fps` was measured: the first launch's quick check, with the camera running and a few
-    /// frames, under-reads by up to two and a half times on the 14 Pro; **Measure encoders again**
+    /// frames, under-reads by up to two and a half times on the 14 Pro; **Measure this phone again**
     /// stops the camera and encodes more.
     public var method = Method.quick
     /// The phone's heat when `fps` was measured, and when.

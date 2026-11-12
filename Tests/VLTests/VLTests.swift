@@ -3303,3 +3303,50 @@ final class LogSharingScheduleTests: XCTestCase {
         XCTAssertEqual(try (packed as NSData).decompressed(using: .zlib) as Data, json)
     }
 }
+
+final class GPUSupportTests: XCTestCase {
+    private let report = """
+    stage, median ms, lowest to highest
+    Maximum, Malvar-He-Cutler: debayer to the full image, 17.7, 14.6 to 24.7
+    Maximum, Malvar-He-Cutler: debayer and planes, log, 17.6, 16.1 to 19.8
+    Maximum, Malvar-He-Cutler: debayer and planes with the look, 14.9, 13.7 to 16.8
+    Maximum, Malvar-He-Cutler: debayer, glow and planes with the look and FX, 18.7, 17.5 to 20.5
+    Efficient, Malvar-He-Cutler: a log take, planes and the monitor image every other frame, 8.2, 6.9 to 8.4
+    Efficient, Malvar-He-Cutler: planes with the look, 7.5, 7.5 to 7.8
+    Efficient, Malvar-He-Cutler: a baked FX take, monitor image and glow every other frame, 11.9, 8.7 to 12.9
+    Efficient, Bilinear: a baked FX take, monitor image and glow every other frame, 10.5, 7.4 to 10.7
+    thermal at end=fair
+    """
+
+    func testTheCostTestsSetupsAreRead() {
+        let costs = GPUSupport.costs(fromReport: report.components(separatedBy: "\n"))
+        XCTAssertEqual(costs["maximum-log-malvar"], 17.6)
+        XCTAssertEqual(costs["maximum-fx-malvar"], 18.7)
+        XCTAssertEqual(costs["efficient-fx-malvar"], 11.9)
+        XCTAssertEqual(costs["efficient-fx-bilinear"], 10.5)
+        XCTAssertNil(costs.keys.first { $0.contains("full") }, "the debayer alone isn't a recording setup")
+        XCTAssertEqual(costs.count, 7)
+    }
+
+    func testNothingWarnsWithoutTakes() {
+        var gpu = GPUSupport(device: "iPhone15,2", system: "27.2")
+        gpu.costs = GPUSupport.costs(fromReport: report.components(separatedBy: "\n"))
+        XCTAssertNil(gpu.warning(for: "maximum-fx-malvar"))
+    }
+
+    func testTakesDecide() {
+        var gpu = GPUSupport(device: "iPhone15,2", system: "27.2")
+        gpu.costs = ["efficient-log-malvar": 8.2, "efficient-fx-malvar": 11.9, "maximum-log-malvar": 17.6]
+        // A short take proves nothing; a long clean one proves its setup.
+        gpu.record(take: "efficient-log-malvar", seconds: 60, frames: 1800, gpuDropped: 0)
+        XCTAssertTrue(gpu.proven.isEmpty)
+        gpu.record(take: "efficient-log-malvar", seconds: 600, frames: 18000, gpuDropped: 2)
+        XCTAssertTrue(gpu.proven.contains("efficient-log-malvar"))
+        // Heavier than anything proven warns; within a tenth doesn't.
+        XCTAssertNotNil(gpu.warning(for: "efficient-fx-malvar"))
+        XCTAssertNil(gpu.warning(for: "efficient-log-malvar"))
+        // A take that fell behind always warns.
+        gpu.record(take: "maximum-log-malvar", seconds: 120, frames: 3400, gpuDropped: 200)
+        XCTAssertTrue(gpu.warning(for: "maximum-log-malvar")!.contains("fell behind"))
+    }
+}

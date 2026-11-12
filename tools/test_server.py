@@ -407,6 +407,8 @@ class Suite:
         {"use": "video_20261112_000714.mov"}   makes a take already on the phone the round's take
         {"pause": "Walk slowly with the phone"}   waits for Enter here, for what needs a person
         {"ask": "Did the shadows stay as dark?"}  a question for a person, listed in the report
+        {"status": {"encoderLimits": "~proven by takes"}}   checks the phone's status reply;
+                        "~text" means it contains the text
 
     A round puts back every setting it changed when it ends, even after a failure.
 
@@ -766,6 +768,17 @@ class Suite:
             print(f"take: {self.last_take}, already on the phone", flush=True)
         elif "pause" in step:
             input(f"\n>>> {step['pause']}\n    Press Enter when done. ")
+        elif "status" in step:
+            values = self.ask({"action": "status"})["values"]
+            for key, wanted in step["status"].items():
+                actual = values.get(key)
+                if isinstance(wanted, str) and wanted.startswith("~"):
+                    passed = actual is not None and wanted[1:] in actual
+                    verdict = "PASS" if passed else "FAIL"
+                    self.checks.append((step.get("label", "status"), verdict, f"{key} contains {wanted[1:]!r} : {actual}"))
+                    print(f"  {verdict} {key} contains {wanted[1:]!r} : {actual}", flush=True)
+                else:
+                    self.expect(step.get("label", "status"), values, {key: wanted})
         elif "ask" in step:
             self.questions.append(step["ask"])
             print(f"for a person: {step['ask']}", flush=True)

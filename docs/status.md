@@ -52,7 +52,7 @@ which ends with the base 16 over the internet link.
 ## Waiting on the phone
 
 Step-by-step instructions, with what to send, are in [next-tests.md](next-tests.md). In short:
-**Measure encoders again** and a take proving a codec, on both phones; log sharing's batching; the
+**Measure this phone again** and a take proving a codec, on both phones; log sharing's batching; the
 base 16's ultra wide questions, slider drags and a 5-minute cold take.
 
 The 14 Pro fetches over USB when plugged in: see **Before you start** in next-tests.md. The test
@@ -98,7 +98,7 @@ In rough order of what's most useful next:
     again**, every default, codec, size, pipeline and the hot paths, is set to what this phone
     measured holding 30 fps with room. Only a setting nobody has touched moves, as `fitToPhone`
     does for codec and size today, and the notice says what moved.
-  - **Measure encoders again:** one button in Settings, **Advanced**, **Diagnostics**, where
+  - **Measure this phone again:** one button in Settings, **Advanced**, **Diagnostics**, where
     tests live by the design rules. It merges with the existing **Encoder test**, which only
     writes a report today, so one run saves the report and updates the limits. It stops the
     camera first and waits for nominal heat, since the first-launch check ran with the stream

@@ -136,7 +136,7 @@ public enum LogSharing {
         paths += list("videos").filter { $0.hasSuffix(".mov.json") || (gyro && $0.hasSuffix(".gcsv")) }
         paths += list("probes").filter { [".txt", ".json", ".csv"].contains(where: $0.hasSuffix) }
         paths += list("lenses", recursive: true).filter { $0.hasSuffix(".json") }
-        paths += ["capture_support.json", "encoder_support.json", "benchmarks.csv"]
+        paths += ["capture_support.json", "encoder_support.json", "gpu_support.json", "benchmarks.csv"]
         return paths.sorted().compactMap { path in
             let url = documents.appendingPathComponent(path)
             guard let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int,

@@ -23,13 +23,13 @@ don't bend). See [findings.md](findings.md).
   `pymobiledevice3` in `~/.venvs/imobile` and the app's bundle ID in the results folder's
   `usb_app_id`, both set up on 2026-11-12.
 
-## Test 1: Measure encoders again (both phones)
+## Test 1: Measure this phone again (both phones)
 
 New in 0.1.118. The first launch's encoder check runs with the camera on and reads too slow:
 on the 14 Pro it warned that HEVC at full size managed 27 fps, while 65 real takes held 30.
 
 1. Let the phone sit for a few minutes so it's cool. Leave VibeLog open on the camera screen.
-2. In Settings, **Advanced**, **Diagnostics**, tap **Measure encoders again**. The camera stops;
+2. In Settings, **Advanced**, **Diagnostics**, tap **Measure this phone again**. The camera stops;
    if the phone is warm it waits up to 5 minutes, showing "Letting the phone cool first".
 3. Wait for the camera to come back, about a minute. Don't record meanwhile.
 4. Open Diagnostics again and read the line **Encoder limits**.
