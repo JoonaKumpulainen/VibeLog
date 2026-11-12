@@ -45,7 +45,8 @@ keeps Documents as long as the bundle ID stays the same.
 
 Turn the ring/silent switch to silent first, then open VibeLog: the camera starts live.
 [docs/using.md](docs/using.md) walks through the camera screen, looks, export, settings,
-recording limits and where files go.
+recording limits and where files go. Export can also steady a take from its gyro log, a first
+version that hasn't yet been proven on the phone.
 
 ## Project layout
 

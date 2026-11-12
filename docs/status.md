@@ -6,146 +6,109 @@ short.
 
 ## Latest build
 
-As of mid Phase 7. The latest build is `652ba7a`, CI run 111, version 0.1.111, which passed
-with 187 tests and one skip: the ultra wide's stabilizing corrects every speed, the probe prints
-RAW photos' maker notes, and the Legal page and gyro wording say what the optics mean for
-Gyroflow. Before it, `7e2b514`, run 110: stabilized export, its preview, stabilized copies of baked takes
-and the probe's stabilizer names, none tried on a phone. Run 109, of `c669641` alone, never
-started: GitHub lists it as queued and won't cancel it. Before it, `35d43dc`, run 108: a baked-FX take makes its monitor image and glow every other
-frame, and the 14 Pro held two 10-minute takes back to back on it with no cooling, `212113`
-with 2 frames lost and `213229`, started at serious heat, with 30. `907287d`, run 107, added the GPU cost test, which ran on the 14 Pro.
-Before it,
-`b740eab`, run 106: baked-FX takes run on the Efficient path throughout, and the
-probe's crash on the 14 Pro is fixed. The 14 Pro proved the probe, and a baked-FX take with no
-cooling held 5:07 before the hot GPU stepped down. Before it, `02d2d11`, run
-105: a baked-FX take
-hands its glow to the viewfinder only when a frame finishes, from a pool of four, after take
-`164209` ran 45 ms a frame from its start on the Maximum path. The 14 Pro proved the fix in take
-`190958`, which then stepped down at 2:27 as `192732` had. Before it,
-`6f4d393`, run 104, passed with 180 tests and one skip: measuring lenses also writes their
-Gyroflow profiles, so the test link can fetch them. `f8eb02a`, run 103, added Gyroflow lens profiles from the Lenses
-page and overlapped bracket cases in the probe; `657767f`,
-run 102, versioned each build `0.1.<CI run>` for SideStore, and `1a1d56c`, run 101, added reset
-all, change dots, export's fullscreen preview and movable scope, and the lens stabilization
-probe. None of that has been tried on a phone except the first probe, on the iPhone 16. `edec570`
-fitted capture and the codec default to each phone, and worked on the iPhone 16. `cb8137a`, run
-97, shared the take's glow with the viewfinder during baked-FX takes, which the 14 Pro showed
-slows the Maximum path: see [findings.md](findings.md). Every
-session is in [history/2026-11.md](history/2026-11.md); the last is **Session on 2026-11-11**.
+As of mid Phase 7, with Phase 8's stabilized export begun. The latest build is `2368f1d`, CI run
+112, version 0.1.112, which passed with 188 tests and one skip. It fixes **Stabilize**'s timing, eases its limit at 130%
+instead of cutting frames off, turns a baked take's export into a **Stabilize** screen and
+explains smoothness. None of that has been tried on a phone.
+
+The builds before it, all from the sessions of 2026-11-11 and 12:
+
+| Build | Run | What it added | On the phone |
+|---|---|---|---|
+| `652ba7a` | 111 | Ultra wide corrects every speed, maker note probe, legal and Gyroflow wording | Probe ran; stabilized copies measured |
+| `7e2b514` | 110 | Stabilized export, its preview, stabilized copies of baked takes, stabilizer names in the probe | Probe ran |
+| `35d43dc` | 108 | Baked-FX takes make the monitor image and glow every other frame | Proven: 20 minutes back to back |
+| `907287d` | 107 | GPU cost test | Ran |
+| `b740eab` | 106 | Baked-FX takes on the Efficient path, probe crash fix | Proven |
+| `02d2d11` | 105 | The take's glow from a pool, handed over when a frame finishes | Proven |
+
+Run 109 never started and can be ignored. Every session is in
+[history/2026-11.md](history/2026-11.md); the last is **Session on 2026-11-12**.
+
+## Start here next session
+
+1. **Ask the owner how Stabilize looks on 0.1.112,** on takes `000714` (0.5x) and `220644` (1x),
+   both upright and baked, still on the phone. The 0.5x's first copy kept two thirds of its
+   shake; the timing fix should remove most of that.
+2. **If the phone is linked, measure the new copies** against their gyro logs, as was done for
+   the first ones. The method is under **How the copies were measured** below.
+3. **Then pick from Still to build.** Measure stabilizer, per lens, is the natural next step if
+   Stabilize now works; rolling shutter if fast moves still lean or wobble.
 
 ## Waiting on the phone
 
 Files can be read straight from a phone plugged in here, under `/run/user/<uid>/gvfs/afc:*/`.
+The test server is `python3 tools/test_server.py serve`; the phone then needs **Connect** on in
+Diagnostics. The server prints its address and token, which have stayed the same across restarts
+and are kept out of this public repo. Over the link,
+`set` takes name and value as two arguments, and `sendFile` fetches a take whole.
 
-**Either phone, on `6f4d393` or later:**
+**The 14 Pro, on 0.1.112:**
 
-1. **SideStore:** whether the build after the one installed shows as an update by itself.
-2. **Look panel:** the red arrow and the dots in all four holds, and the confirmation sideways.
-3. **Export:** whether "Wheels •" fits its tab upright; the fullscreen preview upright and
-   sideways, with a crop outline on; the scope's drag, snap and resize, and the camera's scope
-   too, whose code changed.
-4. **Run probe on the iPhone 16** for its overlapped cases, phone still, and send the newest
-   `probes/probe_*.txt`. The 14 Pro's ran: no bracket holds 30 fps there. In its lens stabilization
-   section, a stabilizer-off case holding about 30 fps with even 33 ms gaps would make a
-   stabilizer switch for takes worth building. From the 14 Pro it also shows whether its lenses
-   have the switch.
-
-**The 14 Pro:**
-
-5. **Stabilize again, on the next build:** the first copies were measured, and the 0.5x's kept
-   two thirds of its shake from a timing error, now fixed. Stabilize `000714` and `220644`
-   again, and say whether the 0.5x still shakes. Say
-   whether the copy is steadier than the take, whether anything shakes that didn't before, and
-   whether an edge ever shows. Then **Run probe** and send the newest `probes/probe_*.txt`, for
-   its stabilizer names.
-9. **Gyroflow's axes:** a take held sideways, with a few seconds held still, played in Gyroflow,
+1. **Stabilize:** open a baked take in the player and tap **Stabilize**, or a log take and
+   **Export** with **Stabilize** on. Watch the preview with the switch off and on, move
+   **Smoothness**, and save a copy. Say whether the copy is steadier than the take, whether
+   anything shakes that didn't before, whether the 0.5x still shakes, and whether an edge shows.
+2. **A log take stabilized,** since both copies so far came from baked takes.
+3. **Gyroflow's axes:** a take held sideways, with a few seconds held still, played in Gyroflow,
    to check `yXZ` is right there. Upright takes are corrected a quarter-turn off until the
-   `.gcsv` says how the phone was held. The profiles are in the test
-   folder as `gyroflow-back-wide-4032x3024.json` and three more. Load
-   the 1x open gate profile in Gyroflow with a 1x take that has slow pans and a straight edge near
-   a corner, shot at 1/250 s with lens distortion correction off. Say whether Gyroflow loads it,
-   whether it stabilizes, and whether the edge comes out straight. A bowed edge means Apple's
-   table runs the other way.
-6. **`scope_cost.json` needs about 112 GB free** for its ProRes take, and the phone has 109.
-7. **Nothing more for baked FX:** two takes back to back held on `35d43dc`. To run a suite, start the server with `python3
-   tools/test_server.py serve`, turn on **Connect**, then `suite tools/suites/fx_baked.json`.
-   Over the link, `set` takes name and value as two arguments.
-8. **Still waiting on the owner:** the stabilization take, slow pans and quick shakes at 1/250 s;
-   a colour chart shot; the matched pair for Apple's preview; ARRI Wide Gamut 3, left for later.
+   `.gcsv` says how the phone was held.
+4. **Look panel:** the red reset arrow and the change dots in all four holds, and the
+   confirmation sideways.
+5. **Export:** whether "Wheels •" fits its tab upright; the fullscreen preview upright and
+   sideways, with a crop outline on; the scope's drag, snap and resize, on the camera too.
+6. **SideStore:** whether a new build shows as an update by itself.
+7. **Later:** a colour chart shot; the matched pair for Apple's preview; ARRI Wide Gamut 3;
+   `scope_cost.json`, which needs about 112 GB free.
 
-**The iPhone 16:** a five-minute HEVC 4:2:2 take at full size, started cold and unplugged, and one
-at 2880x2160.
+**The iPhone 16:** **Run probe**, phone still, for its overlapped bracket cases and stabilizer
+names; a five-minute HEVC 4:2:2 take at full size, started cold and unplugged, and one at
+2880x2160.
+
+**Friends' 15 Pro, 16 Pro and 17 Pro:** nothing yet. The probe must first list video formats.
 
 ## Still to build
 
-- **A stabilizer switch for takes** fails its condition on the 14 Pro: brackets reach 20.8 fps
-  at best. Not yet struck off by the owner.
-- **A cheaper baked-FX frame, done for now:** the hot take's 30 lost frames, in bursts, are
-  what's left. The aim was a fall from about 29 ms to about 23. The GPU cost test ran on the 14 Pro: a frame costs 12.0 ms alone, 3.3 of it the
-  monitor image and glow, so those every other frame save 13%, and every fourth 20%. Every
-  other frame is in `35d43dc`, and takes `212113` and `213229` held on it, the second at
-  serious heat throughout; the owner chose it over every fourth. Candidates: the monitor image and glow every other frame, cheaper per-pixel FX, a
-  slower viewfinder when hot.
-- **FX in baked takes: the long take on the Efficient path.** The Maximum path lost about 7
-  frames a second from about 2 minutes until serious heat brought the Efficient path, which then
-  held. The owner chose the Efficient path from the start of a baked-FX take, built in
-  `b740eab` and waiting on the long take.
-- **ACES 1.3 HDR.**
+In rough order of what's most useful next:
+
+- **Stabilize, after the phone's verdict:** see
+  [decisions/stabilized-export.md](decisions/stabilized-export.md) for the design and its
+  limits. Left: rolling-shutter correction, lens distortion in the warp, a horizon lock, a view
+  of the whole frame with the kept part outlined, and a limit that follows the shake's size.
+- **Measure stabilizer, per lens:** the take-against-gyro fit done by hand on `220644`, built
+  into the app, so each lens gets its own curve in place of the 1x's 2 Hz. The exact route is
+  closed: the lens's shift isn't in a RAW photo's maker note, and no switch exists for a plain
+  RAW stream. Logging maker note keys 15 and 12 through a real take, and two unpublished options
+  for offline stabilization, are untried.
 - **The `.gcsv`'s orientation by hold,** so Gyroflow corrects the right axes on upright takes.
-- **Lens profiles, next steps:** the straight-edge check, colour from a chart, the readout time
-  for Gyroflow, and a profile for the ultra wide, which Apple gives no table for.
+  Needs one test take each way up.
 - **A native log mode for Pro phones,** starting with the probe listing video formats: see
-  [decisions/native-log-mode.md](decisions/native-log-mode.md). The HLG idea was dropped.
-- **The stabilizer's own shift isn't in a RAW photo's maker note,** which the probe printed on
-  `652ba7a`. Left to try: logging maker note keys 15 and 12 through a real take, two unpublished
-  switches for offline stabilization, and a **Measure stabilizer** test per lens, the
-  take-against-gyro fit done by hand on `220644`.
-- **Stabilized export, first version built, waiting on the phone:** see
-  [decisions/stabilized-export.md](decisions/stabilized-export.md). Next: a limit that follows
-  the shake's size, rolling shutter, lens distortion and a horizon lock.
-- After it: Then Phase 8: denoise, proxies and
-  log-to-log conversion.
+  [decisions/native-log-mode.md](decisions/native-log-mode.md).
+- **ACES 1.3 HDR.**
+- **Lens profiles, next steps:** the straight-edge check, colour from a chart, the readout time,
+  and a measured profile for the ultra wide, whose focal length comes from its field of view.
+- **Then the rest of Phase 8:** denoise and proxies.
 
-## Stabilization check: answered on 2026-11-11
+**Decisions waiting on the owner:**
 
-Take `220644`'s own frames show the optical stabilizer running during RAW capture: pans pass
-whole, and a hand's small fast shake mostly doesn't reach the picture. The figures are in
-[findings.md](findings.md). Stabilized export should correct slow, large motion from the gyro
-and leave the rest to the optics. The notes below are the earlier attempt.
+- **Strike the stabilizer switch for takes off the list?** Brackets reach 20.8 fps at best on
+  the 14 Pro, and the probes found no other switch.
 
-## Earlier: stabilization check
+**Done for now:** FX in baked takes. They run on the Efficient path with the glow every other
+frame, and held 20 minutes back to back with no cooling, 32 frames lost.
 
-Before building stabilized export, find out whether optical stabilization moves the picture during
-RAW capture, which the gyro can't see, and the sensor's rolling-shutter readout time. The owner
-recorded `video_20261103_235155.mov`, a 6-second 4032x2268 HEVC take with its `.gcsv`, propped on a
-surface with short shakes at about 4 to 5.5 seconds, and is checking it in Gyroflow.
+## How the copies were measured
 
-- **Gyroflow setup:** set the frame rate to 30 by hand, since Gyroflow read it as "---". Its only
-  lens profile, "iphone 14 pro 30", is for Apple's 3840x2160 video with distortion corrected, not
-  VibeLog's uncorrected 4032-wide frames, so judge the centre of the frame or make a VibeLog profile
-  with Gyroflow's lens calibration. Use a fixed zoom and 4032x2268 output.
-- **Export trouble on the owner's Linux PC:** with **Use GPU encoding** on, Gyroflow wrote a corrupt
-  HEVC file, all green with `cu_qp_delta` errors in ffmpeg, then failed outright: AMD's
-  `libamfrt64.so.1` isn't installed, and VAAPI refuses 10-bit `yuv420p10le`. Turn GPU encoding off,
-  or use ProRes or 8-bit H.264.
-- **What decides it:** steady after stabilizing means optical stabilization isn't in the way. A
-  small float that follows the shakes means it is. A fast pan's leaning verticals give the readout
-  time.
-- **Result, not decisive:** measured frame to frame by phase correlation on the centre of the frame,
-  at 960 wide. Gyroflow's `video_20261103_235155_stabilized.mp4` (3840x2160 H.264) kept the motion:
-  its vertical motion over frames 60 to 133 was 8.3 px rms against 7.5 in the original, the same
-  moves one frame later, so Gyroflow stabilized nothing and says nothing about optical
-  stabilization. The take wasn't propped: from about 4.5 s the phone swung up to the ceiling at up
-  to 16 rad/s, with heavy motion blur. In the original, the gyro's y axis followed the picture's
-  vertical motion with a correlation of 0.96 at a lag within 3 ms, and explained about 92% of it, 2
-  px rms left over. The motion was 0.79 of what a rough focal length, 24 mm equivalent or 2795 px at
-  4032 wide, predicts. That gap may be the estimate, or optical stabilization taking a fifth, and
-  needs a lens calibration to tell. So the `.gcsv` timing and axes look right. A cleaner test needs
-  no Gyroflow: a take at 1/250 s or shorter with a few slow two-second pans or tilts, then a few
-  seconds of small quick shakes. Optical stabilization can't follow big slow moves, so the pans
-  should match the gyro 1:1, and if the shakes come out smaller, it's active and the gap measures
-  it. Phase correlation of frames against the `.gcsv`, a short numpy script, analyses it here.
-- **Then:** stabilized export, as a step before the look in `LookExporter`, from the `.gcsv`, with
-  lookahead smoothing, an optional horizon lock, rolling-shutter correction per row and a crop set
-  in the preview. Live baked stabilization was ruled out: it needs future frames, GPU time the hot
-  path doesn't have, and bakes in a crop.
+This machine has no numpy, so a short pure-Python script did it; it isn't in the repo.
+
+1. Fetch the take and its copy over the link with `sendFile`, and the `.gcsv`.
+2. Decode each to quarter-size grey frames in the sensor's own orientation: `ffmpeg
+   -noautorotate -i take.mov -fps_mode passthrough -vf scale=1008:756:flags=area,format=gray -f
+   rawvideo`.
+3. For each frame pair, find the shift of the middle half's row sums and column sums, and of
+   the left and right thirds' row sums for roll. The content's own move is minus that shift.
+4. Fit those to the angle the gyro turned between the two frame times, times the lens profile's
+   focal length, split into slow and fast at about 2 Hz, trying lags of a few ms each way.
+
+The measured directions: a turn about the phone's x moves the picture right, about y moves it
+up, and about z turns it clockwise, in the stored picture's axes.

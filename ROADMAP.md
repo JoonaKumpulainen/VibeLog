@@ -186,8 +186,9 @@ or shorten recording.
 Keep recording clean, and do the heavy work after the shot, when real-time limits and most heat
 limits no longer apply. Each step writes a new file and leaves the original untouched.
 
-- **One-tap stabilization:** a first version is built into export, untested on a phone: it
-  steadies from the saved gyro data, leaves fast small shake to the optical stabilizer, and
+- **One-tap stabilization:** a first version is built into export, as **Stabilize**, for log and
+  baked takes. Its first copies were measured on the 14 Pro and its timing fixed after; the fix
+  is untested. It steadies from the saved gyro data, leaves fast small shake to the optical stabilizer, and
   enlarges to hide the edges. See
   [docs/decisions/stabilized-export.md](docs/decisions/stabilized-export.md). Rolling shutter,
   lens distortion, a horizon lock and a limit that follows the shake's size are left.

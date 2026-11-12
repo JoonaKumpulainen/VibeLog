@@ -76,7 +76,7 @@ the phone can sustain. When quality and convenience conflict, quality wins.
 | Path | Role |
 |---|---|
 | `App/` | SwiftUI UI, `AppModel`, `FrameRouter`, camera screen with the look panel and its ADJUST, COLOR and FX pages, format panel, library, export with its grade editor, Settings, Diagnostics, `DesignTokens`, `Haptics` |
-| `Modules/VLCore` | Frames, stats, DNG reader, RAW levels, logging, storage, device status, `VideoFrameSink`, `GyroLog`, `AppConfig`, `CaptureSupport`, `GyroflowProfile`, `LookGrade`, `LookStyle`, `LookEffects` |
+| `Modules/VLCore` | Frames, stats, DNG reader, RAW levels, logging, storage, device status, `VideoFrameSink`, `GyroLog`, `SteadyPath` for stabilized export, `AppConfig`, `CaptureSupport`, `GyroflowProfile`, `LookGrade`, `LookStyle`, `LookEffects` |
 | `Modules/VLCapture` | Session, photo RAW driver, video driver, manual controls, audio, `MotionLogger`, probe |
 | `Modules/VLProcessing` | Log curves, color math, `GamutPairing`, `.cube` parser, Metal pipeline with `LookParams`, `ACES2.swift`, `ACES13.swift`, `BuiltInLook` with the grade and HDR encodings, `LookExporter`, `LookPlayback`, `LookEffects`, `ScopeMeter`, still export, `Shaders.metal` |
 | `Modules/VLRecording` | RAW dump writer, `VideoEncoder`, encoder presets, encoder benchmark, `TakeLibrary` |
@@ -86,5 +86,6 @@ the phone can sustain. When quality and convenience conflict, quality wins.
 | `tools/test_server.py` | The test link's server, which sends the phone commands and collects its files |
 | `tools/sidestore_source.py`, `tools/sidestore/icon.png` | Writes the SideStore source from the built IPA, in CI |
 | `tools/suites/export_matrix_1.json`, `_2.json` | Record 2 s in every curve and gamut and export each take |
+| `tools/suites/fx_baked.json`, `fx_cost.json`, `scope_cost.json` and others | Long takes that measure what FX and tools cost when hot |
 
 Modules are dynamic frameworks. Swift is in Swift 5 mode.

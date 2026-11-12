@@ -537,8 +537,11 @@ an item from **Not verified** once it is.
   - **It was enlarged the full 140%,** so some frames were cut off at the edge one by one, which
     adds a stop and start of its own. The take tilted at about 0.5 rad/s, and a pan's start and
     stop are what a long smoothing can't hide.
-  - The fixes, unbuilt: the frame offset is 0, and moves too big to hide are eased in and out
-    instead of cut off, at 130% at most.
+  - The fixes, in `2368f1d`: the frame offset is 0, and moves too big to hide are eased in and
+    out instead of cut off, at 130% at most.
+  - **The 1x's first copy was modestly steadier:** over `220644`'s held stretch, enlarged 133%,
+    roll fell from 2.2 to 1.5 mrad rms a frame, and the shake left to the optics was the same or
+    a little less once the enlargement is divided out.
 
 ## Not verified
 
