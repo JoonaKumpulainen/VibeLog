@@ -36,7 +36,9 @@ extension AppModel {
            !(best.preset.id == hq.id && best.size == EncoderSize.all[0]) {
             plan.append(Trial(label: "\(hq.label) \(EncoderSize.all[0].label), log", preset: hq, size: EncoderSize.all[0], bake: false))
         }
-        plan.append(Trial(label: "\(best.preset.label) \(best.size.label), look baked in", preset: best.preset, size: best.size, bake: true))
+        // BAKE picks its own codec, HEVC 4:2:0 or with Bake to ProRes ProRes 422 HQ, so the label
+        // doesn't name one; the result line says what was written.
+        plan.append(Trial(label: "look baked in, \(best.size.label)", preset: best.preset, size: best.size, bake: true))
         return plan
     }
 
@@ -59,11 +61,13 @@ extension AppModel {
         }
         let trial = state.plan[state.index]
         isBusy = nil
-        encoderPreset = trial.preset
+        // BAKE first: turning it on or off swaps the codec by itself, so the codec comes after,
+        // except for a baked trial, which keeps the codec BAKE chose.
+        bakeLook = trial.bake
+        if !trial.bake { encoderPreset = trial.preset }
         encoderSize = trial.size
         widescreen = false
         twelveBitProRes = false
-        bakeLook = trial.bake
         // A take baked with no look chosen would bake nothing, so it borrows ACES 2.0.
         if trial.bake, selectedLUT.isEmpty { selectedLUT = "ACES 2.0" }
         state.index += 1
@@ -93,10 +97,11 @@ extension AppModel {
 
     private func finishTrials() {
         guard let state = trialState else { return }
+        // BAKE first, since turning it off swaps the codec back by itself; then the codec as it was.
+        bakeLook = state.saved.bake
         encoderPreset = state.saved.preset
         encoderSize = state.saved.size
         widescreen = state.saved.widescreen
-        bakeLook = state.saved.bake
         selectedLUT = state.saved.lut
         twelveBitProRes = state.saved.twelveBit
         trialState = nil
