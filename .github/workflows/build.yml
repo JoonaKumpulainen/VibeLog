@@ -1,22 +1,36 @@
 name: Build unsigned IPA
 
+# The app's code only: tools, docs and test plans run on this computer and don't change the app.
+# The secret check runs on every push anyway. The SideStore tool and its icon still build.
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - '**.md'
+    paths:
+      - '**'
+      - '!**.md'
+      - '!docs/**'
+      - '!tools/**'
+      - 'tools/sidestore_source.py'
+      - 'tools/sidestore/**'
+      - '!.githooks/**'
+      - '!.github/workflows/secrets.yml'
   pull_request:
-    paths-ignore:
-      - '**.md'
+    paths:
+      - '**'
+      - '!**.md'
+      - '!docs/**'
+      - '!tools/**'
+      - 'tools/sidestore_source.py'
+      - 'tools/sidestore/**'
   workflow_dispatch:
 
 jobs:
-  build:
+  # The tests and the IPA build at once, on two Macs, so the IPA is ready in about three minutes
+  # instead of nine. Publishing waits for both, so a build that fails its tests never reaches
+  # SideStore.
+  test:
     runs-on: macos-26
     timeout-minutes: 30
-    # Writes the sidestore release after a build of main.
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -55,6 +69,24 @@ jobs:
       - name: Show test measurements
         if: always()
         run: grep -hE "LUT error|NaN sweep|NaN trace" build/test-output.txt || true
+
+
+  ipa:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
 
       - name: Build for device, unsigned
         run: |
@@ -98,11 +130,25 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+
+  publish:
+    needs: [test, ipa]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Writes the sidestore release and branch.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: VibeLog-unsigned-ipa
+          path: dist
       # SideStore on the phone adds the source once, then offers each build of main as an update.
       # The run number is the build number and the version's last part. SideStore only offered an
       # update once the version itself changed; with 0.1.0 on every build it showed none.
       - name: Publish to the SideStore source
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
         # SideStore gives a source about 3 s, which a release download's redirect can miss, so the
