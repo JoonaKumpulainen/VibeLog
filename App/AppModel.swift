@@ -64,6 +64,12 @@ final class AppModel: ObservableObject {
     var lastTakeFile = ""
     /// A run of trial takes, in `TrialTakes.swift`, or nil.
     var trialState: TrialState?
+    /// This phone's benchmark, in `Benchmark.swift`.
+    @Published var benchmark = BenchmarkProgress.saved()
+    @Published var benchmarkRunning = false
+    /// The one-time offer to measure this phone, and the question about log sharing after it.
+    @Published var benchmarkOffer = false
+    @Published var benchmarkAsksSharing = false
     /// A short message on the camera screen. Tapping it clears it.
     @Published var notice: String?
     @Published var takeAlert: TakeAlert?
@@ -501,6 +507,7 @@ final class AppModel: ObservableObject {
             Log.shared.info("Capture setup for \(captureSupport.device): \(captureSupport.setup.label)")
         }
         loadLastTake()
+        checkBenchmarkAtLaunch()
         // The previous session's logs go once the camera has settled, if sharing is on.
         DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in self?.shareLogs("launch") }
         router.onRecordingElapsed = { [weak self] in

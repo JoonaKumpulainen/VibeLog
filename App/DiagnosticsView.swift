@@ -40,9 +40,19 @@ struct DiagnosticsView: View {
                     close()
                     model.runProbe()
                 }
-                Button("Measure this phone again") {
-                    close()
-                    model.runEncoderTest()
+                if model.benchmarkRunning {
+                    LabeledContent("Measuring", value: model.benchmarkStatusText)
+                    Button("Cancel measuring", role: .destructive) { model.cancelBenchmark() }
+                } else {
+                    Button("Measure this phone again") {
+                        close()
+                        model.startBenchmark(fresh: true)
+                    }
+                    LabeledContent("Benchmark", value: model.benchmarkStatusText)
+                    Button("Measure encoders and GPU only") {
+                        close()
+                        model.runEncoderTest()
+                    }
                 }
                 LabeledContent("Encoder limits", value: model.encoderLimitsText)
                 LabeledContent("GPU limits", value: model.gpuLimitsText)

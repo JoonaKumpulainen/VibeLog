@@ -32,6 +32,7 @@ LATE = re.compile(r"Main thread answered (?P<ms>\d+) ms late on (?P<screen>\S+)"
 THERMAL = re.compile(r"Thermal state changed to (?P<state>\w+)")
 VERSION = re.compile(r"\bapp (?P<version>\d+\.\d+\.\d+)")
 RETURNED = re.compile(r"Returned to the app after (?P<away>\d+) s away(?P<restart>, restarting the camera)?")
+BENCH = re.compile(r"Benchmark: (?P<step>\w+) (?P<status>done|failed|skipped|crashed) in (?P<seconds>\d+) s at (?P<heat>[^:]+): (?P<detail>.*)")
 DRAG = re.compile(r"Slider (?P<title>.+) dragged (?P<seconds>[\d.]+) s, from (?P<start>-?[\d.]+) to (?P<end>-?[\d.]+)")
 
 LOST_LIMIT = 0.005
@@ -47,7 +48,7 @@ def read(path):
     summary = {
         "log": Path(path).name, "phone": None, "ios": None, "app": None, "captureSetup": None,
         "start": None, "end": None, "takes": [], "exports": [], "problems": [], "photoFailures": Counter(),
-        "thermal": [], "mainThread": [], "idlePauses": [], "reducedLoad": 0, "returns": [], "drags": [],
+        "thermal": [], "mainThread": [], "idlePauses": [], "reducedLoad": 0, "returns": [], "drags": [], "benchmark": [],
     }
     takes = {}
     with open(path, encoding="utf-8", errors="replace") as log:
@@ -100,6 +101,10 @@ def read(path):
                 summary["reducedLoad"] += 1
             elif m := RETURNED.match(text):
                 summary["returns"].append({"time": time, "away": int(m["away"]), "restart": bool(m["restart"]), "pausedAfter": None})
+            elif m := BENCH.match(text):
+                summary["benchmark"].append({"time": time, **m.groupdict()})
+                if m["status"] in ("failed", "crashed"):
+                    summary["problems"].append((time, text))
             elif m := DRAG.match(text):
                 summary["drags"].append({"time": time, "title": m["title"], "seconds": float(m["seconds"]),
                                          "moved": abs(float(m["end"]) - float(m["start"]))})
@@ -170,6 +175,11 @@ def report(s):
         out.append("  Problems:")
         for time, text in problems:
             out.append(f"     {time} {text[:150]}")
+    if s["benchmark"]:
+        out.append("  Benchmark:")
+        for b in s["benchmark"]:
+            mark = "!" if b["status"] != "done" else " "
+            out.append(f"   {mark} {b['step']:8} {b['status']:7} {b['seconds']:>4} s at {b['heat']}: {b['detail'][:110]}")
     if s["returns"]:
         out.append("  Returning to the app:")
         for r in s["returns"]:

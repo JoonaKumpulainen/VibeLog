@@ -3369,3 +3369,49 @@ final class GPUSupportTests: XCTestCase {
         XCTAssertTrue(gpu.warning(for: "maximum-log-malvar")!.contains("fell behind"))
     }
 }
+
+final class BenchmarkProgressTests: XCTestCase {
+    private let steps = ["capture", "trials", "lenses", "measure", "probe"]
+
+    func testACrashMidStepIsCaughtAndSkipped() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        var progress = BenchmarkProgress(device: "iPhone13,2", system: "26.6")
+        progress.begin("capture")
+        progress.finish("capture", .init(status: "done", detail: "1x 30 fps", heat: "nominal", seconds: 60))
+        progress.begin("trials")
+        progress.save(to: url)
+        // The app dies here; the next launch reads the file.
+        var next = BenchmarkProgress.saved(device: "iPhone13,2", system: "26.6", from: url)
+        XCTAssertEqual(next.noteCrash(), "trials")
+        XCTAssertEqual(next.results["trials"]?.status, "crashed")
+        XCTAssertEqual(next.pending(steps), ["lenses", "measure", "probe"])
+        XCTAssertNil(next.noteCrash())
+    }
+
+    func testANewIOSVersionMeasuresAgain() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        var progress = BenchmarkProgress(device: "iPhone13,2", system: "26.6")
+        progress.finishedAt = Date()
+        progress.save(to: url)
+        XCTAssertTrue(BenchmarkProgress.saved(device: "iPhone13,2", system: "26.6", from: url).finished)
+        XCTAssertFalse(BenchmarkProgress.saved(device: "iPhone13,2", system: "27.0", from: url).finished)
+    }
+
+    func testTheLogLineHasAFixedForm() {
+        let line = BenchmarkProgress.logLine("capture", .init(status: "done", detail: "1x 30 fps", heat: "nominal", seconds: 64.4))
+        XCTAssertEqual(line, "Benchmark: capture done in 64 s at nominal: 1x 30 fps")
+    }
+
+    func testEachLensKeepsTheHighestRateItHeld() {
+        let results = [
+            LensCapture(lens: "1x", frameRate: 30, fps: 29.7, missed: 2, failures: 0, setup: "standard"),
+            LensCapture(lens: "0.5x", frameRate: 30, fps: 21.0, missed: 40, failures: 3, setup: "standard"),
+            LensCapture(lens: "0.5x", frameRate: 24, fps: 23.8, missed: 1, failures: 0, setup: "standard"),
+            LensCapture(lens: "3x", frameRate: 30, fps: 12.0, missed: 90, failures: 9, setup: "standard"),
+            LensCapture(lens: "3x", frameRate: 24, fps: 15.0, missed: 50, failures: 9, setup: "standard"),
+        ]
+        XCTAssertEqual(LensCapture.bestRates(results), ["1x": 30, "0.5x": 24, "3x": 0])
+    }
+}

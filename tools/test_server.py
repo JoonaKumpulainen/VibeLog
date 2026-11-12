@@ -330,6 +330,8 @@ def command_from(words):
         return {"action": action, "name": rest[0], "value": " ".join(rest[1:])}
     if action in ("sendFile", "applyPreset", "savePreset", "defaultPreset"):
         return {"action": action, "name": " ".join(rest)}
+    if action == "benchmark":
+        return {"action": action, "value": rest[0] if rest else ""}
     if action in ("stream", "focusAt"):
         return {"action": action, "value": rest[0]}
     if action == "export":
