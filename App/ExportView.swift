@@ -38,6 +38,9 @@ struct ExportView: View {
     @State private var stabilize = false
     @State private var stabilizeSeconds = 0.6
     @State private var dragLog = SliderDragLog()
+    /// A slider is held. The form stops scrolling meanwhile: on iOS 26 a fast drag went to the
+    /// scroll instead of the slider, which only moved when dragged slowly.
+    @State private var sliding = false
     /// What the stabilized preview did, or why it couldn't: its enlargement, or what's missing.
     @State private var steadyNote: String?
     /// Where the crop sits, -1 to 1 across what it leaves out, as the take plays.
@@ -135,7 +138,7 @@ struct ExportView: View {
                             if editingGrade {
                                 ExportGradeEditor(
                                     lutName: $lutName, lutMadeForRec709: $lutMadeForRec709, grade: $grade, effects: $effects,
-                                    scopeKind: $scopeKind)
+                                    scopeKind: $scopeKind, sliding: $sliding)
                             } else {
                                 settingsSections
                             }
@@ -143,6 +146,7 @@ struct ExportView: View {
                         // Grouped in every orientation, on the same ground as the preview.
                         .formStyle(.grouped)
                         .scrollContentBackground(.hidden)
+                        .scrollDisabled(sliding)
                     }
                     if sideways, !previewLeads { preview(sideways) }
                 }
@@ -219,7 +223,7 @@ struct ExportView: View {
         .onChange(of: lutMadeForRec709) { _, _ in refreshPreview() }
         .onChange(of: grade) { _, _ in refreshSoon() }
         .onChange(of: effects) { _, _ in refreshSoon() }
-        .interactiveDismissDisabled(job.progress != nil || editingGrade)
+        .interactiveDismissDisabled(job.progress != nil || editingGrade || sliding)
         .haptic(.selection, trigger: lutName)
         .haptic(.selection, trigger: codec)
         .haptic(.selection, trigger: quality)
@@ -379,7 +383,7 @@ struct ExportView: View {
                             }
                             HStack(spacing: 8) {
                                 Text(sides ? "Left" : "Top").font(.caption).foregroundStyle(.secondary)
-                                Slider(value: $cropShift, in: -1...1)
+                                Slider(value: $cropShift, in: -1...1) { editing in sliding = editing }
                                 Text(sides ? "Right" : "Bottom").font(.caption).foregroundStyle(.secondary)
                             }
                         }
@@ -402,6 +406,7 @@ struct ExportView: View {
                                 HStack(spacing: 8) {
                                     Text("Follows you").font(.caption).foregroundStyle(.secondary)
                                     Slider(value: $stabilizeSeconds, in: 0.2...2, step: 0.1) { editing in
+                                        sliding = editing
                                         dragLog.note("Smoothness", editing: editing, value: stabilizeSeconds)
                                     }
                                     Text("Holds still").font(.caption).foregroundStyle(.secondary)
@@ -932,6 +937,8 @@ struct ExportGradeEditor: View {
     @Binding var effects: LookEffects
     /// The scope over the preview while grading, or nil for none.
     @Binding var scopeKind: ScopeKind?
+    /// Set while a slider is held, so the form around it holds still.
+    @Binding var sliding: Bool
     @State private var tab = Tab.adjust
     @State private var haptics = DetentHaptics()
     @State private var dragLog = SliderDragLog()
@@ -1168,6 +1175,7 @@ struct ExportGradeEditor: View {
             }
             Slider(value: ticking(value, range: range), in: range) { editing in
                 if editing { haptics.prepare() }
+                sliding = editing
                 dragLog.note(title, editing: editing, value: value.wrappedValue)
             }
             .tint(tint)

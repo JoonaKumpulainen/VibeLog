@@ -610,8 +610,11 @@ an item from **Not verified** once it is.
   (see above). Most likely an older build's 20 ms offset, before 0.1.112, or 1/50 s motion blur;
   which build made the shaky copy isn't known.
 - **Why the base iPhone 16's sliders lag in Export:** not a stalled main thread, measured on
-  0.1.116 (see above). Suspected next: the grade editor's sliders sit in a scrolling form, and
-  on iOS 26 the scroll may take a drag with any vertical movement. Unproven.
+  0.1.116 (see above). The owner described it on 2026-11-12: only in Export's grade editor, the
+  thumb turns see-through when touched, as iOS 26 shows a held slider, but a fast drag doesn't
+  move it; a slow, relaxed drag does. That fits the scrolling form taking fast drags on iOS 26.6
+  (the 14 Pro, on iOS 27.2, is fine). From 0.1.119 the form stops scrolling while a slider is
+  held; whether that cures it is untested.
 
 - **What maker note keys 15 and 12 read in a running take,** frame by frame, still and shaken:
   whether 15 changes from the probe's 5, and whether 12 grows with the shake.

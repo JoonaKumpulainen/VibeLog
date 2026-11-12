@@ -88,16 +88,20 @@ Two questions left from 2026-11-12, when take `140255`'s copy measured steady:
    At 1/50 s the motion blur changes direction with each shake, which can look like vibration;
    stabilized takes want 1/250 s or faster.
 
-## Test 5: laggy sliders (base iPhone 16)
+## Test 5: laggy sliders (base iPhone 16, 0.1.119)
 
-A busy main thread was ruled out on 2026-11-12. The suspect is the scrolling form the sliders sit
-in, taking drags that move even slightly up or down. From 0.1.117 the log counts each drag a
-slider took, so a drag the scroll took shows up as missing.
+The owner's description: in Export's grade editor, a slider's thumb turns see-through when
+touched but doesn't move on a fast drag, only on a slow one. From 0.1.119 the form stops
+scrolling while a slider is held, which should let fast drags through. The log counts each drag
+a slider took, so a drag that still goes astray shows up as missing.
 
 1. Open a log take, tap **Export**, open the grade editor.
 2. Drag one slider **slowly and exactly sideways**, keeping the finger level, **ten times**.
 3. Drag the same slider **diagonally**, a little up or down as it moves, **ten times**.
 4. Do the same with **Smoothness** under **Stabilize**.
+
+**Expected:** on 0.1.119, fast and diagonal drags move the slider like slow ones, and the page
+doesn't scroll while a slider is held.
 
 **Send:** how many drags you made of each kind, and whether the slider refused to move. With
 **Log sharing** on, the log arrives by itself; tap **Send now** after the test.
