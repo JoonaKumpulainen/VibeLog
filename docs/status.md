@@ -6,16 +6,16 @@ short.
 
 ## Latest build
 
-As of mid Phase 7, with Phase 8's stabilized export begun. The latest build is `d232d7e`, CI run
-115, version 0.1.115, which passed with 189 tests and one skip. The test link can now reach a
-phone elsewhere: the app takes an `https://` server address, and `serve --public` runs behind an
-ngrok tunnel with a long token and lockouts, checked here through a real tunnel. Nothing from
-0.1.113 on has been tried on a phone.
+As of mid Phase 7, with Phase 8's stabilized export begun. The latest build is `b1cc9a8`, CI run
+116, version 0.1.116, which passed with 189 tests and one skip. **Over the internet** in
+Diagnostics is now its own switch for the ngrok link, and `MainThreadWatch` logs main-thread
+stalls for the base iPhone 16's laggy sliders. Nothing from 0.1.113 on has been tried on a phone.
 
 The builds before it, all from the sessions of 2026-11-11 and 12:
 
 | Build | Run | What it added | On the phone |
 |---|---|---|---|
+| `d232d7e` | 115 | The test link reaches a phone elsewhere through ngrok, `serve --public` | Checked through a real tunnel, not with a phone |
 | `8c7f7d5` | 114 | A baked take's stabilized copy keeps its own codec | Not yet |
 | `eed6df9` | 113 | FX keep light below zero; returning to the app no longer idle-pauses the camera | Not yet |
 | `2368f1d` | 112 | Stabilize's timing fixed, its limit eased at 130%, a Stabilize screen for baked takes | Not yet |
@@ -30,7 +30,7 @@ Run 109 never started and can be ignored. Every session is in
 
 ## Start here next session
 
-1. **Ask for the results of [next-tests.md](next-tests.md)** from both phones, 0.1.115. Tests
+1. **Ask for the results of [next-tests.md](next-tests.md)** from both phones, 0.1.116. Tests
    1 to 3 close `eed6df9` and `8c7f7d5`; Test 6 says how Stabilize looks with its timing fixed.
 2. **If the phone is linked, measure the new copies** against their gyro logs, as was done for
    the first ones. The method is under **How the copies were measured** below.
@@ -56,7 +56,7 @@ and are kept out of this public repo. Over the link,
 Step-by-step instructions for every test below, with what to send, are in
 [next-tests.md](next-tests.md).
 
-**The 14 Pro, on 0.1.115:**
+**The 14 Pro, on 0.1.116:**
 
 1. **Tests 1 to 3:** FX keep the shadows, the camera keeps running after leaving the app, and
    Stabilize keeps a baked take's codec.
@@ -73,7 +73,7 @@ Step-by-step instructions for every test below, with what to send, are in
 8. **Later:** a colour chart shot; the matched pair for Apple's preview; ARRI Wide Gamut 3;
    `scope_cost.json`, which needs about 112 GB free.
 
-**The iPhone 16, base model, on 0.1.115:** Tests 1, 2 and 4, the ultra wide's stabilization.
+**The iPhone 16, base model, on 0.1.116:** Tests 1, 2 and 4, the ultra wide's stabilization.
 Then **Run probe**, phone still, for its overlapped bracket cases and stabilizer names; a
 five-minute HEVC 4:2:2 take at full size, started cold and unplugged, and one at 2880x2160.
 
