@@ -1,0 +1,7 @@
+[
+  {"needs": "0.1.125"},
+  {"pause": "Trial takes: the phone lies still on a table, pointing at anything, for about 2 minutes."},
+  {"run": "trialTakes", "until": {"trials": ""}, "minutes": 5, "label": "Trial takes"},
+  {"status": {"encoderLimits": "~proven by takes"}, "label": "Trials proved their codecs"},
+  {"log": true, "label": "Session log"}
+]

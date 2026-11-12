@@ -46,6 +46,11 @@ struct DiagnosticsView: View {
                 }
                 LabeledContent("Encoder limits", value: model.encoderLimitsText)
                 LabeledContent("GPU limits", value: model.gpuLimitsText)
+                Button("Run trial takes") {
+                    close()
+                    model.runTrialTakes()
+                }
+                .disabled(!model.isStreaming)
                 Button("Run GPU cost test") {
                     close()
                     model.runCostTest()

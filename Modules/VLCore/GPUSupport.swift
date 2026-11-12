@@ -96,7 +96,9 @@ public struct GPUSupport: Codable, Equatable, Sendable {
         let total = frames + gpuDropped
         guard total > 0 else { return }
         let share = Double(gpuDropped) / Double(total)
-        if share > Self.strainedShare, seconds >= 30 {
+        // A 20-second trial take on a cool phone already counts: it's how the base 16's ProRes
+        // showed its limit, six seconds in.
+        if share > Self.strainedShare, seconds >= 15 {
             if reachedSerious { strainedHot.insert(key) } else { strained.insert(key) }
         } else if seconds >= Self.provingSeconds, share <= Self.strainedShare / 5 {
             proven.insert(key)

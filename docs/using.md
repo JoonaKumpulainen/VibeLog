@@ -180,7 +180,10 @@ cool to nominal heat for up to five minutes, times every codec and size on synth
 times the GPU for each recording setup, as **Run GPU cost test** does. **Encoder limits** and
 **GPU limits** below it say how and when they were measured, and what takes proved. A take of
 two and a half minutes or more that keeps nearly every frame proves its setup on the GPU; one
-that falls behind makes that setup warn. A take of five seconds or more that holds
+that falls behind makes that setup warn. **Run trial takes** records up to three 20-second takes
+of the setups this phone records best, with the camera on, lying still: the best codec and size,
+ProRes 422 HQ at full size, and the first with the look baked in. Each counts as evidence like
+any take, then is deleted; the results go to `probes/trials_*.txt`. A take of five seconds or more that holds
 30 fps in a codec and size proves it, and its warning stops for good; a take whose encoder drops
 frames makes it warn from then on. **Run GPU cost test** times each stage of a frame on the
 GPU the same way, for both pipelines and debayers, and saves `probes/gpu_cost_*.txt`.

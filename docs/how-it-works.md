@@ -172,6 +172,10 @@ leaves the standard setup on its own evidence, so a workaround for one never rea
   off. A setup warns only when strained, or when it costs more than a tenth over the
   heaviest proven one. With no takes yet, nothing warns. A take whose path or debayer changed for
   heat proves nothing.
+- **Trial takes:** `TrialTakes.swift` records up to three 20-second takes of the best setups,
+  with the camera, GPU and encoder together, which separate trials miss. They prove encoders as
+  any take does, and can strain a GPU setup from 15 seconds on, but are too short to prove one.
+  Each is deleted once measured, and isn't sent over the test link.
 - **Adding a fallback:** give it a step on the ladder or a measured trial, never a model name, and
   put the costlier change later.
 

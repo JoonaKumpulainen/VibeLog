@@ -407,6 +407,8 @@ class Suite:
         {"use": "video_20261112_000714.mov"}   makes a take already on the phone the round's take
         {"pause": "Walk slowly with the phone"}   waits for Enter here, for what needs a person
         {"ask": "Did the shadows stay as dark?"}  a question for a person, listed in the report
+        {"run": "trialTakes", "until": {"trials": ""}, "minutes": 5}
+                        sends a command, then waits until status says it's done
         {"status": {"encoderLimits": "~proven by takes"}}   checks the phone's status reply;
                         "~text" means it contains the text
 
@@ -773,6 +775,27 @@ class Suite:
                 time.sleep(self.options.go)
             else:
                 input(f"\n>>> {step['pause']}\n    Press Enter when done. ")
+        elif "run" in step:
+            label = step.get("label", step["run"])
+            print(f"run: {step['run']}", flush=True)
+            reply = self.ask({"action": step["run"]})
+            if not reply["ok"]:
+                self.checks.append((label, "FAIL", reply["message"]))
+                print(f"  refused: {reply['message']}", flush=True)
+                return
+            time.sleep(5)
+            deadline = time.time() + step.get("minutes", 10) * 60
+            until = step.get("until", {"busy": ""})
+            while True:
+                values = self.status(label)
+                if all(values.get(k) == v for k, v in until.items()) and values.get("recording") == "false":
+                    break
+                if time.time() > deadline:
+                    self.checks.append((label, "FAIL", "didn't finish in time"))
+                    return
+                time.sleep(5)
+            print(f"  {values.get('lastResult', '')[:120]}", flush=True)
+            self.checks.append((label, "PASS", values.get("lastResult", "")[:120]))
         elif "status" in step:
             values = self.ask({"action": "status"})["values"]
             for key, wanted in step["status"].items():

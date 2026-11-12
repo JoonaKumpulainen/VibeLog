@@ -245,6 +245,11 @@ extension AppModel {
             guard !isRecording else { return refused("A take is running") }
             resetSettings()
             return done()
+        case "trialTakes":
+            guard !isRecording else { return refused("A take is running") }
+            guard isStreaming else { return refused("The camera isn't running") }
+            runTrialTakes()
+            return done()
         case "encoderTest", "measureEncoders", "measurePhone", "probe", "measureLenses", "costTest":
             guard !isRecording else { return refused("A take is running") }
             if let cameraBlocked { return refused(cameraBlocked) }
@@ -304,7 +309,7 @@ extension AppModel {
 
     private var testStatus: [String: String] {
         [
-            "app": SystemStatus.appVersion, "phone": SystemStatus.deviceModel, "encoderLimits": encoderLimitsText, "gpuLimits": gpuLimitsText, "gpuSetup": gpuSetupKey,
+            "app": SystemStatus.appVersion, "phone": SystemStatus.deviceModel, "encoderLimits": encoderLimitsText, "gpuLimits": gpuLimitsText, "gpuSetup": gpuSetupKey, "trials": trialState.map { "\($0.index) of \($0.plan.count)" } ?? "",
             "recording": String(isRecording), "streaming": String(isStreaming),
             "screen": playingTake == nil ? openScreen : "player", "busy": isBusy ?? "",
             "method": method.rawValue, "encodeVideo": String(recordEncoded),

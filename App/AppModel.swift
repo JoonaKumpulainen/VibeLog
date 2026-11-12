@@ -62,6 +62,8 @@ final class AppModel: ObservableObject {
     @Published var lastResult: String?
     /// The newest take's file name, which the test link reports so a round can fetch it.
     var lastTakeFile = ""
+    /// A run of trial takes, in `TrialTakes.swift`, or nil.
+    var trialState: TrialState?
     /// A short message on the camera screen. Tapping it clears it.
     @Published var notice: String?
     @Published var takeAlert: TakeAlert?
@@ -2225,6 +2227,7 @@ final class AppModel: ObservableObject {
             lastResult = summary
             guard result.framesWritten > 0 else {
                 testLink.holdFiles(false)
+                trialTakeFinished(file: result.file, summary: summary)
                 return
             }
             makeThumbnail(for: Storage.videos.appendingPathComponent(result.file))
@@ -2232,8 +2235,12 @@ final class AppModel: ObservableObject {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let sidecar = Storage.videos.appendingPathComponent(result.file + ".json")
             try? encoder.encode(result).write(to: sidecar)
-            sendTakeFiles(video: Storage.videos.appendingPathComponent(result.file))
+            // A trial take is deleted once measured, so it isn't sent anywhere.
+            if trialState == nil {
+                sendTakeFiles(video: Storage.videos.appendingPathComponent(result.file))
+            }
             testLink.holdFiles(false)
+            trialTakeFinished(file: result.file, summary: summary)
         }
     }
 

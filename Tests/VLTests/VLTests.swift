@@ -3358,6 +3358,12 @@ final class GPUSupportTests: XCTestCase {
         XCTAssertTrue(hot.strained.isEmpty)
         XCTAssertNil(hot.warning(for: "maximum-log-malvar", hotFallback: true))
         XCTAssertTrue(hot.warning(for: "maximum-log-malvar", hotFallback: false)!.contains("got hot"))
+        // A 20-second trial take that falls behind on a cool phone already strains its setup.
+        var trial = GPUSupport(device: "iPhone17,3", system: "26.6")
+        trial.record(take: "maximum-log-malvar", seconds: 20, frames: 300, gpuDropped: 300)
+        XCTAssertTrue(trial.strained.contains("maximum-log-malvar"))
+        trial.record(take: "efficient-log-malvar", seconds: 10, frames: 150, gpuDropped: 150)
+        XCTAssertFalse(trial.strained.contains("efficient-log-malvar"), "too short to say")
         // A take that fell behind while not seriously hot always warns.
         gpu.record(take: "maximum-log-malvar", seconds: 120, frames: 3400, gpuDropped: 200)
         XCTAssertTrue(gpu.warning(for: "maximum-log-malvar")!.contains("fell behind"))
