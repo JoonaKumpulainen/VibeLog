@@ -615,6 +615,9 @@ an item from **Not verified** once it is.
   serious heat at 49 s and lost 203 of 5,098 frames, all on the GPU. The cost test reads that
   setup at 12.6 ms a frame, so the isolated cost says little about a hot take; the heat fallback
   is what keeps Maximum takes whole.
+- **Maximum log holds from cool on the 14 Pro:** the same setup, 170 seconds from nominal heat and
+  unplugged, on 0.1.124 with **Efficient when hot** on, wrote 5,094 frames at 29.99 fps and lost
+  none, with no heat change. It's the first setup proven in GPU limits.
 
 ## Not verified
 
