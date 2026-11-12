@@ -3462,43 +3462,47 @@ final class GradeRecipeTests: XCTestCase {
 /// The Rec.709 view's gamut compression: colours from outside Rec.709 are drawn onto its edge
 /// instead of clipped, and colours well inside it are left alone.
 final class GamutCompressionTests: XCTestCase {
+    private func limits(_ gamut: Gamut) -> SIMD3<Double> {
+        MonitorTransform.gamutLimits[gamut] ?? SIMD3<Double>(repeating: 0)
+    }
+
+    private func smallest(_ v: SIMD3<Double>) -> Double { Swift.min(v.x, Swift.min(v.y, v.z)) }
+    private func largest(_ v: SIMD3<Double>) -> Double { Swift.max(v.x, Swift.max(v.y, v.z)) }
+
     func testEveryGamutReachesPastRec709() {
         for gamut in Gamut.allCases {
-            let limits = try! XCTUnwrap(MonitorTransform.gamutLimits[gamut])
-            XCTAssertGreaterThan(max(limits.x, limits.y, limits.z), 1, "\(gamut)")
+            XCTAssertGreaterThan(largest(limits(gamut)), 1.0, "\(gamut)")
         }
     }
 
     func testNeutralAndInnerColoursStayPut() {
-        let limits = MonitorTransform.gamutLimits[.sGamut3]!
         let gray = SIMD3<Double>(repeating: 0.18)
-        XCTAssertEqual(MonitorTransform.compressGamut(gray, limits: limits), gray)
+        XCTAssertEqual(MonitorTransform.compressGamut(gray, limits: limits(.sGamut3)), gray)
         let skin = SIMD3<Double>(0.45, 0.3, 0.22)
-        XCTAssertEqual(MonitorTransform.compressGamut(skin, limits: limits), skin)
+        XCTAssertEqual(MonitorTransform.compressGamut(skin, limits: limits(.sGamut3)), skin)
     }
 
     /// Each primary of the recorded gamut, the most saturated colour it holds, lands inside Rec.709.
     func testPrimariesLandInsideRec709() {
+        let corners: [SIMD3<Double>] = [SIMD3<Double>(1, 0, 0), SIMD3<Double>(0, 1, 0), SIMD3<Double>(0, 0, 1)]
         for gamut in Gamut.allCases {
-            let limits = MonitorTransform.gamutLimits[gamut]!
-            let matrix = ColorMath.rec2020ToRec709 * gamut.fromRec2020.inverse
-            for primary in [SIMD3<Double>(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)] {
-                let raw = matrix * primary
-                let compressed = MonitorTransform.compressGamut(raw, limits: limits)
-                XCTAssertGreaterThanOrEqual(min(compressed.x, compressed.y, compressed.z), -1e-6, "\(gamut) \(primary)")
+            let matrix: simd_double3x3 = ColorMath.rec2020ToRec709 * gamut.fromRec2020.inverse
+            for primary in corners {
+                let raw: SIMD3<Double> = matrix * primary
+                let compressed = MonitorTransform.compressGamut(raw, limits: limits(gamut))
+                XCTAssertGreaterThanOrEqual(smallest(compressed), -1e-6, "\(gamut)")
                 // The strongest channel is never touched, so brightness holds.
-                XCTAssertEqual(max(compressed.x, compressed.y, compressed.z), max(raw.x, raw.y, raw.z), accuracy: 1e-9)
+                XCTAssertEqual(largest(compressed), largest(raw), accuracy: 1e-9)
             }
         }
     }
 
     /// Further out goes further in, so gradients toward the edge stay smooth rather than flat.
     func testCompressionKeepsOrder() {
-        let limits = MonitorTransform.gamutLimits[.sGamut3]!
         var last = -Double.infinity
         for step in 0...20 {
             let blue = SIMD3<Double>(0.2 - 0.03 * Double(step), 0.2, 0.6)
-            let red = MonitorTransform.compressGamut(blue, limits: limits).x
+            let red = MonitorTransform.compressGamut(blue, limits: limits(.sGamut3)).x
             XCTAssertGreaterThan(-red, last - 1e-12)
             last = -red
         }

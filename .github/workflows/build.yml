@@ -65,10 +65,10 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             | tee build/test-output.txt | tail -n 60
 
-      # Measurements tests print, which the 60 lines above cut off.
+      # Measurements tests print, and compile errors, which the 60 lines above cut off.
       - name: Show test measurements
         if: always()
-        run: grep -hE "LUT error|NaN sweep|NaN trace" build/test-output.txt || true
+        run: grep -hE "LUT error|NaN sweep|NaN trace|: error:" build/test-output.txt | sort -u | head -40 || true
 
 
   ipa:
