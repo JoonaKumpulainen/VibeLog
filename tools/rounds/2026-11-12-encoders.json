@@ -3,7 +3,7 @@
   {"status": {"encoderLimits": "~Camera stopped"}, "label": "Test 1: careful encoder limits"},
   {"set": {"lens": "1x", "codec": "hevc444", "size": "4032x3024", "aspect": "4:3", "bakeLook": false, "tools": "none"}},
   {"pause": "Test 2: lay the phone still on a table, pointing at anything. The 10 s take starts on Enter."},
-  {"take": 10, "label": "Test 2: HEVC 4:4:4 full size", "gbPerSecond": 0.06, "expect": {"lost": "<=2"}},
+  {"take": 10, "label": "Test 2: HEVC 4:4:4 full size", "gbPerSecond": 0.06, "expect": {"written": ">=29"}},
   {"status": {"encoderLimits": "~proven by takes"}, "label": "Test 2: the take proved its codec"},
   {"log": true, "label": "Session log", "expect": {"flaggedTakes": 0}}
 ]

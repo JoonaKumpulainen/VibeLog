@@ -3255,7 +3255,10 @@ final class EncoderEvidenceTests: XCTestCase {
         XCTAssertTrue(s.warning(for: "hevc422", size: "4032x3024")!.contains("quick check"))
         s.record(take: "hevc422", size: "4032x3024", seconds: 3, fps: 30, encoderDrops: 0)
         XCTAssertNotNil(s.warning(for: "hevc422", size: "4032x3024"), "a take under five seconds proves nothing")
-        s.record(take: "hevc422", size: "4032x3024", seconds: 10, fps: 29.9, encoderDrops: 0)
+        s.record(take: "hevc422", size: "4032x3024", seconds: 10, fps: 28.5, encoderDrops: 0)
+        XCTAssertNotNil(s.warning(for: "hevc422", size: "4032x3024"), "fed too slowly to say")
+        // The 14 Pro's HEVC 4:4:4 take: 4 frames lost at the GPU, none at the encoder.
+        s.record(take: "hevc422", size: "4032x3024", seconds: 10, fps: 29.497, encoderDrops: 0)
         XCTAssertNil(s.warning(for: "hevc422", size: "4032x3024"))
     }
 

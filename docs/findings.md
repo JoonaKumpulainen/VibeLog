@@ -604,6 +604,11 @@ an item from **Not verified** once it is.
   full timestamp, an address or the name of the imported LUT. USB fetching through
   `pymobiledevice3` ran at about 39 MB/s against a few hundred KB/s over the phone's Wi-Fi.
 
+- **HEVC 4:4:4 at full size on the 14 Pro is GPU-bound, not encoder-bound:** a 10-second log
+  take on the Maximum path at fair heat, 2026-11-12, lost 4 frames, all on the GPU, none at the
+  encoder, with the GPU at 32.6 ms a frame against the 33.3 a frame has at 30 fps. The careful
+  encoder test read it at 29.7 fps.
+
 ## Not verified
 
 - **What the 16's tester saw as added shake on the ultra wide:** take `140255`'s copy added none

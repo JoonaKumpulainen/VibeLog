@@ -157,8 +157,9 @@ leaves the standard setup on its own evidence, so a workaround for one never rea
   under-reads: on the 14 Pro, HEVC at full size read 27.5 fps against 30.5 with the camera
   stopped, ProRes 422 HQ 81 against 194. **Measure this phone again** in Diagnostics measures with
   the camera stopped, 45 frames, at nominal heat when it can, and records the method and heat.
-- **Takes outrank trials:** a log take in the chosen size, five seconds or more, that held 29.5
-  fps with the encoder refusing nothing goes into `proven`, and that codec and size never warns
+- **Takes outrank trials:** a log take in the chosen size, five seconds or more, fed 29 fps or
+  more with the encoder refusing nothing goes into `proven`; frames lost at the camera or the GPU
+  don't count against the encoder, and that codec and size never warns
   again; one whose encoder refused frames goes into `strained` and always warns.
   `tools/check_benchmark.py` lists where a phone's figures disagree with its takes.
 - **GPU:** `GPUSupport` keeps the GPU cost test's median per recording setup, by path, work (log,

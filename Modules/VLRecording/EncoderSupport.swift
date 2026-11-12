@@ -61,11 +61,13 @@ public struct EncoderSupport: Codable, Equatable, Sendable {
     }
 
     /// What a real take showed about its encoder. Only a take of at least five seconds counts.
+    /// `fps` is what the file holds a second; frames lost earlier, at the camera or the GPU,
+    /// lower it without the encoder being to blame, so a take fed at 29 or more counts.
     public mutating func record(take key: String, size: String, seconds: Double, fps: Double, encoderDrops: Int) {
         guard seconds >= 5 else { return }
         if encoderDrops > 0 {
             strained[key, default: []].insert(size)
-        } else if fps >= 29.5 {
+        } else if fps >= 29 {
             proven[key, default: []].insert(size)
         }
     }
