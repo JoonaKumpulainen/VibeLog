@@ -1773,7 +1773,6 @@ final class AppConfigTests: XCTestCase {
         let config = try JSONDecoder().decode(AppConfig.self, from: Data(json.utf8))
         XCTAssertEqual(config.codec, "hevc420")
         XCTAssertEqual(config.mainsHz, 50)
-        XCTAssertEqual(config.telemetry, true)
     }
 
     func testFrameRateAndPresetsRoundTrip() throws {
@@ -2135,9 +2134,9 @@ final class ACESTests: XCTestCase {
                 + "OpenColorIO \(ACESReference.aces20[result.index])")
     }
 
-    /// OpenColorIO's ACES 1.3 Rec.709 view leaves out-of-gamut colours above 1, where the Academy's
-    /// ODT clamps to the display, as this port does, so the reference is clamped the same way. The
-    /// rest differs by about 0.0002, at black.
+    /// OpenColorIO's ACES 1.3 Rec.709 view leaves out-of-gamut colours above 1, where this port,
+    /// from the same OpenColorIO code, clamps to the display as a LUT needs, so the reference is
+    /// clamped the same way. The rest differs by about 0.0002, at black, from OpenColorIO's floats.
     func testACES13MatchesOpenColorIO() {
         let clamped = ACESReference.aces13.map { simd_clamp($0, SIMD3(repeating: 0), SIMD3(repeating: 1)) }
         let result = worst(.aces13, clamped)
@@ -3413,5 +3412,49 @@ final class BenchmarkProgressTests: XCTestCase {
             LensCapture(lens: "3x", frameRate: 24, fps: 15.0, missed: 50, failures: 9, setup: "standard"),
         ]
         XCTAssertEqual(LensCapture.bestRates(results), ["1x": 30, "0.5x": 24, "3x": 0])
+    }
+}
+
+/// The grade an export or a baked take keeps in its sidecar, for a later export to copy.
+final class GradeRecipeTests: XCTestCase {
+    private func sample() -> GradeRecipe {
+        var grade = LookGrade()
+        grade.exposure = 0.5
+        grade.saturation = 1.2
+        var effects = LookEffects()
+        effects.bloom = 0.3
+        return GradeRecipe(look: "ACES 2.0", lutMadeForRec709: true, grade: grade, effects: effects)
+    }
+
+    func testRoundTripsThroughSidecarMetadata() throws {
+        let recipe = sample()
+        let value = try XCTUnwrap(recipe.metadataValue)
+        XCTAssertEqual(GradeRecipe.from(metadata: [GradeRecipe.metadataKey: value, "look": "ACES 2.0"]), recipe)
+    }
+
+    func testNoRecipeInOlderOrBrokenSidecars() {
+        XCTAssertNil(GradeRecipe.from(metadata: nil))
+        XCTAssertNil(GradeRecipe.from(metadata: ["look": "ACES 2.0 Rec.709, baked in"]))
+        XCTAssertNil(GradeRecipe.from(metadata: [GradeRecipe.metadataKey: "not json"]))
+    }
+
+    func testNeutralAndSummary() {
+        XCTAssertTrue(GradeRecipe(look: "ACES 2.0").isNeutral)
+        XCTAssertFalse(sample().isNeutral)
+        XCTAssertEqual(sample().summary, "ACES 2.0, graded, FX")
+        XCTAssertEqual(GradeRecipe(look: "").summary, "Monitor (Rec.709)")
+    }
+
+    func testRecipeSurvivesTheEncoderResultSidecar() throws {
+        let value = try XCTUnwrap(sample().metadataValue)
+        let sidecar: [String: Any] = [
+            "file": "a_look.mov", "preset": "hevc420", "width": 1920, "height": 1080, "framesWritten": 30,
+            "framesDropped": 0, "droppedNoBuffer": 0, "droppedNotReady": 0, "audioSamplesWritten": 0,
+            "seconds": 1.0, "fps": 30.0, "megabytes": 1.0, "megabytesPerSecond": 1.0,
+            "metadata": [GradeRecipe.metadataKey: value],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: sidecar)
+        let result = try JSONDecoder().decode(VideoEncoder.Result.self, from: data)
+        XCTAssertEqual(GradeRecipe.from(metadata: result.metadata), sample())
     }
 }

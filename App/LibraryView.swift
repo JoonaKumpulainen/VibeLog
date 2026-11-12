@@ -129,7 +129,7 @@ struct LibraryView: View {
     }
 }
 
-private extension Take {
+extension Take {
     var durationLabel: String? {
         info.map { Duration.seconds($0.seconds).formatted(.time(pattern: .minuteSecond)) }
     }

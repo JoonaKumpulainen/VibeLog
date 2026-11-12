@@ -177,6 +177,16 @@ final class AppModel: ObservableObject {
         return "\(PipelineMode.efficient.label), for the baked FX"
     }
 
+    /// The grade a baked take records, for an export to copy: what `bakedLookLabel` describes.
+    var bakedRecipe: GradeRecipe? {
+        guard bakeLook else { return nil }
+        let effects = processing.bakeEffects ? lookEffects : LookEffects()
+        if bakesHDR { return GradeRecipe(look: BuiltInLook.aces20.name, grade: lookGrade, effects: effects) }
+        return GradeRecipe(
+            look: selectedLUT, lutMadeForRec709: processing.lutExpectsRec709,
+            grade: gradeApplies ? lookGrade : LookGrade(), effects: effects)
+    }
+
     /// What the sidecar says the file holds.
     var bakedLookLabel: String {
         guard bakeLook else { return "log, as recorded" }
@@ -240,6 +250,12 @@ final class AppModel: ObservableObject {
     /// The FX tab's effects. The viewfinder and export apply them; takes don't yet, baked or not.
     @Published var lookEffects = LookEffects() {
         didSet { pipeline?.setEffects(lookEffects) }
+    }
+
+    /// The export screen's grade in progress, kept across exports and launches until an export
+    /// with it succeeds or it's reset. Nil when there's nothing to keep.
+    @Published var exportRecipe: GradeRecipe? = GradeRecipe.loadSaved() {
+        didSet { if exportRecipe != oldValue { GradeRecipe.save(exportRecipe) } }
     }
 
     /// Shows effects on the viewfinder while a slider moves, without publishing anything.
@@ -327,7 +343,6 @@ final class AppModel: ObservableObject {
     @Published var audioPeak: Float = 0
     /// Megabytes per second written so far in this recording.
     @Published var dataRate = 0.0
-    @Published var showTelemetry = true
     @Published var mainsHz = 50
     @Published var toolbar: [Tool] = []
     @Published private(set) var activeTools: Set<Tool> = [] {
@@ -763,7 +778,6 @@ final class AppModel: ObservableObject {
         config.monitorLUT = selectedLUT
         config.lutExpectsRec709 = processing.lutExpectsRec709
         config.monitorOffWhileRecording = processing.pauseMonitorWhileRecording
-        config.telemetry = showTelemetry
         config.lockAtRoll = lockAtRoll
         config.saveGyroLog = saveGyroLog
         config.pcmAudio = pcmAudio
@@ -853,7 +867,6 @@ final class AppModel: ObservableObject {
         if saved.monitorLUT.isEmpty || isAvailableLook(saved.monitorLUT) { selectedLUT = saved.monitorLUT }
         processing.lutExpectsRec709 = saved.lutExpectsRec709
         processing.pauseMonitorWhileRecording = saved.monitorOffWhileRecording
-        showTelemetry = saved.telemetry
         lockAtRoll = saved.lockAtRoll
         saveGyroLog = saved.saveGyroLog
         pcmAudio = saved.pcmAudio
@@ -2080,7 +2093,7 @@ final class AppModel: ObservableObject {
         takeReachedSerious = isHot
         let name = "video_\(Storage.timestamp())"
         let url = Storage.videos.appendingPathComponent(name + ".mov")
-        let metadata: [String: String] = [
+        var metadata: [String: String] = [
             "curve": processing.curve.label, "gamut": processing.gamut.label,
             "audio": (pcmAudio ? "24-bit PCM" : "AAC") + (stereoAudio ? " stereo" : " mono"),
             "matrix": "Rec.2020 non-constant luminance, video range",
@@ -2113,6 +2126,7 @@ final class AppModel: ObservableObject {
             "note": bakeLook ? "The look is baked in, and the file's tags describe it."
                 : "The file's transfer tag is nominal; decode with the curve named here.",
         ]
+        if let recipe = bakedRecipe { metadata[GradeRecipe.metadataKey] = recipe.metadataValue }
         do {
             let encoder = try VideoEncoder(config: .init(
                 url: url, preset: takePreset, size: outputSize, frameRate: frameRate, audio: true,

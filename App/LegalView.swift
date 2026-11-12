@@ -1,14 +1,14 @@
 import SwiftUI
 
 /// VibeLog's own license, the third-party code it carries with their notices, and what VibeLog
-/// isn't. The license files ship inside the app, since the BSD and Academy licenses ask for their
+/// isn't. The license files ship inside the app, since the BSD and Apache licenses ask for their
 /// notices to travel with it.
 struct LegalView: View {
     private struct Notice: Identifiable {
         let title: String
         let detail: String
         let file: String
-        var id: String { file }
+        var id: String { title }
     }
 
     private static let notices = [
@@ -21,13 +21,17 @@ struct LegalView: View {
             detail: "Ported from OpenColorIO's ACES 2.0 output transform. Copyright Contributors to the OpenColorIO Project, BSD 3-Clause license.",
             file: "LICENSES/OpenColorIO-BSD-3-Clause.txt"),
         Notice(
-            title: "ACES 2.0 algorithm",
-            detail: "The Academy Color Encoding System 2.0 output transform, by the Academy of Motion Picture Arts and Sciences, Apache License 2.0.",
-            file: "LICENSES/ACES-Apache-2.0.txt"),
-        Notice(
             title: "ACES 1.3 look",
-            detail: "Ported from the Academy's ACES 1.3 reference code. Copyright © 2015 Academy of Motion Picture Arts and Sciences (A.M.P.A.S.). Portions contributed by others as indicated. All rights reserved.",
-            file: "LICENSES/ACES-1.3-AMPAS.txt"),
+            detail: "Ported from OpenColorIO's ACES 1.0 SDR video output transform. Copyright Contributors to the OpenColorIO Project, BSD 3-Clause license.",
+            file: "LICENSES/OpenColorIO-BSD-3-Clause.txt"),
+        Notice(
+            title: "Camera to ACES matrices",
+            detail: "From the OpenColorIO Configuration for ACES studio configs. Copyright Contributors to the OpenColorIO Project, BSD 3-Clause license.",
+            file: "LICENSES/OpenColorIO-BSD-3-Clause.txt"),
+        Notice(
+            title: "ACES 2.0 algorithm",
+            detail: "The Academy Color Encoding System 2.0 output transform, by the Academy of Motion Picture Arts and Sciences, Apache License 2.0. VibeLog ports OpenColorIO's implementation of it.",
+            file: "LICENSES/ACES-Apache-2.0.txt"),
     ]
 
     var body: some View {
@@ -49,8 +53,8 @@ struct LegalView: View {
                 Text("Licenses")
             }
             Section("Notices") {
-                Text("VibeLog is an independent project. It isn't affiliated with, endorsed by or certified by Apple, Sony, ARRI, Canon, the Academy of Motion Picture Arts and Sciences, the Academy Software Foundation, the OpenColorIO Project, the Gyroflow project or Blackmagic Design. Its ACES looks are its own implementation, checked against OpenColorIO, and aren't an ACES Logo product. Its stabilization is its own too, and carries none of Gyroflow's code: the gyro logs and lens profiles it writes only follow the file formats Gyroflow reads.")
-                Text("Apple, iPhone, Apple Log and ProRes are trademarks of Apple Inc. ACES is a trademark of the Academy of Motion Picture Arts and Sciences. Sony, ARRI and Canon, and the names of their log curves and color spaces, such as S-Log3, LogC4 and Canon Log 3, may be trademarks of their owners. Gyroflow belongs to the Gyroflow project, DaVinci Resolve to Blackmagic Design, and other names to their owners. All are used only to say what VibeLog works with.")
+                Text("VibeLog is an independent project. It isn't affiliated with, endorsed by or certified by Apple, Sony, ARRI, Canon, the Academy of Motion Picture Arts and Sciences, the Academy Software Foundation, the OpenColorIO Project, the Gyroflow project or Blackmagic Design. Its ACES looks are ported from OpenColorIO and checked against its output, and aren't an ACES Logo product. Its stabilization is its own, and carries none of Gyroflow's code: the gyro logs and lens profiles it writes only follow the file formats Gyroflow reads.")
+                Text("Apple, iPhone, Apple Log and ProRes are trademarks of Apple Inc. ACES, the Academy Color Encoding System, is the Academy of Motion Picture Arts and Sciences' system. Sony, ARRI and Canon, and the names of their log curves and color spaces, such as S-Log3, LogC4 and Canon Log 3, may be trademarks of their owners. Gyroflow belongs to the Gyroflow project, DaVinci Resolve to Blackmagic Design, and other names to their owners. All are used only to say what VibeLog works with.")
                 Text("Log curves and color spaces follow the makers' published formulas and primaries. LUTs you import stay under their own licenses.")
                 Text("VibeLog comes with no warranty, to the extent the law allows. Check important footage before relying on it.")
             }

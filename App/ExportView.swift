@@ -72,10 +72,17 @@ struct ExportView: View {
     @State private var previewComposition: AVVideoComposition?
     /// Where the preview was when an export took its item away, to return to after.
     @State private var resumeAt = CMTime.zero
-    /// The export's own grade, starting neutral, so a take isn't graded until the owner grades it,
-    /// and changing it here leaves the camera's alone.
+    /// The export's own grade, apart from the camera's. It starts neutral, or as the last grade
+    /// left here, which `AppModel.exportRecipe` keeps until an export with it succeeds or Reset
+    /// Grade clears it.
     @State private var grade = LookGrade()
     @State private var effects = LookEffects()
+    /// The kept grade is back on screen, so changes from here on are the owner's to keep.
+    @State private var restoredGrade = false
+    @State private var copyingGrade = false
+    @State private var confirmingGradeReset = false
+    /// The running export bakes the grade in, so finishing it clears the kept grade.
+    @State private var exportUsesGrade = false
     @State private var target = BakeTarget.sdr
     @State private var editingGrade = false
     @State private var beforeEditing: (lut: String, grade: LookGrade, effects: LookEffects)?
@@ -190,6 +197,8 @@ struct ExportView: View {
             let cameraLook = model.processing.monitor == .rec709 ? model.selectedLUT : BuiltInLook.aces20.name
             lutName = model.isAvailableLook(cameraLook) || cameraLook.isEmpty ? cameraLook : BuiltInLook.aces20.name
             lutMadeForRec709 = model.processing.lutExpectsRec709
+            if isLog, let kept = model.exportRecipe { apply(kept) }
+            restoredGrade = true
             target = model.bakeTarget
             // A baked take's screen only steadies, so it has no use for the scope.
             scopeKind = isLog && model.isOn(.scope) ? model.scopeKind : nil
@@ -213,16 +222,41 @@ struct ExportView: View {
         .onChange(of: job.progress == nil) { _, idle in
             if idle { restorePreview() }
         }
+        .onChange(of: job.runs) { _, _ in
+            // A finished export with the grade has used it, so the next starts clean.
+            guard exportUsesGrade, job.message?.hasPrefix("Saved") == true else { return }
+            resetGrade()
+        }
+        .sheet(isPresented: $copyingGrade) {
+            GradePicker(excluding: take.url) { recipe in
+                beforeEditing = (lutName, grade, effects)
+                apply(recipe)
+                editingGrade = true
+            }
+            .environmentObject(model)
+        }
         .task { takeTurns = (try? await LookExporter.describe(take.url).quarterTurns) ?? 0 }
-        .onChange(of: lutName) { _, _ in refreshPreview() }
+        .onChange(of: lutName) { _, _ in
+            refreshPreview()
+            keepGrade()
+        }
         .onChange(of: logTarget) { _, target in
             // Log for grading elsewhere belongs in ProRes, which keeps its detail.
             if target != nil, codec == "hevc420" { codec = "prores422hq" }
             refreshPreview()
         }
-        .onChange(of: lutMadeForRec709) { _, _ in refreshPreview() }
-        .onChange(of: grade) { _, _ in refreshSoon() }
-        .onChange(of: effects) { _, _ in refreshSoon() }
+        .onChange(of: lutMadeForRec709) { _, _ in
+            refreshPreview()
+            keepGrade()
+        }
+        .onChange(of: grade) { _, _ in
+            refreshSoon()
+            keepGrade()
+        }
+        .onChange(of: effects) { _, _ in
+            refreshSoon()
+            keepGrade()
+        }
         .interactiveDismissDisabled(job.progress != nil || editingGrade || sliding)
         .haptic(.selection, trigger: lutName)
         .haptic(.selection, trigger: codec)
@@ -343,6 +377,17 @@ struct ExportView: View {
                         LabeledContent("Grade", value: grade.isNeutral && effects.isNeutral ? "None" : "Changed")
                     }
                     .disabled(job.progress != nil)
+                    Button("Copy Grade From…") { copyingGrade = true }
+                        .disabled(job.progress != nil)
+                    Button("Reset Grade", role: .destructive) { confirmingGradeReset = true }
+                        .disabled(job.progress != nil || (grade.isNeutral && effects.isNeutral))
+                        .confirmationDialog(
+                            "Reset the grade and FX?", isPresented: $confirmingGradeReset, titleVisibility: .visible
+                        ) {
+                            Button("Reset Grade", role: .destructive) { resetGrade() }
+                        } message: {
+                            Text("Adjust, Color, Wheels and FX go back to none. The look stays.")
+                        }
                     if logTarget == nil, lutName == BuiltInLook.aces20.name {
                         Picker("Output", selection: $target) {
                             ForEach(BakeTarget.allCases) { Text($0.label).tag($0) }
@@ -582,9 +627,33 @@ struct ExportView: View {
         previewExporter = nil
         previewComposition = nil
         var chosen = choice
+        exportUsesGrade = isLog && logTarget == nil && !(grade.isNeutral && effects.isNeutral)
         // A baked take's copy is stabilized whatever the comparing switch shows.
         if !isLog { chosen.stabilize = true }
         job.start(take: take, choice: chosen)
+    }
+
+    /// Puts a kept or copied grade on screen. A look that's gone keeps the current one.
+    private func apply(_ recipe: GradeRecipe) {
+        if recipe.look.isEmpty || model.isAvailableLook(recipe.look) {
+            lutName = recipe.look
+            lutMadeForRec709 = recipe.lutMadeForRec709
+        }
+        grade = recipe.grade
+        effects = recipe.effects
+    }
+
+    /// Keeps the grade for next time, or forgets it once it's back to none.
+    private func keepGrade() {
+        guard restoredGrade, isLog else { return }
+        let recipe = GradeRecipe(look: lutName, lutMadeForRec709: lutMadeForRec709, grade: grade, effects: effects)
+        model.exportRecipe = recipe.isNeutral ? nil : recipe
+    }
+
+    private func resetGrade() {
+        grade = LookGrade()
+        effects = LookEffects()
+        model.exportRecipe = nil
     }
 
     /// Gives the preview its take back where it was once an export ends, however it ends.
@@ -834,6 +903,18 @@ final class LookExportJob: ObservableObject {
             ? "The look is baked in, and the file's tags describe it."
             : "The file's transfer tag is nominal; decode with the curve named here."
         metadata["exportedFrom"] = take.url.lastPathComponent
+        // A look export keeps its whole grade, so a later export can copy it. A log take written
+        // as log again has none, and a baked take only steadied keeps the one it was recorded with.
+        if ExportChoice.isLog(take) {
+            if choice.logTarget == nil {
+                let recipe = GradeRecipe(
+                    look: choice.lutName, lutMadeForRec709: choice.lutMadeForRec709, grade: choice.grade, effects: choice.effects)
+                metadata[GradeRecipe.metadataKey] = recipe.metadataValue
+                metadata["effects"] = choice.effects.isNeutral ? "none" : "baked in: \(choice.effects.label)"
+            } else {
+                metadata[GradeRecipe.metadataKey] = nil
+            }
+        }
         if let steadied { metadata["steadied"] = steadied }
         metadata["exportFormat"] = format
         let rate = take.info?.metadata["frameRate"].flatMap(Double.init) ?? 30

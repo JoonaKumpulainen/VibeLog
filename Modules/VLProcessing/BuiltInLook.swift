@@ -4,9 +4,22 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 //   Copyright Contributors to the OpenColorIO Project.
 //
-// The full BSD 3-Clause terms are in LICENSES/OpenColorIO-BSD-3-Clause.txt. Changes from the
-// original: translated from C++ to Swift, with only the forward Rec.709 100-nit and P3-D65
-// 1000-nit views kept. The rest of this file is VibeLog's own, under the GPL in LICENSE.
+//   Redistribution and use in source and binary forms, with or without modification, are
+//   permitted provided that the following conditions are met:
+//   * Redistributions of source code must retain the above copyright notice, this list of
+//     conditions and the following disclaimer.
+//   * Redistributions in binary form must reproduce the above copyright notice, this list of
+//     conditions and the following disclaimer in the documentation and/or other materials
+//     provided with the distribution.
+//   * Neither the name of the copyright holder nor the names of its contributors may be used to
+//     endorse or promote products derived from this software without specific prior written
+//     permission.
+//
+// The full terms, with the disclaimer, are in LICENSES/OpenColorIO-BSD-3-Clause.txt. Changes from
+// the original: translated from C++ to Swift, with only the forward Rec.709 100-nit and P3-D65
+// 1000-nit views kept. The camera matrices in cameraToAP0 and rec2020ToAP0 come from the
+// OpenColorIO Configuration for ACES studio configs, under the same BSD 3-Clause license and
+// copyright. The rest of this file is VibeLog's own, under the GPL in LICENSE.
 
 import Foundation
 import VLCore
@@ -68,8 +81,9 @@ public enum BuiltInLook: String, CaseIterable, Sendable {
 
     /// The gamut to linear Rec.2020 as an ACES look takes it: through the vendor's matrix to
     /// ACES2065-1 and back by OpenColorIO's own Rec.2020 matrix, so `display` sends the colour to
-    /// ACES exactly as the vendor's input would, and an ACES grade in Resolve matches. Off it by
-    /// about 0.4% from the direct conversion between two D65 spaces, which MONITOR and LUTs keep.
+    /// ACES exactly as the vendor's input would, which should match an ACES grade in Resolve (not
+    /// checked). Off by about 0.4% from the direct conversion between two D65 spaces, which MONITOR
+    /// and LUTs keep.
     static func acesInput(_ gamut: Gamut) -> simd_double3x3 {
         guard let vendor = cameraToAP0(gamut) else { return gamut.fromRec2020.inverse }
         let m = rec2020ToAP0

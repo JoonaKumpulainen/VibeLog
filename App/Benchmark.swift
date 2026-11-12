@@ -377,9 +377,9 @@ extension AppModel {
         if !benchmark.fitted.isEmpty { lines.append("Changed for you: " + benchmark.fitted.joined(separator: "; ") + ".") }
         if !failed.isEmpty {
             lines.append("Not measured: " + failed.map { Self.benchmarkStepNames[$0] ?? $0 }.joined(separator: ", ")
-                + ". Try Run benchmark in Settings, Advanced, Diagnostics.")
+                + ". Try again in Settings, Advanced, Benchmark.")
         }
-        lines.append("Every codec and setting stays available; ones past this phone's limit warn before a take.")
+        lines.append("Every codec and setting stays available; ones past this phone's limit warn before a take. Details are in Settings, Advanced, Benchmark.")
         return lines.joined(separator: "\n")
     }
 }

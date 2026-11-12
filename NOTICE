@@ -2,8 +2,8 @@ VibeLog
 Copyright (C) 2026 JoonaKumpulainen
 Licensed under the GNU General Public License v3.0, in LICENSE.
 
-This product includes code ported from the following projects. Their license texts are in the
-LICENSES folder, and the app shows them under Settings > About > Legal.
+This product includes code and data ported from the following projects. Their license texts are
+in the LICENSES folder, and the app shows them under Settings > About > Legal.
 
 1. OpenColorIO, ACES 2.0 output transform
    Source: https://github.com/AcademySoftwareFoundation/OpenColorIO
@@ -16,21 +16,32 @@ LICENSES folder, and the app shows them under Settings > About > Legal.
    encoding from transforms/builtins/ACES.cpp and Displays.cpp added in
    Modules/VLProcessing/BuiltInLook.swift.
 
-2. Academy Color Encoding System (ACES) 2.0
-   Source: https://github.com/ampas/aces-core
-   Academy of Motion Picture Arts and Sciences.
+2. OpenColorIO, ACES 1.x SDR video output transform
+   Source: https://github.com/AcademySoftwareFoundation/OpenColorIO at commit 22dd9c4faa:
+           "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-VIDEO_1.0" in
+           src/OpenColorIO/transforms/builtins/ACES.cpp, the ACES glow, red modifier and
+           dark-to-dim renderers in ops/fixedfunction/FixedFunctionOpCPU.cpp, the curve fitting in
+           ops/gradingrgbcurve/GradingBSplineCurve.cpp, and the Rec.1886 Rec.709 display in
+           transforms/builtins/Displays.cpp
+   Copyright Contributors to the OpenColorIO Project.
+   License: BSD 3-Clause, LICENSES/OpenColorIO-BSD-3-Clause.txt
+   Changes: translated from C++ to Swift in Modules/VLProcessing/ACES13.swift, keeping only the
+   forward path of that view, clamped to the display.
+
+3. OpenColorIO Configuration for ACES, camera input matrices
+   Source: https://github.com/AcademySoftwareFoundation/OpenColorIO-Config-ACES, the ACES 2.0 and
+           1.3 studio configs, as built into OpenColorIO 2.6
+   Copyright Contributors to the OpenColorIO Project.
+   License: BSD 3-Clause, LICENSES/OpenColorIO-BSD-3-Clause.txt
+   Changes: the Sony, ARRI and Canon gamuts' matrices to ACES2065-1 and the Rec.2020 matrix,
+   copied as numbers into Modules/VLProcessing/BuiltInLook.swift.
+
+4. Academy Color Encoding System (ACES) 2.0
+   Source: https://github.com/aces-aswf/aces-core (formerly ampas/aces-dev)
+   Academy of Motion Picture Arts and Sciences, now under the Academy Software Foundation.
    License: Apache License 2.0, LICENSES/ACES-Apache-2.0.txt
-   The ACES 2.0 output transform algorithm, as implemented by item 1.
+   The ACES 2.0 output transform algorithm. VibeLog's code is ported from OpenColorIO's
+   implementation of it (item 1), not from this repository.
 
-3. Academy Color Encoding System (ACES) 1.3 reference implementation
-   Source: https://github.com/ampas/aces-dev, tag v1.3.1: transforms/ctl/rrt/RRT.ctl,
-           transforms/ctl/odt/rec709/ODT.Academy.Rec709_100nits_dim.ctl and the ACESlib files
-   Copyright © 2015 Academy of Motion Picture Arts and Sciences (A.M.P.A.S.).
-   Portions contributed by others as indicated. All rights reserved.
-   License: License Terms for Academy Color Encoding System Components,
-            LICENSES/ACES-1.3-AMPAS.txt, including its Disclaimer of Warranty
-   Changes: translated from CTL to Swift in Modules/VLProcessing/ACES13.swift, keeping only the
-   forward RRT and the Rec.709 100-nit dim-surround output transform.
-
-Neither the names of the Academy of Motion Picture Arts and Sciences, the OpenColorIO Project or
-their contributors are used to endorse or promote VibeLog.
+Neither the names of the Academy of Motion Picture Arts and Sciences, the Academy Software
+Foundation, the OpenColorIO Project or their contributors are used to endorse or promote VibeLog.

@@ -4,8 +4,21 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 //   Copyright Contributors to the OpenColorIO Project.
 //
-// The full BSD 3-Clause terms are in LICENSES/OpenColorIO-BSD-3-Clause.txt. The algorithm is the
-// Academy's ACES 2.0 Output Transform, under the Apache License 2.0 in LICENSES/ACES-Apache-2.0.txt.
+//   Redistribution and use in source and binary forms, with or without modification, are
+//   permitted provided that the following conditions are met:
+//   * Redistributions of source code must retain the above copyright notice, this list of
+//     conditions and the following disclaimer.
+//   * Redistributions in binary form must reproduce the above copyright notice, this list of
+//     conditions and the following disclaimer in the documentation and/or other materials
+//     provided with the distribution.
+//   * Neither the name of the copyright holder nor the names of its contributors may be used to
+//     endorse or promote products derived from this software without specific prior written
+//     permission.
+//
+// The full terms, with the disclaimer, are in LICENSES/OpenColorIO-BSD-3-Clause.txt. The
+// algorithm is the Academy's ACES 2.0 Output Transform, whose reference code is now under the
+// Apache License 2.0 in LICENSES/ACES-Apache-2.0.txt; this file is ported from OpenColorIO's
+// code, not from the Academy's.
 // Changes from the original: translated to Swift, with only the forward path kept, used for the
 // Rec.709 100-nit and P3-D65 1000-nit outputs, and lineBoundaryIntersectionM holds its normalised
 // J at zero or above, where float rounding at the peak made a NaN. Names follow the original so

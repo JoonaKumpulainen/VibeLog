@@ -523,6 +523,15 @@ struct SettingsView: View {
                 Text("This phone's lens profiles, from Apple's calibration. Kept on the phone, out of presets.")
             }
             Section {
+                NavigationLink {
+                    BenchmarkView { dismiss() }
+                } label: {
+                    LabeledContent("Benchmark", value: model.benchmarkStatusText)
+                }
+            } footer: {
+                Text("What this phone records without dropping frames, step by step, and what each warning means.")
+            }
+            Section {
                 NavigationLink("Diagnostics") {
                     DiagnosticsView { dismiss() }
                 }

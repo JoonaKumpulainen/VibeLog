@@ -1,21 +1,39 @@
-// Ported to Swift from the Academy's ACES 1.3 reference CTL, aces-dev tag v1.3.1: RRT.ctl,
-// ODT.Academy.Rec709_100nits_dim.ctl and the ACESlib files they import.
+// Ported to Swift from OpenColorIO's built-in ACES 1.x output transform at commit 22dd9c4faa:
+// "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-VIDEO_1.0" in transforms/builtins/ACES.cpp, the
+// ACES_GLOW_10, ACES_RED_MOD_10 and ACES_DARK_TO_DIM_10 renderers in
+// ops/fixedfunction/FixedFunctionOpCPU.cpp, and the RGB curve fitting and evaluation in
+// ops/gradingrgbcurve/GradingBSplineCurve.cpp, all of which carry:
 //
-//   Copyright © 2015 Academy of Motion Picture Arts and Sciences (A.M.P.A.S.).
-//   Portions contributed by others as indicated. All rights reserved.
+//   SPDX-License-Identifier: BSD-3-Clause
+//   Copyright Contributors to the OpenColorIO Project.
 //
-// Used under the License Terms for Academy Color Encoding System Components, with its conditions
-// and Disclaimer of Warranty in LICENSES/ACES-1.3-AMPAS.txt. Changes from the original: translated
-// to Swift, with only the forward RRT and the Rec.709 100-nit dim-surround ODT kept.
+//   Redistribution and use in source and binary forms, with or without modification, are
+//   permitted provided that the following conditions are met:
+//   * Redistributions of source code must retain the above copyright notice, this list of
+//     conditions and the following disclaimer.
+//   * Redistributions in binary form must reproduce the above copyright notice, this list of
+//     conditions and the following disclaimer in the documentation and/or other materials
+//     provided with the distribution.
+//   * Neither the name of the copyright holder nor the names of its contributors may be used to
+//     endorse or promote products derived from this software without specific prior written
+//     permission.
+//
+//   The full terms, with the disclaimer, are in LICENSES/OpenColorIO-BSD-3-Clause.txt.
+//
+// Changes from the original: translated from C++ to Swift in Double, with only the forward path of
+// the SDR video view kept, followed by the Rec.1886 Rec.709 display from Displays.cpp, clamped to
+// the display.
 
 import Foundation
 
-/// ACES 1.3: the Reference Rendering Transform, then the Rec.709 output transform for a 100 nit
-/// display in a dim surround. ACES2065-1 in, Rec.1886 code values out.
+/// ACES 1.3's Rec.709 view, as OpenColorIO's "ACES 1.0 - SDR Video" builds it: the RRT's glow and
+/// red modifier, its tone curve and the 48-nit ODT curve as fitted B-splines, the dark-to-dim
+/// surround and desaturation for 100 nits, then Rec.709 with the 2.4 power. ACES2065-1 in,
+/// Rec.1886 code values out.
 enum ACES13Output {
     typealias M33 = [Double]
 
-    // MARK: Matrices, in column-vector form, from ACESlib.Transform_Common and ODT_Common
+    // MARK: Matrices, in column-vector form
 
     static let ap0ToXYZ = ACES2OutputTransform.rgbToXYZ(ACES2OutputTransform.ap0)
     static let ap1ToXYZ = ACES2OutputTransform.rgbToXYZ(ACES2OutputTransform.ap1)
@@ -23,21 +41,8 @@ enum ACES13Output {
     static let ap0ToAP1 = ACES2OutputTransform.multiply(xyzToAP1, ap0ToXYZ)
     static let ap1ToAP0 = ACES2OutputTransform.invert(ap0ToAP1)
     static let xyzToRec709 = ACES2OutputTransform.invert(ACES2OutputTransform.rgbToXYZ(ACES2OutputTransform.rec709))
-    static let ap1RGB2Y = [ap1ToXYZ[3], ap1ToXYZ[4], ap1ToXYZ[5]]
 
-    /// calc_sat_adjust_matrix: each channel keeps `sat` of itself and takes the rest from luminance.
-    static func saturationMatrix(_ sat: Double) -> M33 {
-        var m = M33(repeating: 0, count: 9)
-        for r in 0..<3 {
-            for c in 0..<3 { m[r * 3 + c] = (1 - sat) * ap1RGB2Y[c] + (r == c ? sat : 0) }
-        }
-        return m
-    }
-
-    static let rrtSatMatrix = saturationMatrix(0.96)
-    static let odtSatMatrix = saturationMatrix(0.93)
-
-    /// calculate_cat_matrix with Bradford, from the ACES white to D65.
+    /// Bradford adaptation from the ACES white to D65.
     static let d60ToD65: M33 = {
         let bradford: M33 = [0.8951, 0.2664, -0.1614, -0.7502, 1.7135, 0.0367, 0.0389, -0.0685, 1.0296]
         func xyz(_ x: Double, _ y: Double) -> [Double] { [x / y, 1, (1 - x - y) / y] }
@@ -51,198 +56,220 @@ enum ACES13Output {
             ACES2OutputTransform.invert(bradford), ACES2OutputTransform.multiply(scale, bradford))
     }()
 
+    /// AP1 to CIE XYZ D65 with Bradford, then XYZ to Rec.709 with no adaptation, as the view and
+    /// the display do it.
+    static let ap1ToRec709 = ACES2OutputTransform.multiply(
+        xyzToRec709, ACES2OutputTransform.multiply(d60ToD65, ap1ToXYZ))
+
+    /// RRT_SAT_MAT in Generate_RRT_preamble_ops.
+    static let rrtSatMatrix: M33 = [
+        0.970889148671, 0.026963270632, 0.002147580696,
+        0.010889148671, 0.986963270632, 0.002147580696,
+        0.010889148671, 0.026963270632, 0.962147580696,
+    ]
+
+    /// DESAT_100_NITS in Generate_video_adjustment_ops.
+    static let desat100Nits: M33 = [
+        0.949056010175, 0.047185723607, 0.003758266219,
+        0.019056010175, 0.977185723607, 0.003758266219,
+        0.019056010175, 0.047185723607, 0.933758266219,
+    ]
+
     @inline(__always) static func mult(_ m: M33, _ v: (Double, Double, Double)) -> (Double, Double, Double) {
         (m[0] * v.0 + m[1] * v.1 + m[2] * v.2,
          m[3] * v.0 + m[4] * v.1 + m[5] * v.2,
          m[6] * v.0 + m[7] * v.1 + m[8] * v.2)
     }
 
-    // MARK: Constants
+    // MARK: Glow and red modifier, from FixedFunctionOpCPU.cpp
 
-    static let glowGain = 0.05
-    static let glowMid = 0.08
-    static let redScale = 0.82
-    static let redPivot = 0.03
-    static let redHue = 0.0
-    static let redWidth = 135.0
-    static let cinemaWhite = 48.0
-    static let cinemaBlack = 0.02
-    static let dimSurroundGamma = 0.9811
-    /// CTL's smallest positive half, the floor for the splines' log.
-    static let halfMin = 5.96046448e-08
-    static let halfMax = 65504.0
+    static let noiseLimit = 1e-2
 
-    // MARK: RRT sweeteners, from ACESlib.RRT_Common and Utilities_Color
-
-    static func saturation(_ rgb: (Double, Double, Double)) -> Double {
-        let hi = max(rgb.0, rgb.1, rgb.2)
-        let lo = min(rgb.0, rgb.1, rgb.2)
-        return (max(hi, 1e-10) - max(lo, 1e-10)) / max(hi, 1e-2)
+    /// CalcSatWeight.
+    static func satWeight(_ r: Double, _ g: Double, _ b: Double) -> Double {
+        let lo = min(r, g, b)
+        let hi = max(r, g, b)
+        return (max(1e-10, hi) - max(1e-10, lo)) / max(noiseLimit, hi)
     }
 
-    static func yc(_ rgb: (Double, Double, Double)) -> Double {
+    /// Renderer_ACES_Glow03_Fwd with ACES 1.0's gain 0.05 and mid 0.08.
+    static func glow(_ rgb: (Double, Double, Double)) -> (Double, Double, Double) {
         let (r, g, b) = rgb
-        let chroma = (b * (b - g) + g * (g - r) + r * (r - b)).squareRoot()
-        return (b + g + r + 1.75 * chroma) / 3
+        let glowGain = 0.05, glowMid = 0.08
+        let yc = (b + g + r + 1.75 * (b * (b - g) + g * (g - r) + r * (r - b)).squareRoot()) / 3
+        let x = (satWeight(r, g, b) - 0.4) * 5
+        let sign: Double = x.sign == .minus ? -1 : 1
+        let t = max(0, 1 - 0.5 * sign * x)
+        let gain = glowGain * (1 + sign * (1 - t * t)) * 0.5
+        let out: Double
+        if yc >= glowMid * 2 {
+            out = 0
+        } else if yc <= glowMid * 2 / 3 {
+            out = gain
+        } else {
+            out = gain * (glowMid / yc - 0.5)
+        }
+        let added = 1 + out
+        return (r * added, g * added, b * added)
     }
 
-    /// Undefined for a neutral, which the red modifier then leaves alone.
-    static func hue(_ rgb: (Double, Double, Double)) -> Double? {
-        if rgb.0 == rgb.1 && rgb.1 == rgb.2 { return nil }
-        var h = (180 / Double.pi) * atan2(3.0.squareRoot() * (rgb.1 - rgb.2), 2 * rgb.0 - rgb.1 - rgb.2)
-        if h < 0 { h += 360 }
-        return h
-    }
-
-    static func sigmoidShaper(_ x: Double) -> Double {
-        let t = max(1 - abs(x / 2), 0)
-        let sign: Double = x > 0 ? 1 : x < 0 ? -1 : 0
-        let y = 1 + sign * (1 - t * t)
-        return y / 2
-    }
-
-    static func glowFwd(_ yc: Double, _ gain: Double, _ mid: Double) -> Double {
-        if yc <= 2.0 / 3 * mid { return gain }
-        if yc >= 2 * mid { return 0 }
-        return gain * (mid / yc - 0.5)
-    }
-
-    static func cubicBasisShaper(_ x: Double, _ w: Double) -> Double {
-        let M: [[Double]] = [
-            [-1.0 / 6, 3.0 / 6, -3.0 / 6, 1.0 / 6],
-            [3.0 / 6, -6.0 / 6, 3.0 / 6, 0],
-            [-3.0 / 6, 0, 3.0 / 6, 0],
-            [1.0 / 6, 4.0 / 6, 1.0 / 6, 0],
-        ]
-        let knots = [-w / 2, -w / 4, 0, w / 4, w / 2]
-        var y = 0.0
-        if x > knots[0] && x < knots[4] {
-            let knotCoord = (x - knots[0]) * 4 / w
-            let j = Int(knotCoord)
+    /// Renderer_ACES_RedMod10_Fwd, with CalcHueWeight.
+    static func redModifier(_ rgb: (Double, Double, Double)) -> (Double, Double, Double) {
+        var r = rgb.0
+        let g = rgb.1, b = rgb.2
+        let invWidth = 1.6976527263135504
+        let hue = atan2(3.0.squareRoot() * (g - b), 2 * r - (g + b))
+        let knotCoord = hue * invWidth + 2
+        let j = Int(knotCoord)
+        var weight = 0.0
+        if j >= 0 && j < 4 {
+            let M: [[Double]] = [
+                [0.25, 0, 0, 0],
+                [-0.75, 0.75, 0.75, 0.25],
+                [0.75, -1.5, 0, 1],
+                [-0.25, 0.75, -0.75, 0.25],
+            ]
             let t = knotCoord - Double(j)
-            let monomials = [t * t * t, t * t, t, 1]
-            if (0...3).contains(j) {
-                let column = 3 - j
-                y = monomials[0] * M[0][column] + monomials[1] * M[1][column]
-                    + monomials[2] * M[2][column] + monomials[3] * M[3][column]
+            let c = M[j]
+            weight = c[3] + t * (c[2] + t * (c[1] + t * c[0]))
+        }
+        if weight > 0 {
+            r += weight * satWeight(r, g, b) * (0.03 - r) * (1 - 0.82)
+        }
+        return (r, g, b)
+    }
+
+    // MARK: Tone curves, from GradingBSplineCurve.cpp
+
+    /// A curve fitted from control points and slopes as piecewise quadratics in log10.
+    struct Curve {
+        var knots: [Double] = []
+        var a: [Double] = []
+        var b: [Double] = []
+        var c: [Double] = []
+
+        /// computeKnotsAndCoefsForRGBCurve with the slopes given: FitRGBSpline, then
+        /// AdjustRGBSlopes and a second fit if any segment would dip.
+        init(points: [(x: Double, y: Double)], slopes given: [Double]) {
+            var slopes = given
+            fit(points, slopes)
+            var adjusted = false
+            var i = 0
+            for ksi in knots {
+                guard points[i].x != ksi else { continue }
+                let (xi, yi) = points[i]
+                let (x1, y1) = points[i + 1]
+                let sBar = (2 * (y1 - yi) - (ksi - xi) * slopes[i] - (x1 - ksi) * slopes[i + 1]) / (x1 - xi)
+                if sBar < 0 {
+                    adjusted = true
+                    let secant = (y1 - yi) / (x1 - xi)
+                    let blend = ((ksi - xi) * slopes[i] + (x1 - ksi) * slopes[i + 1]) / (x1 - xi)
+                    let aim = min(0.01 * 0.5 * (slopes[i] + slopes[i + 1]), secant)
+                    let adjust = (2 * secant - aim) / blend
+                    slopes[i] *= adjust
+                    slopes[i + 1] *= adjust
+                }
+                i += 1
+            }
+            if adjusted { fit(points, slopes) }
+        }
+
+        /// FitRGBSpline.
+        private mutating func fit(_ points: [(x: Double, y: Double)], _ slopes: [Double]) {
+            knots = [points[0].x]
+            a = []; b = []; c = []
+            for i in 0..<(points.count - 1) {
+                let (xi, yi) = points[i]
+                let (x1, y1) = points[i + 1]
+                let dx = x1 - xi
+                let secant = (y1 - yi) / dx
+                if abs((slopes[i] + slopes[i + 1]) - 2 * secant) < 1e-6 {
+                    c.append(yi); b.append(slopes[i]); a.append(0.5 * (slopes[i + 1] - slopes[i]) / dx)
+                } else {
+                    let aa = slopes[i] - secant
+                    let bb = slopes[i + 1] - secant
+                    let ksi: Double
+                    if aa * bb >= 0 {
+                        ksi = (xi + x1) * 0.5
+                    } else if abs(aa) > abs(bb) {
+                        ksi = x1 + aa * dx / (slopes[i + 1] - slopes[i])
+                    } else {
+                        ksi = xi + bb * dx / (slopes[i + 1] - slopes[i])
+                    }
+                    let sBar = (2 * secant - slopes[i + 1]) + (slopes[i + 1] - slopes[i]) * (ksi - xi) / dx
+                    let eta = (sBar - slopes[i]) / (ksi - xi)
+                    c.append(yi); b.append(slopes[i]); a.append(0.5 * eta)
+                    c.append(yi + slopes[i] * (ksi - xi) + 0.5 * eta * (ksi - xi) * (ksi - xi))
+                    b.append(sBar)
+                    a.append(0.5 * (slopes[i + 1] - sBar) / (x1 - ksi))
+                    knots.append(ksi)
+                }
+                knots.append(x1)
             }
         }
-        return y * 3 / 2
-    }
 
-    static func centerHue(_ hue: Double, _ center: Double) -> Double {
-        var h = hue - center
-        if h < -180 { h += 360 } else if h > 180 { h -= 360 }
-        return h
-    }
-
-    // MARK: Tonescales, from ACESlib.Tonescales
-
-    struct Spline {
-        var coefsLow: [Double]
-        var coefsHigh: [Double]
-        var minPoint: (x: Double, y: Double)
-        var midPoint: (x: Double, y: Double)
-        var maxPoint: (x: Double, y: Double)
-        var slopeLow: Double
-        var slopeHigh: Double
-        var knots: Int
-    }
-
-    static let rrtParams = Spline(
-        coefsLow: [-4.0000000000, -4.0000000000, -3.1573765773, -0.4852499958, 1.8477324706, 1.8477324706],
-        coefsHigh: [-0.7185482425, 2.0810307172, 3.6681241237, 4.0000000000, 4.0000000000, 4.0000000000],
-        minPoint: (0.18 * pow(2, -15), 0.0001), midPoint: (0.18, 4.8), maxPoint: (0.18 * pow(2, 18), 10000),
-        slopeLow: 0, slopeHigh: 0, knots: 4)
-
-    static let odt48Nits = Spline(
-        coefsLow: [-1.6989700043, -1.6989700043, -1.4779000000, -1.2291000000, -0.8648000000, -0.4480000000,
-                   0.0051800000, 0.4511080334, 0.9113744414, 0.9113744414],
-        coefsHigh: [0.5154386965, 0.8470437783, 1.1358000000, 1.3802000000, 1.5197000000, 1.5985000000,
-                    1.6467000000, 1.6746091357, 1.6878733390, 1.6878733390],
-        minPoint: (segmentedSpline(0.18 * pow(2, -6.5), rrtParams), 0.02),
-        midPoint: (segmentedSpline(0.18, rrtParams), 4.8),
-        maxPoint: (segmentedSpline(0.18 * pow(2, 6.5), rrtParams), 48),
-        slopeLow: 0, slopeHigh: 0.04, knots: 8)
-
-    /// segmented_spline_c5_fwd and c9_fwd, which differ only in their knot count.
-    static func segmentedSpline(_ x: Double, _ C: Spline) -> Double {
-        func basis(_ cf: [Double], _ t: Double) -> Double {
-            // monomials {t², t, 1} times cf times M, with M from the CTL.
-            let a = 0.5 * cf[0] - cf[1] + 0.5 * cf[2]
-            let b = -cf[0] + cf[1]
-            let c = 0.5 * cf[0] + 0.5 * cf[1]
-            return t * t * a + t * b + c
+        /// KnotsCoefs::evalCurve: linear beyond the ends, with the end segments' slopes.
+        func eval(_ x: Double) -> Double {
+            let first = knots[0], last = knots[knots.count - 1]
+            if x <= first { return (x - first) * b[0] + c[0] }
+            if x >= last {
+                let n = a.count - 1
+                let t = last - knots[knots.count - 2]
+                return (x - last) * (2 * a[n] * t + b[n]) + (a[n] * t + b[n]) * t + c[n]
+            }
+            var i = 0
+            while i < knots.count - 2 && !(x < knots[i + 1]) { i += 1 }
+            let t = x - knots[i]
+            return (a[i] * t + b[i]) * t + c[i]
         }
-        let logx = log10(max(x, halfMin))
-        let logMin = log10(C.minPoint.x)
-        let logMid = log10(C.midPoint.x)
-        let logMax = log10(C.maxPoint.x)
-        let logy: Double
-        if logx <= logMin {
-            logy = logx * C.slopeLow + (log10(C.minPoint.y) - C.slopeLow * logMin)
-        } else if logx < logMid {
-            let knotCoord = Double(C.knots - 1) * (logx - logMin) / (logMid - logMin)
-            let j = Int(knotCoord)
-            logy = basis([C.coefsLow[j], C.coefsLow[j + 1], C.coefsLow[j + 2]], knotCoord - Double(j))
-        } else if logx < logMax {
-            let knotCoord = Double(C.knots - 1) * (logx - logMid) / (logMax - logMid)
-            let j = Int(knotCoord)
-            logy = basis([C.coefsHigh[j], C.coefsHigh[j + 1], C.coefsHigh[j + 2]], knotCoord - Double(j))
-        } else {
-            logy = logx * C.slopeHigh + (log10(C.maxPoint.y) - C.slopeHigh * logMax)
-        }
-        return pow(10, logy)
     }
 
-    // MARK: The transforms
+    /// The RRT shaper in Generate_tonecurve_ops.
+    static let rrtCurve = Curve(
+        points: [(-5.26017743, -4), (-3.75502745, -3.57868829), (-2.24987747, -1.82131329),
+                 (-0.74472749, 0.68124124), (1.06145248, 2.87457742), (2.86763245, 3.83406206),
+                 (4.67381243, 4)],
+        slopes: [0, 0.55982688, 1.77532247, 1.55, 0.8787017, 0.18374463, 0])
 
-    /// RRT.ctl: ACES2065-1 to OCES.
-    static func rrt(_ input: (Double, Double, Double)) -> (Double, Double, Double) {
-        var aces = input
-        let sat = saturation(aces)
-        let s = sigmoidShaper((sat - 0.4) / 0.2)
-        let addedGlow = 1 + glowFwd(yc(aces), glowGain * s, glowMid)
-        aces = (aces.0 * addedGlow, aces.1 * addedGlow, aces.2 * addedGlow)
-        if let h = hue(aces) {
-            let weight = cubicBasisShaper(centerHue(h, redHue), redWidth)
-            aces.0 = aces.0 + weight * sat * (redPivot - aces.0) * (1 - redScale)
-        }
-        aces = (max(aces.0, 0), max(aces.1, 0), max(aces.2, 0))
-        var pre = mult(ap0ToAP1, aces)
-        pre = (min(max(pre.0, 0), halfMax), min(max(pre.1, 0), halfMax), min(max(pre.2, 0), halfMax))
-        pre = mult(rrtSatMatrix, pre)
-        let post = (segmentedSpline(pre.0, rrtParams), segmentedSpline(pre.1, rrtParams), segmentedSpline(pre.2, rrtParams))
-        return mult(ap1ToAP0, post)
+    /// The SDR ODT shaper in Generate_tonecurve_ops.
+    static let odtCurve = Curve(
+        points: [(-2.54062362, -1.69897000), (-2.08035721, -1.58843500), (-1.62009080, -1.35350000),
+                 (-1.15982439, -1.04695000), (-0.69955799, -0.65640000), (-0.23929158, -0.22141000),
+                 (0.22097483, 0.22814402), (0.68124124, 0.68124124), (1.01284632, 0.99142189),
+                 (1.34445140, 1.25800000), (1.67605648, 1.44995000), (2.00766156, 1.55910000),
+                 (2.33926665, 1.62260000), (2.67087173, 1.66065457), (3.00247681, 1.68124124)],
+        slopes: [0, 0.4803088, 0.5405565, 0.79149813, 0.9055625, 0.98460368, 0.96884766, 1,
+                 0.87078346, 0.73702127, 0.42068113, 0.23763206, 0.14535362, 0.08416378, 0.04])
+
+    /// log10, both curves, back to linear, then the cinema white and black scale.
+    static func toneCurve(_ v: Double) -> Double {
+        let logV = log10(max(v, Double(Float.leastNormalMagnitude)))
+        let y = pow(10, odtCurve.eval(rrtCurve.eval(logV)))
+        let cinemaWhite = 48.0, cinemaBlack = 0.02
+        return (y - cinemaBlack) / (cinemaWhite - cinemaBlack)
     }
 
-    static func darkToDimSurround(_ linearCV: (Double, Double, Double)) -> (Double, Double, Double) {
-        let XYZ = mult(ap1ToXYZ, linearCV)
-        var divisor = XYZ.0 + XYZ.1 + XYZ.2
-        if divisor == 0 { divisor = 1e-10 }
-        let x = XYZ.0 / divisor
-        let y = XYZ.1 / divisor
-        let Y = pow(max(XYZ.1, 0), dimSurroundGamma)
-        let out = (x * Y / max(y, 1e-10), Y, (1 - x - y) * Y / max(y, 1e-10))
-        return mult(xyzToAP1, out)
+    /// Renderer_ACES_DarkToDim10_Fwd with gamma 0.9811, on AP1.
+    static func darkToDim(_ rgb: (Double, Double, Double)) -> (Double, Double, Double) {
+        let y = max(1e-10, 0.27222871678091454 * rgb.0 + 0.67408176581114831 * rgb.1
+                    + 0.053689517407937051 * rgb.2)
+        let k = pow(y, 0.9811 - 1)
+        return (rgb.0 * k, rgb.1 * k, rgb.2 * k)
     }
 
-    /// ODT.Academy.Rec709_100nits_dim.ctl: OCES to full-range Rec.1886 code values.
-    static func odtRec709(_ oces: (Double, Double, Double)) -> (Double, Double, Double) {
-        let pre = mult(ap0ToAP1, oces)
-        let post = (segmentedSpline(pre.0, odt48Nits), segmentedSpline(pre.1, odt48Nits), segmentedSpline(pre.2, odt48Nits))
-        func linCV(_ Y: Double) -> Double { (Y - cinemaBlack) / (cinemaWhite - cinemaBlack) }
-        var cv = (linCV(post.0), linCV(post.1), linCV(post.2))
-        cv = darkToDimSurround(cv)
-        cv = mult(odtSatMatrix, cv)
-        let XYZ = mult(d60ToD65, mult(ap1ToXYZ, cv))
-        let rgb = mult(xyzToRec709, XYZ)
-        // bt1886_r with L_W 1 and L_B 0 is a plain 1/2.4 power.
-        func encode(_ v: Double) -> Double { pow(min(max(v, 0), 1), 1 / 2.4) }
-        return (encode(rgb.0), encode(rgb.1), encode(rgb.2))
-    }
+    // MARK: The view
 
     static func forward(_ aces: (Double, Double, Double)) -> (Double, Double, Double) {
-        odtRec709(rrt(aces))
+        var v = redModifier(glow(aces))
+        v = (max(v.0, 0), max(v.1, 0), max(v.2, 0))
+        v = mult(ap0ToAP1, v)
+        v = (max(v.0, 0), max(v.1, 0), max(v.2, 0))
+        v = mult(rrtSatMatrix, v)
+        v = (toneCurve(v.0), toneCurve(v.1), toneCurve(v.2))
+        v = mult(desat100Nits, darkToDim(v))
+        let rgb = mult(ap1ToRec709, v)
+        // Rec.1886 with a 2.4 power, clamped to the display as a LUT needs.
+        func encode(_ x: Double) -> Double { pow(min(max(x, 0), 1), 1 / 2.4) }
+        return (encode(rgb.0), encode(rgb.1), encode(rgb.2))
     }
 }

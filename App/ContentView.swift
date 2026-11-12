@@ -77,7 +77,7 @@ struct CameraScreen: View {
             Button("Start") { model.startBenchmark(fresh: false) }
             Button("Later", role: .cancel) { model.declineBenchmark() }
         } message: {
-            Text("The benchmark finds what this iPhone records without dropping frames: each lens, the encoders, the GPU and a few short test takes, which are deleted after. It takes about 5 minutes. Lay the phone down still, pointing at anything, with 50% battery or more. You can cancel and carry on later in Settings, Advanced, Diagnostics.")
+            Text("The benchmark finds what this iPhone records without dropping frames: each lens, the encoders, the GPU and a few short test takes, which are deleted after. It takes about 5 minutes. Lay the phone down still, pointing at anything, with 50% battery or more. You can cancel and carry on later in Settings, Advanced, Benchmark.")
         }
         .alert("Benchmark results", isPresented: $model.benchmarkSummaryShown) {
             Button("OK", role: .cancel) { model.benchmarkSummaryClosed() }

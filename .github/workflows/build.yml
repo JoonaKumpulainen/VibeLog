@@ -159,11 +159,11 @@ jobs:
           cp dist/VibeLog-unsigned.ipa dist/VibeLog.ipa
           python3 tools/sidestore_source.py dist/VibeLog.ipa \
             --download "$BASE/VibeLog.ipa" --source "$SOURCE" \
-            --notes "Build ${{ github.run_number }}, $(git log -1 --format=%h): $(git log -1 --format=%s)" \
+            --notes "Build ${{ github.run_number }}, $(git log -1 --format=%h): $(git log -1 --format=%s). Source, GPLv3: https://github.com/${{ github.repository }}/tree/${{ github.sha }}" \
             > dist/source.json
           cat dist/source.json
           gh release view sidestore > /dev/null 2>&1 || gh release create sidestore --prerelease \
-            --title "SideStore" --notes "The newest build of main for SideStore. Add $SOURCE as a source."
+            --title "SideStore" --notes "The newest build of main for SideStore. Add $SOURCE as a source. Each build's source, under GPLv3, is the commit its notes name."
           gh release upload sidestore dist/VibeLog.ipa dist/source.json --clobber
           # One commit holding only the source, replaced on each build.
           mkdir source && cp dist/source.json source/

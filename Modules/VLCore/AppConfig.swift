@@ -81,7 +81,6 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var monitorLUT = "ACES 2.0"
     public var lutExpectsRec709 = false
     public var monitorOffWhileRecording = false
-    public var telemetry = true
     public var lockAtRoll = true
     public var saveGyroLog = true
     public var pcmAudio = false
@@ -173,7 +172,6 @@ public struct AppConfig: Codable, Equatable, Sendable {
         monitorLUT = read(.monitorLUT, defaults.monitorLUT)
         lutExpectsRec709 = read(.lutExpectsRec709, defaults.lutExpectsRec709)
         monitorOffWhileRecording = read(.monitorOffWhileRecording, defaults.monitorOffWhileRecording)
-        telemetry = read(.telemetry, defaults.telemetry)
         lockAtRoll = read(.lockAtRoll, defaults.lockAtRoll)
         saveGyroLog = read(.saveGyroLog, defaults.saveGyroLog)
         pcmAudio = read(.pcmAudio, defaults.pcmAudio)

@@ -40,27 +40,6 @@ struct DiagnosticsView: View {
                     close()
                     model.runProbe()
                 }
-                if model.benchmarkRunning {
-                    LabeledContent("Benchmarking", value: model.benchmarkStatusText)
-                    Button("Cancel benchmark", role: .destructive) { model.cancelBenchmark() }
-                } else {
-                    Button("Run benchmark") {
-                        close()
-                        model.startBenchmark(fresh: true)
-                    }
-                    LabeledContent("Benchmark", value: model.benchmarkStatusText)
-                    if !model.benchmark.summary.isEmpty {
-                        Text(model.benchmark.summary)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                    Button("Benchmark encoders and GPU only") {
-                        close()
-                        model.runEncoderTest()
-                    }
-                }
-                LabeledContent("Encoder limits", value: model.encoderLimitsText)
-                LabeledContent("GPU limits", value: model.gpuLimitsText)
                 Button("Run trial takes") {
                     close()
                     model.runTrialTakes()
