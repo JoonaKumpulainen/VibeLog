@@ -62,9 +62,12 @@ def log_evidence(folder, evidence, seen):
                 bits[m["file"]] = m["bits"]
             elif m := RESULT.search(line):
                 name = Path(m["file"]).stem
-                if name in seen:
+                # The same take can arrive twice: under its own name in the results folder and
+                # under log sharing's code. Its time and figures together tell them apart.
+                fingerprint = line[:12] + line[m.end("file"):]
+                if name in seen or fingerprint in seen:
                     continue
-                seen.add(name)
+                seen.update((name, fingerprint))
                 codec = LABEL_TO_ID.get(m["label"])
                 if codec == "prores4444" and bits.get(name) == "12":
                     codec = "prores4444-12"
