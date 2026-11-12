@@ -553,7 +553,7 @@ an item from **Not verified** once it is.
   real log take only noise near black goes that low. `eed6df9` keeps it, as the path without FX
   always did, so log takes lose nothing; how little it changes in a dark log take isn't seen.
 - **The ultra wide's stabilization on other phones:** the owner reported on 2026-11-12 that on
-  the iPhone 16's ultra wide, Stabilize adds small fast shake, which reads as a timing or
+  the base iPhone 16's ultra wide, Stabilize adds small fast shake, which reads as a timing or
   direction error, and that on the 14 Pro's ultra wide the edges shake and bend, which fits the
   missing lens distortion and rolling shutter. Neither is measured.
 - **Returning to the app after two minutes away, after `eed6df9`:** the camera should keep

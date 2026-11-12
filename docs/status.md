@@ -28,16 +28,15 @@ Run 109 never started and can be ignored. Every session is in
 
 ## Start here next session
 
-1. **Ask how FX on a dark take looks on 0.1.114,** on both phones, then **how Stabilize looks,**
-   on takes `000714` (0.5x) and `220644` (1x), both upright and baked, still on the phone. The 0.5x's first copy kept two thirds of its
-   shake; the timing fix should remove most of that.
+1. **Ask for the results of [next-tests.md](next-tests.md)** from both phones, 0.1.114. Tests
+   1 to 3 close `eed6df9` and `8c7f7d5`; Test 6 says how Stabilize looks with its timing fixed.
 2. **If the phone is linked, measure the new copies** against their gyro logs, as was done for
    the first ones. The method is under **How the copies were measured** below.
-3. **The ultra wide's stabilization:** on the iPhone 16 it adds small fast shake, and on the 14
-   Pro its edges shake and bend. The plan, not yet agreed, is in **Still to build**. First ask
-   the 16's tester for an ultra wide take with small fast shake and slow pans, its `.gcsv` and
-   its stabilized copy, and fit them as under **How the copies were measured**, at lags of
-   ±100 ms and both signs.
+3. **The ultra wide's stabilization:** on the base iPhone 16 it adds small fast shake, and on
+   the 14 Pro its edges shake and bend. Fit Test 4's take and copy as under **How the copies
+   were measured**, at lags of ±100 ms and both signs, to tell timing from direction from
+   scale; Test 5 separates distortion from rolling shutter. The plan, not yet agreed, is in
+   **Still to build**.
 4. **Then pick from Still to build.** Measure stabilizer, per lens, is the natural next step if
    Stabilize now works; rolling shutter if fast moves still lean or wobble.
 
@@ -49,16 +48,15 @@ Diagnostics. The server prints its address and token, which have stayed the same
 and are kept out of this public repo. Over the link,
 `set` takes name and value as two arguments, and `sendFile` fetches a take whole.
 
+Step-by-step instructions for every test below, with what to send, are in
+[next-tests.md](next-tests.md).
+
 **The 14 Pro, on 0.1.114:**
 
-1. **FX on a dark scene:** in export's grade editor, or the look panel's FX page, raise any FX
-   slider on a dark take and check the shadows stay where they were, with no grey veil. Then
-   leave the app for over two minutes and come back: the camera should keep running.
-2. **Stabilize:** open a baked take in the player and tap **Stabilize**, or a log take and
-   **Export** with **Stabilize** on. Watch the preview with the switch off and on, move
-   **Smoothness**, and save a copy. Say whether the copy is steadier than the take, whether
-   anything shakes that didn't before, whether the 0.5x still shakes, and whether an edge shows.
-3. **A log take stabilized,** since both copies so far came from baked takes.
+1. **Tests 1 to 3:** FX keep the shadows, the camera keeps running after leaving the app, and
+   Stabilize keeps a baked take's codec.
+2. **Test 5:** the ultra wide's edges, with a take for its readout time.
+3. **Test 6:** Stabilize with its timing fixed, on `000714` and `220644`, and on a log take.
 4. **Gyroflow's axes:** a take held sideways, with a few seconds held still, played in Gyroflow,
    to check `yXZ` is right there. Upright takes are corrected a quarter-turn off until the
    `.gcsv` says how the phone was held.
@@ -70,10 +68,9 @@ and are kept out of this public repo. Over the link,
 8. **Later:** a colour chart shot; the matched pair for Apple's preview; ARRI Wide Gamut 3;
    `scope_cost.json`, which needs about 112 GB free.
 
-**The iPhone 16:** on 0.1.114, the same dark take with FX on as in the screen recording, and a
-return to the app after two minutes away; then **Run probe**, phone still, for its overlapped bracket cases and stabilizer
-names; a five-minute HEVC 4:2:2 take at full size, started cold and unplugged, and one at
-2880x2160.
+**The iPhone 16, base model, on 0.1.114:** Tests 1, 2 and 4, the ultra wide's stabilization.
+Then **Run probe**, phone still, for its overlapped bracket cases and stabilizer names; a
+five-minute HEVC 4:2:2 take at full size, started cold and unplugged, and one at 2880x2160.
 
 **Friends' 15 Pro, 16 Pro and 17 Pro:** nothing yet. The probe must first list video formats.
 

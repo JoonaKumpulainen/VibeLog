@@ -52,6 +52,7 @@ the phone can sustain. When quality and convenience conflict, quality wins.
 | File | What's in it | When to read it |
 |---|---|---|
 | [docs/status.md](docs/status.md) | Latest build, last session, what's waiting on the phone, what's next | At the start of every session |
+| [docs/next-tests.md](docs/next-tests.md) | Step-by-step phone tests waiting to run, and what to send | When asking for tests, and to rewrite for a new round |
 | [docs/findings.md](docs/findings.md) | What the phone has proven, and what isn't verified | Before claiming or testing camera behaviour |
 | [docs/how-it-works.md](docs/how-it-works.md) | The camera screen, what presets keep, what may change during a take, encoder failures, the test link for test sessions, simulator limits | Before changing those areas |
 | [ROADMAP.md](ROADMAP.md) | Phases and the design rules for new additions | Before adding anything |
@@ -67,6 +68,8 @@ the phone can sustain. When quality and convenience conflict, quality wins.
   [docs/history/](docs/history/), newest at the bottom.
 - Move anything the phone proved into [docs/findings.md](docs/findings.md), and take it off
   **Not verified**.
+- Rewrite [docs/next-tests.md](docs/next-tests.md) for the tests the new build needs, step by
+  step, with what to send.
 - Put a new plan or design the owner agreed in [docs/decisions/](docs/decisions/), one file each.
 - If the app's behaviour changed, update [docs/using.md](docs/using.md) and the README.
 - Keep docs plain and short, wrapped at about 100 columns. `.md` changes don't start a build.
