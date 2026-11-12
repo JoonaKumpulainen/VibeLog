@@ -96,6 +96,7 @@ the phone can sustain. When quality and convenience conflict, quality wins.
 | `Tests/VLTests` | 189 tests, including real GPU tests on the simulator |
 | `tools/inspect_clip.py` | Summarizes a RAW clip and exports a frame |
 | `tools/test_server.py` | The test link's server, which sends the phone commands and collects its files, and runs suites and rounds |
+| `App/Benchmark.swift`, `App/TrialTakes.swift` | The benchmark that fits each phone, and its trial takes; see `docs/decisions/benchmark.md` |
 | `tools/rounds/*.json` | A round of phone tests that checks its own results and writes `round_*.md` |
 | `tools/measure_steady.py` | Fits a take's motion to its gyro log, and measures what a stabilized copy leaves |
 | `tools/read_log.py` | Sums up session logs: takes, exports, stalls, heat, returning to the app, slider drags |

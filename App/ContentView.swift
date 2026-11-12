@@ -79,6 +79,11 @@ struct CameraScreen: View {
         } message: {
             Text("VibeLog measures what this iPhone records without dropping frames: each lens, the encoders, the GPU and a few short test takes, which are deleted after. It takes about 5 minutes. Lay the phone down still, pointing at anything, with 50% battery or more. You can cancel and carry on later in Settings, Advanced, Diagnostics.")
         }
+        .alert("This iPhone, measured", isPresented: $model.benchmarkSummaryShown) {
+            Button("OK", role: .cancel) { model.benchmarkSummaryClosed() }
+        } message: {
+            Text(model.benchmark.summary)
+        }
         .alert("Share how it went?", isPresented: $model.benchmarkAsksSharing) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -2606,17 +2611,35 @@ struct FormatPanel: View {
         }
     }
 
+    /// A choice past this phone's limit, by its own measurements or takes, is marked "!", which
+    /// warns before a take as well. Every choice stays pickable.
+    private func marked(_ label: String, _ overLimit: Bool) -> String { overLimit ? label + " !" : label }
+
+    private func presetOverLimit(_ preset: EncoderPreset) -> Bool {
+        let key = model.twelveBitProRes && preset.id == "prores4444" ? EncoderSupport.twelveBitID : preset.id
+        return model.encoderSupport.warning(for: key, size: model.encoderSize.label) != nil
+    }
+
+    private func sizeOverLimit(_ size: EncoderSize) -> Bool {
+        model.encoderSupport.warning(for: model.encoderKey, size: size.label) != nil
+    }
+
+    private func rateOverLimit(_ rate: Double) -> Bool {
+        guard let main = LensCapture.bestRates(model.benchmark.capture)["1x"] else { return false }
+        return rate > max(main, 24)
+    }
+
     var body: some View {
         HStack(alignment: .bottom, spacing: 0) {
             FormatWheel(title: "CODEC", options: families, selection: family, hold: hold, rowDepth: rowDepth) { $0 }
             FormatWheel(
                 title: Self.isHEVC(model.encoderPreset) ? "CHROMA" : "PROFILE", options: chromaChoices, selection: $model.encoderPreset, hold: hold,
-                rowDepth: rowDepth, label: Self.chromaLabel
+                rowDepth: rowDepth, label: { marked(Self.chromaLabel($0), presetOverLimit($0)) }
             )
             // Each codec has its own list.
             .id(Self.isHEVC(model.encoderPreset))
             FormatWheel(title: "SIZE", options: EncoderSize.all, selection: $model.encoderSize, hold: hold, rowDepth: rowDepth) {
-                (model.widescreen ? $0.widescreen : $0).label
+                marked((model.widescreen ? $0.widescreen : $0).label, sizeOverLimit($0))
             }
             FormatWheel(
                 title: "LOG", options: LogCurve.allCases, selection: $model.processing.curve, hold: hold,
@@ -2626,7 +2649,7 @@ struct FormatPanel: View {
                 $0 ? "16:9" : "OPEN GATE"
             }
             FormatWheel(title: "FPS", options: FrameRates.all, selection: $model.frameRate, hold: hold,
-                rowDepth: rowDepth, label: FrameRates.label
+                rowDepth: rowDepth, label: { marked(FrameRates.label($0), rateOverLimit($0)) }
             )
         }
         .background(alignment: .bottom) {

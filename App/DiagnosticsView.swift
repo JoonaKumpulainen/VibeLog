@@ -49,6 +49,11 @@ struct DiagnosticsView: View {
                         model.startBenchmark(fresh: true)
                     }
                     LabeledContent("Benchmark", value: model.benchmarkStatusText)
+                    if !model.benchmark.summary.isEmpty {
+                        Text(model.benchmark.summary)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                     Button("Measure encoders and GPU only") {
                         close()
                         model.runEncoderTest()

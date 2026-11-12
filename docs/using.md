@@ -180,7 +180,13 @@ cool to nominal heat for up to five minutes, times every codec and size on synth
 times the GPU for each recording setup, as **Run GPU cost test** does. **Encoder limits** and
 **GPU limits** below it say how and when they were measured, and what takes proved. A take of
 two and a half minutes or more that keeps nearly every frame proves its setup on the GPU; one
-that falls behind makes that setup warn. **Run trial takes** records up to three 20-second takes
+that falls behind makes that setup warn. **Measure this phone again** runs the whole benchmark, which VibeLog also offers once at first
+launch and after each iOS update: about 5 minutes with the phone lying still, covering each
+lens's RAW stream, a few short test takes, the lens profiles, the encoders and GPU, and the
+camera's formats. It can be cancelled and resumed. At the end it says what this phone records
+best and what it can't, and moves only the settings you haven't changed to fit. Format choices
+past the phone's limit show "!" in the format panel. **Measure encoders and GPU only** does just
+that part. **Run trial takes** records up to three 20-second takes
 of the setups this phone records best, with the camera on, lying still: the best codec and size,
 ProRes 422 HQ at full size, and the first with the look baked in. Each counts as evidence like
 any take, then is deleted; the results go to `probes/trials_*.txt`. A take of five seconds or more that holds

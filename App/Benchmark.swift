@@ -267,16 +267,118 @@ extension AppModel {
         whenStreaming { measure(0, rate: 30, attempt: 0) }
     }
 
+    // MARK: Fitting the defaults
+
+    /// What the app last chose by itself, by setting. A setting that still reads so is the app's,
+    /// and may move; one that differs is the owner's choice and stays. A phone with no record yet
+    /// keeps what it has, so an update never moves a choice already made.
+    private static let fittedKey = "fittedDefaults"
+
+    private var fittedNow: [String: String] {
+        ["codec": encoderPreset.id, "size": encoderSize.label, "frameRate": String(frameRate),
+         "pipeline": processing.pipeline.rawValue]
+    }
+
+    /// Notes the current settings as the app's own choice, as after the first launch's fit.
+    func recordFittedDefaults() {
+        UserDefaults.standard.set(fittedNow, forKey: Self.fittedKey)
+    }
+
+    /// Moves the settings nobody has touched to what the benchmark found, and says what moved.
+    func fitDefaultsToBenchmark() -> [String] {
+        guard let fitted = UserDefaults.standard.dictionary(forKey: Self.fittedKey) as? [String: String] else {
+            recordFittedDefaults()
+            return []
+        }
+        let untouched = { (key: String) in fitted[key] == self.fittedNow[key] }
+        var moved: [String] = []
+        if untouched("codec"), untouched("size"), !bakeLook, let best = encoderSupport.bestDefault(for: encoderPreset) {
+            if best.preset != encoderPreset {
+                moved.append("codec \(encoderPreset.label) to \(best.preset.label)")
+                encoderPreset = best.preset
+            }
+            if best.size != encoderSize {
+                moved.append("size \(encoderSize.label) to \(best.size.label)")
+                encoderSize = best.size
+            }
+        }
+        // The main lens decides the frame rate: 24 where it can't hold 30.
+        let mainRate = LensCapture.bestRates(benchmark.capture)["1x"] ?? 30
+        if untouched("frameRate"), mainRate == 24, frameRate > 24 {
+            moved.append("frame rate to 24 fps, as the main lens can't stream 30 here")
+            frameRate = 24
+        }
+        // Little memory left while streaming: the Efficient path, which skips the full-size image.
+        if untouched("pipeline"), processing.pipeline == .maximum,
+           let left = benchmark.memoryLeftMB, left < Self.tightMemoryMB {
+            moved.append("the Efficient path, as only \(left) MB of memory was left while streaming")
+            processing.pipeline = .efficient
+        }
+        // A setup that fell behind without heat on the Maximum path: the Efficient path.
+        if untouched("pipeline"), processing.pipeline == .maximum,
+           gpuSupport.strained.contains(where: { $0.hasPrefix("maximum-log") }) {
+            moved.append("the Efficient path, as Maximum fell behind in a take here")
+            processing.pipeline = .efficient
+        }
+        recordFittedDefaults()
+        if !moved.isEmpty { Log.shared.info("Benchmark: fitted " + moved.joined(separator: "; ")) }
+        return moved
+    }
+
+    /// Below this, in MB left while streaming at full size, the phone gets the lighter path.
+    static let tightMemoryMB = 500
+
     // MARK: The end
 
     private func finishBenchmark() {
         benchmarkRunning = false
         benchmark.finishedAt = Date()
+        benchmark.fitted = fitDefaultsToBenchmark()
         benchmark.save()
         let failed = benchmark.results.filter { $0.value.status != "done" }.map(\.key).sorted()
         Log.shared.info("Benchmark: finished" + (failed.isEmpty ? "" : ", without \(failed.joined(separator: ", "))"))
-        showNotice(failed.isEmpty ? "This phone is measured" : "This phone is measured, apart from \(failed.count) step\(failed.count == 1 ? "" : "s")", seconds: 4)
-        // Without log sharing, nothing tells the owner how the benchmark went on this phone.
+        benchmark.summary = benchmarkSummaryText(failed: failed)
+        benchmark.save()
+        Log.shared.info("Benchmark: summary: " + benchmark.summary.replacingOccurrences(of: "\n", with: " / "))
+        benchmarkSummaryShown = true
+    }
+
+    /// After the summary: without log sharing, nothing tells the owner how it went on this phone.
+    func benchmarkSummaryClosed() {
         if !logUploader.settings.on { benchmarkAsksSharing = true }
+    }
+
+    /// The one-time notice: what this phone records best, what it can't, and what moved.
+    private func benchmarkSummaryText(failed: [String]) -> String {
+        var lines: [String] = []
+        if let best = encoderSupport.bestDefault(for: encoderPreset) {
+            lines.append("Records best: \(best.preset.label) at \(best.size.label).")
+        }
+        let rates = LensCapture.bestRates(benchmark.capture)
+        let lensWords = lenses.sorted { $0.zoom < $1.zoom }.compactMap { lens -> String? in
+            guard let rate = rates[lens.zoomLabel] else { return nil }
+            return rate > 0 ? "\(lens.zoomLabel) at \(Int(rate)) fps" : "\(lens.zoomLabel) not steadily"
+        }
+        if !lensWords.isEmpty { lines.append("RAW streams on " + lensWords.joined(separator: ", ") + ".") }
+        var cannot: [String] = []
+        if !encoderSupport.hasProRes {
+            cannot.append("no ProRes encoder, so HEVC only")
+        } else if let hq = encoderSupport.fps["prores422hq"]?[EncoderSize.all[0].label], hq < EncoderSupport.realTimeFPS {
+            cannot.append(String(format: "ProRes 422 HQ at full size encodes at %.0f fps, under the 30 a take needs", hq))
+        }
+        for (lens, rate) in rates.sorted(by: { $0.key < $1.key }) where rate < 30 {
+            cannot.append(rate > 0 ? "the \(lens) lens holds 24 fps, not 30" : "the \(lens) lens didn't stream RAW steadily")
+        }
+        if let left = benchmark.memoryLeftMB, left < Self.tightMemoryMB {
+            cannot.append("little memory to spare (\(left) MB), so the lighter Efficient path suits it")
+        }
+        if !cannot.isEmpty { lines.append("Can't: " + cannot.joined(separator: "; ") + ".") }
+        if !benchmark.fitted.isEmpty { lines.append("Changed for you: " + benchmark.fitted.joined(separator: "; ") + ".") }
+        if !failed.isEmpty {
+            lines.append("Not measured: " + failed.map { Self.benchmarkStepNames[$0] ?? $0 }.joined(separator: ", ")
+                + ". Try Measure this phone again in Settings, Advanced, Diagnostics.")
+        }
+        lines.append("Every codec and setting stays available; ones past this phone's limit warn before a take.")
+        return lines.joined(separator: "\n")
     }
 }

@@ -18,6 +18,10 @@ public struct BenchmarkProgress: Codable, Equatable, Sendable {
     /// The least memory left and the most used while streaming at full size, in MB.
     public var memoryLeftMB: Int?
     public var memoryUsedMB: Int?
+    /// The settings the benchmark moved, in words, for the summary.
+    public var fitted: [String] = []
+    /// The one-time notice shown at the end, kept for Diagnostics.
+    public var summary = ""
 
     public struct StepResult: Codable, Equatable, Sendable {
         /// "done", "failed", "skipped" or "crashed".
@@ -40,7 +44,7 @@ public struct BenchmarkProgress: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case device, system, results, running, startedAt, finishedAt, declined, capture, memoryLeftMB, memoryUsedMB
+        case device, system, results, running, startedAt, finishedAt, declined, capture, memoryLeftMB, memoryUsedMB, fitted, summary
     }
 
     public init(from decoder: Decoder) throws {
@@ -55,6 +59,8 @@ public struct BenchmarkProgress: Codable, Equatable, Sendable {
         capture = (try? values.decodeIfPresent([LensCapture].self, forKey: .capture)) ?? []
         memoryLeftMB = try? values.decodeIfPresent(Int.self, forKey: .memoryLeftMB)
         memoryUsedMB = try? values.decodeIfPresent(Int.self, forKey: .memoryUsedMB)
+        fitted = (try? values.decodeIfPresent([String].self, forKey: .fitted)) ?? []
+        summary = (try? values.decodeIfPresent(String.self, forKey: .summary)) ?? ""
     }
 
     public var finished: Bool { finishedAt != nil }

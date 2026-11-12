@@ -54,6 +54,19 @@ fix. A build cycle takes about 3 minutes to the IPA since the tests and the IPA 
 - At the end, one question asks the tester to turn on log sharing, which still needs the invite
   code. Without it there are no logs to fix from.
 
+## Progress
+
+- **Built on 2026-11-12, untested on a phone:** the benchmark runner (`App/Benchmark.swift`,
+  `BenchmarkProgress` in VLCore) with capture on each lens, memory sampled, 24 fps tried where 30
+  won't hold, trial takes, lens profiles, encoders and GPU, and the probe; the offer at first
+  launch and after an iOS update; **Measure this phone again** running all of it; defaults
+  fitted for untouched settings (codec, size, frame rate, the Efficient path for little memory
+  or a Maximum path that fell behind); the one-time summary; "!" on format choices past the
+  limit; `Benchmark:` log lines that `read_log.py` reads; `benchmark.json` with shared logs.
+- **Left until a phone's logs call for it:** internal limits (the glow's and monitor image's
+  rate, the scope's rate, the export preview's size), and fewer buffers for little memory. They
+  change the real-time path, which the design rules only allow on a measured need.
+
 ## Still to decide
 
 - **Which iOS versions to support.** Check that the 12 still gets the iOS version VibeLog

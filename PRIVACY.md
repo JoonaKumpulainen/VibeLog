@@ -28,7 +28,8 @@ account.
 
 **What goes:** session logs, each take's details (its format, settings and frame counts), test
 and benchmark reports, lens profiles, and what the app measured about your phone's camera and
-encoders. Gyro logs, which describe how the phone moved, only with their own switch on.
+encoders, including the benchmark's results. Gyro logs, which describe how the phone moved, only
+with their own switch on.
 
 **What never goes:** videos, sound, stills, previews, RAW frames, or anything else the camera
 saw or the microphone heard.

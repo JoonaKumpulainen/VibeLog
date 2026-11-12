@@ -70,6 +70,7 @@ final class AppModel: ObservableObject {
     /// The one-time offer to measure this phone, and the question about log sharing after it.
     @Published var benchmarkOffer = false
     @Published var benchmarkAsksSharing = false
+    @Published var benchmarkSummaryShown = false
     /// A short message on the camera screen. Tapping it clears it.
     @Published var notice: String?
     @Published var takeAlert: TakeAlert?
@@ -502,6 +503,8 @@ final class AppModel: ObservableObject {
         }
         fitToPhone(choosingDefaults: firstLaunch)
         refitOldDefault()
+        // The first launch's choices are the app's own, which the benchmark may move later.
+        if firstLaunch { recordFittedDefaults() }
         if !encoderSupport.measured { measureEncoders() }
         if captureSupport.step > 0 {
             Log.shared.info("Capture setup for \(captureSupport.device): \(captureSupport.setup.label)")
@@ -1160,6 +1163,7 @@ final class AppModel: ObservableObject {
             }
             // Only a choice nobody has touched since launch moves to the phone's best size.
             fitToPhone(choosingDefaults: firstLaunch && !takeDuringEncoderCheck && (encoderPreset, encoderSize) == before)
+            if firstLaunch { recordFittedDefaults() }
         }
     }
 
