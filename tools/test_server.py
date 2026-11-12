@@ -593,12 +593,16 @@ class Suite:
         return name
 
     def fetch(self, names, give_up_minutes=45):
-        """Fetches each file unless it's already in the results folder, and waits for it."""
+        """Fetches each file unless it's already in the results folder, and waits for it. Over USB
+        when the phone is plugged in here, about a hundred times faster, else over the link."""
         for what in names:
             name = self.file_name(what)
             target = self.options.folder / name
             if target.exists():
                 print(f"fetch: {name} is already here", flush=True)
+                continue
+            if usb_pull(self.options.folder, name):
+                print(f"fetch: {name}, over USB", flush=True)
                 continue
             print(f"fetch: {name}", flush=True)
             reply = self.ask({"action": "sendFile", "name": name})
@@ -618,7 +622,9 @@ class Suite:
 
     def tool(self, script, arguments, label):
         """Runs one of the analysis tools, keeps its report and returns its figures."""
-        output = self.options.folder / f"{label.replace(' ', '_')}_{self.stamp}.json"
+        # Letters, digits and dashes only: a label's ':' isn't allowed on every drive.
+        safe = re.sub(r"[^A-Za-z0-9-]+", "_", label).strip("_")
+        output = self.options.folder / f"{safe}_{self.stamp}.json"
         command = [sys.executable, str(Path(__file__).with_name(script)), *arguments, "--json", str(output)]
         print(f"{script}: {label}", flush=True)
         run = subprocess.run(command, capture_output=True, text=True)
@@ -795,6 +801,46 @@ class Suite:
             self.collect()
             counts = self.export_counts
             print(f"exports: {self.exports.name}, {counts['saved']} saved, {counts['failed']} failed", flush=True)
+
+
+def usb_tool():
+    """pymobiledevice3, from its own environment or the PATH, or None."""
+    for candidate in (Path.home() / ".venvs/imobile/bin/pymobiledevice3", shutil.which("pymobiledevice3")):
+        if candidate and Path(candidate).exists():
+            return str(candidate)
+    return None
+
+
+def usb_pull(folder, name):
+    """Copies a file from the app's Documents over USB, when the phone is plugged in and trusted.
+    The app's bundle ID, which SideStore changes, is read from usb_app_id in the results folder,
+    kept out of the repo. Returns whether the file arrived."""
+    tool, id_file = usb_tool(), folder / "usb_app_id"
+    if not tool or not id_file.exists():
+        return False
+    bundle = id_file.read_text().strip()
+    part = folder / (name + ".usb")
+    for where in ("videos", "logs", "probes", "stills", "clips", "lenses", f"lenses/{phone_model(folder)}"):
+        result = subprocess.run([tool, "apps", "pull", "--documents", bundle, f"/Documents/{where}/{name}", str(part)],
+                                capture_output=True, timeout=1800)
+        if result.returncode == 0 and part.exists() and part.stat().st_size > 0:
+            part.replace(folder / name)
+            return True
+        part.unlink(missing_ok=True)
+    return False
+
+
+def phone_model(folder):
+    """The phone's model from the newest status reply, for its lens profile folder."""
+    try:
+        with open(folder / "replies.jsonl", "rb") as log:
+            log.seek(max(0, log.seek(0, 2) - 200_000))
+            for line in reversed(log.read().decode("utf-8", "replace").splitlines()):
+                if '"phone"' in line:
+                    return json.loads(line)["values"]["phone"]
+    except (OSError, ValueError, KeyError):
+        pass
+    return "unknown"
 
 
 def version_tuple(text):

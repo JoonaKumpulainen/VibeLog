@@ -3242,3 +3242,64 @@ final class LogSharingTests: XCTestCase {
         XCTAssertNotEqual(fresh.salt, loaded.salt)
     }
 }
+
+final class EncoderEvidenceTests: XCTestCase {
+    private func support(rate: Double) -> EncoderSupport {
+        EncoderSupport(device: "iPhone15,2", system: "27.2", codecs: ["hevc422"],
+                       fps: ["hevc422": ["4032x3024": rate]], measured: true)
+    }
+
+    func testATakeThatHeldOutranksASlowTrial() {
+        var s = support(rate: 27.3)
+        XCTAssertNotNil(s.warning(for: "hevc422", size: "4032x3024"))
+        XCTAssertTrue(s.warning(for: "hevc422", size: "4032x3024")!.contains("quick check"))
+        s.record(take: "hevc422", size: "4032x3024", seconds: 3, fps: 30, encoderDrops: 0)
+        XCTAssertNotNil(s.warning(for: "hevc422", size: "4032x3024"), "a take under five seconds proves nothing")
+        s.record(take: "hevc422", size: "4032x3024", seconds: 10, fps: 29.9, encoderDrops: 0)
+        XCTAssertNil(s.warning(for: "hevc422", size: "4032x3024"))
+    }
+
+    func testATakeWhoseEncoderRefusedFramesAlwaysWarns() {
+        var s = support(rate: 57.5)
+        XCTAssertNil(s.warning(for: "hevc422", size: "4032x3024"))
+        s.record(take: "hevc422", size: "4032x3024", seconds: 60, fps: 29.1, encoderDrops: 3)
+        XCTAssertTrue(s.warning(for: "hevc422", size: "4032x3024")!.contains("earlier take"))
+    }
+
+    func testOlderFilesReadAsQuickChecks() throws {
+        let old = #"{"device":"iPhone15,2","system":"27.2","codecs":["hevc420"],"fps":{"hevc420":{"4032x3024":27.5}},"measured":true}"#
+        let s = try JSONDecoder().decode(EncoderSupport.self, from: Data(old.utf8))
+        XCTAssertEqual(s.method, .quick)
+        XCTAssertTrue(s.proven.isEmpty)
+        var careful = s
+        careful.method = .careful
+        careful.record(take: "hevc420", size: "4032x3024", seconds: 10, fps: 30, encoderDrops: 0)
+        let again = try JSONDecoder().decode(EncoderSupport.self, from: JSONEncoder().encode(careful))
+        XCTAssertEqual(again, careful)
+    }
+}
+
+final class LogSharingScheduleTests: XCTestCase {
+    func testLeavingTheAppWaitsUnlessATakeRan() {
+        let now = Date()
+        let recent = now.addingTimeInterval(-60)
+        XCTAssertFalse(LogSharing.due(reason: "left the app", lastUpload: recent, tookSince: false, now: now))
+        XCTAssertTrue(LogSharing.due(reason: "left the app", lastUpload: recent, tookSince: true, now: now))
+        XCTAssertTrue(LogSharing.due(reason: "left the app", lastUpload: now.addingTimeInterval(-16 * 60), tookSince: false, now: now))
+        XCTAssertTrue(LogSharing.due(reason: "launch", lastUpload: recent, tookSince: false, now: now))
+        XCTAssertTrue(LogSharing.due(reason: "asked", lastUpload: recent, tookSince: false, now: now))
+    }
+
+    func testTheOpenLogWaitsUnlessAskedOrAfterATake() {
+        let files = [LogShareFile(path: "logs/session_old.log", size: 5), LogShareFile(path: "logs/session_now.log", size: 9)]
+        XCTAssertEqual(LogSharing.choose(files, openLog: "logs/session_now.log", sendOpenLog: false).map(\.path), ["logs/session_old.log"])
+        XCTAssertEqual(LogSharing.choose(files, openLog: "logs/session_now.log", sendOpenLog: true).count, 2)
+    }
+
+    func testUploadsCompressToRawDeflate() throws {
+        let json = Data(String(repeating: "10:00:00.000 I Recording: 30.00 fps now\n", count: 500).utf8)
+        let packed = try (json as NSData).compressed(using: .zlib) as Data
+        XCTAssertLessThan(packed.count, json.count / 10)
+        XCTAssertEqual(try (packed as NSData).decompressed(using: .zlib) as Data, json)
+    }
+}

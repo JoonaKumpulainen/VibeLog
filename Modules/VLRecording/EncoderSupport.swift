@@ -15,6 +15,23 @@ public struct EncoderSupport: Codable, Equatable, Sendable {
     public var fps: [String: [String: Double]]
     /// The trial encodes have run, so `fps` is the whole answer.
     public var measured: Bool
+    /// How `fps` was measured: the first launch's quick check, with the camera running and a few
+    /// frames, under-reads by up to two and a half times on the 14 Pro; **Measure encoders again**
+    /// stops the camera and encodes more.
+    public var method = Method.quick
+    /// The phone's heat when `fps` was measured, and when.
+    public var heat = ""
+    public var measuredAt: Date?
+    /// Codecs and sizes, by preset ID and size label, a real take held 30 fps in with the encoder
+    /// refusing nothing. A take outranks a trial, so these never warn.
+    public var proven: [String: Set<String>] = [:]
+    /// Codecs and sizes whose encoder refused frames in a real take. These always warn.
+    public var strained: [String: Set<String>] = [:]
+
+    public enum Method: String, Codable, Sendable {
+        case quick = "quick check, camera running"
+        case careful = "camera stopped"
+    }
 
     public init(device: String, system: String, codecs: Set<String>, fps: [String: [String: Double]], measured: Bool) {
         self.device = device
@@ -22,6 +39,48 @@ public struct EncoderSupport: Codable, Equatable, Sendable {
         self.codecs = codecs
         self.fps = fps
         self.measured = measured
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case device, system, codecs, fps, measured, method, heat, measuredAt, proven, strained
+    }
+
+    /// Files from before `method` and the take evidence still read, as quick checks.
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        device = try values.decode(String.self, forKey: .device)
+        system = try values.decode(String.self, forKey: .system)
+        codecs = try values.decode(Set<String>.self, forKey: .codecs)
+        fps = try values.decode([String: [String: Double]].self, forKey: .fps)
+        measured = try values.decode(Bool.self, forKey: .measured)
+        method = (try? values.decodeIfPresent(Method.self, forKey: .method)) ?? .quick
+        heat = (try? values.decodeIfPresent(String.self, forKey: .heat)) ?? ""
+        measuredAt = try? values.decodeIfPresent(Date.self, forKey: .measuredAt)
+        proven = (try? values.decodeIfPresent([String: Set<String>].self, forKey: .proven)) ?? [:]
+        strained = (try? values.decodeIfPresent([String: Set<String>].self, forKey: .strained)) ?? [:]
+    }
+
+    /// What a real take showed about its encoder. Only a take of at least five seconds counts.
+    public mutating func record(take key: String, size: String, seconds: Double, fps: Double, encoderDrops: Int) {
+        guard seconds >= 5 else { return }
+        if encoderDrops > 0 {
+            strained[key, default: []].insert(size)
+        } else if fps >= 29.5 {
+            proven[key, default: []].insert(size)
+        }
+    }
+
+    /// Why a take in this codec and size may drop frames, or nil when there's no reason to think
+    /// so. A take that held outranks any trial; a take whose encoder refused frames outranks a
+    /// trial that read fast.
+    public func warning(for key: String, size: String) -> String? {
+        if strained[key]?.contains(size) == true {
+            return "This codec and size dropped frames at the encoder in an earlier take"
+        }
+        if proven[key]?.contains(size) == true { return nil }
+        guard let rate = fps[key]?[size], rate < Self.realTimeFPS else { return nil }
+        let how = method == .quick ? " in the quick check" : ""
+        return String(format: "This codec and size encoded at %.0f fps on this phone%@, so frames may drop", rate, how)
     }
 
     /// The rate a take needs.
@@ -167,7 +226,7 @@ public struct EncoderSupport: Codable, Equatable, Sendable {
     /// Encodes a few synthetic frames with each preset the codec list allows, largest size first,
     /// stopping at the first size that keeps 30 fps. Runs off the main thread, takes a few
     /// seconds, and calls back on the main queue without saving.
-    public static func measure(frames: Int = 20, completion: @escaping (EncoderSupport) -> Void) {
+    public static func measure(frames: Int = 20, careful: Bool = false, completion: @escaping (EncoderSupport) -> Void) {
         DispatchQueue.global(qos: .utility).async {
             var support = codecList()
             var lines = ["Encoder check on \(support.device), \(support.system)"]
@@ -189,6 +248,10 @@ public struct EncoderSupport: Codable, Equatable, Sendable {
                 run(fourFour.twelveBit, key: twelveBitID, sizes: [EncoderSize.all[0]])
             }
             support.measured = true
+            support.method = careful ? .careful : .quick
+            support.heat = SystemStatus.thermalName
+            support.measuredAt = Date()
+            lines.append("Measured \(support.method.rawValue), heat \(support.heat)")
             lines.forEach { Log.shared.info($0) }
             DispatchQueue.main.async { completion(support) }
         }

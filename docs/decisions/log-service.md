@@ -19,8 +19,13 @@ asking for files, which [per-phone-fitting.md](per-phone-fitting.md) depends on.
 - Session logs, `exports.csv`, take sidecars (`.mov.json`), probe and test reports, lens
   profiles, `capture_support.json`, `encoder_support.json` and `benchmarks.csv`. Files over
   1.5 MB are left out. Never videos, stills, previews or RAW clips.
-- Only files new or grown since the last upload, in batches under 2.5 MB.
-- Thirty seconds after launch and on leaving the app, never during a take. On Wi-Fi only,
+- Only files new or grown since the last upload, compressed with raw DEFLATE, which shrinks a
+  session log about ninefold, in requests of at most 8 MB unpacked. The service keeps them packed.
+- Thirty seconds after launch, on leaving the app after a take or at most every 15 minutes
+  otherwise, and on **Send now**, never during a take. The session log still being written only
+  goes after a take or on **Send now**, so leaving the app often doesn't resend it each time; it
+  goes whole at the next launch. Added on 2026-11-12, after a first version that sent on every
+  leave and resent the open log each time. On Wi-Fi only,
   unless the tester turns on **Use mobile data** (added on 2026-11-12 at the owner's request),
   which also allows a hotspot. Never in Low Data Mode.
 
@@ -42,7 +47,8 @@ request's IP address, as every web server does, and stores nothing but what the 
 
 ## The service
 
-`tools/log_service`, a Cloudflare Worker with Workers KV, on the free plan. `POST /upload` takes
+`tools/log_service`, a Cloudflare Worker with Workers KV, on the free plan, which allows 1,000
+writes a day: one upload is one write. `POST /upload` takes
 an upload with an invite code, after checking the model, versions, ID, file names (text kinds
 only) and sizes, and at most ten uploads a minute per install. `/list`, `/get` and `/delete` are
 for the owner's key only. Uploads are kept until the owner deletes them.

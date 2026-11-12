@@ -22,7 +22,9 @@ import os
 import sys
 import urllib.parse
 import urllib.request
-from collections import defaultdict
+import zlib
+import re
+from collections import Counter, defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -43,7 +45,11 @@ def call(base, token, path, method="GET"):
     request = urllib.request.Request(base + path, method=method, headers={
         "Authorization": f"Bearer {token}", "User-Agent": "vibelog-pull"})
     with urllib.request.urlopen(request, timeout=60) as response:
-        return json.loads(response.read())
+        body = response.read()
+        # Uploads the phone sent packed are kept packed, as raw DEFLATE.
+        if response.headers.get("x-body-encoding") == "deflate-raw":
+            body = zlib.decompress(body, -15)
+        return json.loads(body)
 
 
 def keys(base, token):
@@ -127,11 +133,12 @@ def report(root):
         installs = {install for _, _, install, _ in entries}
         takes = [t for *_, s in entries for t in s["takes"] if "frames" in t]
         flagged = [t for *_, s in entries for t in s["takes"] if t["flagged"]]
-        setups = {s["captureSetup"] for *_, s in entries if s["captureSetup"]}
+        # The app only logs a capture setup that left the standard one.
+        setups = {s["captureSetup"] or "standard" for *_, s in entries}
         lines += [f"## {model}", "",
                   f"- {len(installs)} install(s), {len(entries)} session(s), "
                   f"iOS {', '.join(sorted({i for i, *_ in entries}))}, app {', '.join(sorted({a for _, a, *_ in entries}))}",
-                  f"- Capture setup: {', '.join(sorted(setups)) or 'not logged'}",
+                  f"- Capture setup: {', '.join(sorted(setups))}",
                   f"- Takes: {len(takes)}, of which {len(flagged)} lost frames or failed"]
         codecs = defaultdict(list)
         for t in takes:
@@ -140,9 +147,15 @@ def report(root):
             lost = sum(t["lost"] for t in group)
             frames = sum(t["frames"] for t in group)
             lines.append(f"  - {codec}: {len(group)} takes, {lost} of {frames + lost} frames lost")
-        problems = [(i, p) for _, _, i, s in entries for p in s["problems"]]
-        if problems:
-            lines.append(f"- Problems: {len(problems)}, such as: " + "; ".join(text[:80] for _, (_, text) in problems[:5]))
+        kinds = Counter()
+        for *_, s in entries:
+            for _, text in s["problems"]:
+                # Grouped by what happened, without the numbers that differ each time.
+                kind = re.sub(r"\b\w+_[0-9a-f]{8}\S*", "<file>", text.split(":")[0])
+                kinds[re.sub(r"[0-9][0-9.]*", "#", kind)[:70]] += 1
+        if kinds:
+            lines.append(f"- Problems: {sum(kinds.values())}")
+            lines += [f"  - {kind}: {count}" for kind, count in kinds.most_common()]
         lines.append("")
         for ios, app, install, s in entries:
             lines += ["```", read_log.report(s), "```", ""]

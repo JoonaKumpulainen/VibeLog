@@ -11,6 +11,8 @@ import { env } from "cloudflare:workers";
 // has already made anonymous. Uploads are kept until the owner deletes them.
 
 const MAX_BODY = 4 * 1024 * 1024;
+// An upload unpacked: logs compress about tenfold, so this is what 4 MB packed can hold.
+const MAX_UNPACKED = 24 * 1024 * 1024;
 const MAX_FILE = 2 * 1024 * 1024;
 const MAX_FILES = 200;
 const MODEL = /^iPhone\d{1,2},\d{1,2}$/;
@@ -77,12 +79,45 @@ export function check(upload: Upload): string | null {
 	return null;
 }
 
+/** Unpacks raw DEFLATE, stopping once it passes the limit, so a small bomb can't fill memory. */
+async function inflate(packed: ArrayBuffer): Promise<string | null> {
+	const stream = new Blob([packed]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+	const reader = stream.getReader();
+	const parts: Uint8Array[] = [];
+	let total = 0;
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		total += value.length;
+		if (total > MAX_UNPACKED) {
+			await reader.cancel();
+			return null;
+		}
+		parts.push(value);
+	}
+	const joined = new Uint8Array(total);
+	let at = 0;
+	for (const part of parts) {
+		joined.set(part, at);
+		at += part.length;
+	}
+	return new TextDecoder().decode(joined);
+}
+
 async function upload(request: Request): Promise<Response> {
 	if (!invited(bearer(request))) return reply(401, { error: "invite code refused" });
 	const length = Number(request.headers.get("content-length") ?? "0");
 	if (length > MAX_BODY) return reply(413, { error: "too large" });
-	const raw = await request.text();
-	if (raw.length > MAX_BODY) return reply(413, { error: "too large" });
+	const packed = request.headers.get("x-body-encoding") === "deflate-raw";
+	const bytes = await request.arrayBuffer();
+	if (bytes.byteLength > MAX_BODY) return reply(413, { error: "too large" });
+	let raw: string | null;
+	try {
+		raw = packed ? await inflate(bytes) : new TextDecoder().decode(bytes);
+	} catch {
+		return reply(400, { error: "can't unpack" });
+	}
+	if (raw === null) return reply(413, { error: "too large unpacked" });
 	let body: Upload;
 	try {
 		body = JSON.parse(raw);
@@ -97,11 +132,18 @@ async function upload(request: Request): Promise<Response> {
 	// Newest first in a listing: keys sort by a count down from far in the future.
 	const order = (9_999_999_999_999 - Date.now()).toString().padStart(13, "0");
 	const key = `u/${body.model}/${body.ios}/${body.app}/${body.install}/${order}-${crypto.randomUUID().slice(0, 8)}`;
-	const files = body.files.map((f) => ({ name: f.name, text: f.text }));
-	await env.LOGS.put(key, JSON.stringify({ files }), {
-		metadata: { files: files.length, bytes: raw.length },
+	// Only the files are kept. A packed upload is kept packed, about a tenth of the space.
+	const files = JSON.stringify({ files: body.files.map((f) => ({ name: f.name, text: f.text })) });
+	const stored = packed ? await deflate(files) : files;
+	await env.LOGS.put(key, stored, {
+		metadata: { files: body.files.length, bytes: raw.length, encoding: packed ? "deflate-raw" : "json" },
 	});
-	return reply(200, { stored: files.length });
+	return reply(200, { stored: body.files.length });
+}
+
+async function deflate(text: string): Promise<ArrayBuffer> {
+	const stream = new Blob([text]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+	return new Response(stream).arrayBuffer();
 }
 
 async function list(url: URL): Promise<Response> {
@@ -123,8 +165,10 @@ export default {
 		const key = url.searchParams.get("key") ?? "";
 		if (!key.startsWith("u/")) return reply(400, { error: "bad key" });
 		if (request.method === "GET" && url.pathname === "/get") {
-			const value = await env.LOGS.get(key);
-			return value === null ? reply(404, { error: "no such upload" }) : new Response(value, { headers: { "content-type": "application/json" } });
+			const { value, metadata } = await env.LOGS.getWithMetadata<{ encoding?: string }>(key, "arrayBuffer");
+			if (value === null) return reply(404, { error: "no such upload" });
+			const encoding = metadata?.encoding === "deflate-raw" ? "deflate-raw" : "json";
+			return new Response(value, { headers: { "content-type": "application/octet-stream", "x-body-encoding": encoding } });
 		}
 		if (request.method === "POST" && url.pathname === "/delete") {
 			await env.LOGS.delete(key);

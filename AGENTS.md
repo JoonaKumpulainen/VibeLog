@@ -98,6 +98,7 @@ the phone can sustain. When quality and convenience conflict, quality wins.
 | `tools/measure_steady.py` | Fits a take's motion to its gyro log, and measures what a stabilized copy leaves |
 | `tools/read_log.py` | Sums up session logs: takes, exports, stalls, heat, returning to the app, slider drags |
 | `tools/log_service/` | The Cloudflare Worker that takes testers' opt-in log uploads; `cf dev`, `cf deploy` |
+| `tools/check_benchmark.py` | Lists where a phone's encoder figures disagree with what its takes did |
 | `tools/pull_logs.py` | Pulls those uploads, sorted by phone model, into `phones/` and writes `phones/report.md` |
 | `tools/sidestore_source.py`, `tools/sidestore/icon.png` | Writes the SideStore source from the built IPA, in CI |
 | `tools/suites/export_matrix_1.json`, `_2.json` | Record 2 s in every curve and gamut and export each take |

@@ -54,11 +54,18 @@ final class LogUploader: ObservableObject {
 
     /// Sends what's new, if sharing is on and nothing stands in the way. `names` are the names
     /// the owner typed, of LUTs, presets and styles, which are taken out of every file.
+    /// A take finished since the last upload, which sends the open session log and skips the wait.
+    private var tookSince = false
+
+    func takeFinished() { tookSince = true }
+
     func sendIfDue(recording: Bool, names: [String], reason: String, completion: (() -> Void)? = nil) {
         let settings = self.settings
         guard settings.on, !settings.inviteCode.isEmpty, let base = URL(string: settings.server),
-              base.scheme == "https", !recording, !busy
+              base.scheme == "https", !recording, !busy,
+              LogSharing.due(reason: reason, lastUpload: settings.lastUpload, tookSince: tookSince)
         else { completion?(); return }
+        let sendOpenLog = reason == "asked" || tookSince
         let waiting = !connected ? (settings.mobileData ? "Waiting for a connection" : "Waiting for Wi-Fi")
             : lowData ? "Waiting: Low Data Mode is on"
             : (metered && !settings.mobileData) ? "Waiting for Wi-Fi" : nil
@@ -68,11 +75,14 @@ final class LogUploader: ObservableObject {
             return
         }
         busy = true
+        let openLog = "logs/" + Log.shared.fileURL.lastPathComponent
         queue.async { [weak self] in
             guard let self else { return }
-            let outcome = self.send(settings: settings, base: base, names: names)
+            let outcome = self.send(settings: settings, base: base, names: names,
+                                    openLog: openLog, sendOpenLog: sendOpenLog)
             DispatchQueue.main.async {
                 self.busy = false
+                if !outcome.sent.isEmpty { self.tookSince = false }
                 self.update { now in
                     for (path, size) in outcome.sent { now.sent[path] = size }
                     if !outcome.sent.isEmpty { now.lastUpload = Date() }
@@ -90,9 +100,11 @@ final class LogUploader: ObservableObject {
     }
 
     /// Runs on the uploader's queue, one batch at a time, and stops at the first refusal.
-    private func send(settings: LogSharingSettings, base: URL, names: [String]) -> Outcome {
+    private func send(settings: LogSharingSettings, base: URL, names: [String], openLog: String, sendOpenLog: Bool) -> Outcome {
         let documents = Storage.documents
-        let files = LogSharing.changed(LogSharing.candidates(documents: documents, gyro: settings.gyro), sent: settings.sent)
+        let files = LogSharing.choose(
+            LogSharing.changed(LogSharing.candidates(documents: documents, gyro: settings.gyro), sent: settings.sent),
+            openLog: openLog, sendOpenLog: sendOpenLog)
         guard !files.isEmpty else { return Outcome(message: "Up to date") }
         var outcome = Outcome()
         let model = SystemStatus.deviceModel
@@ -114,9 +126,17 @@ final class LogUploader: ObservableObject {
             request.httpMethod = "POST"
             request.allowsExpensiveNetworkAccess = settings.mobileData
             request.allowsConstrainedNetworkAccess = false
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue("Bearer \(settings.inviteCode)", forHTTPHeaderField: "Authorization")
-            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+            guard let json = try? JSONSerialization.data(withJSONObject: body) else { continue }
+            // Raw DEFLATE, which the service unpacks; logs shrink about tenfold.
+            if let packed = try? (json as NSData).compressed(using: .zlib) as Data {
+                request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+                request.setValue("deflate-raw", forHTTPHeaderField: "X-Body-Encoding")
+                request.httpBody = packed
+            } else {
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.httpBody = json
+            }
             let (status, error) = post(request)
             switch status {
             case 200:

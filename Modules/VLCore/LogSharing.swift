@@ -91,8 +91,27 @@ public enum LogSharing {
     public static let defaultServer = "https://vibelog-logs.vibelog-testing.workers.dev"
     /// A file bigger than this is left out. Session logs run to about 100 KB, probes 300 KB.
     public static let largestFile = 1_500_000
-    /// One upload's files together, which keeps each request well under the service's 4 MB.
-    public static let batchBytes = 2_500_000
+    /// One upload's files together, before compression. Logs compress about tenfold, which keeps
+    /// each request well under the service's 4 MB.
+    public static let batchBytes = 8_000_000
+    /// Automatic uploads at most this often. Launch, a take, and **Send now** don't wait.
+    public static let quietInterval: TimeInterval = 15 * 60
+
+    /// Whether an automatic upload should go now. `reason` is "launch", "left the app" or
+    /// "asked"; `tookSince` says a take finished since the last upload.
+    public static func due(reason: String, lastUpload: Date?, tookSince: Bool, now: Date = Date()) -> Bool {
+        if reason != "left the app" || tookSince { return true }
+        guard let lastUpload else { return true }
+        return now.timeIntervalSince(lastUpload) >= quietInterval
+    }
+
+    /// The files to send: the session log still being written only goes after a take or when
+    /// asked, so leaving the app often doesn't resend it each time; it goes whole at the next
+    /// launch otherwise.
+    public static func choose(_ files: [LogShareFile], openLog: String?, sendOpenLog: Bool) -> [LogShareFile] {
+        guard let openLog, !sendOpenLog else { return files }
+        return files.filter { $0.path != openLog }
+    }
 
     public static func newSalt() -> String {
         (0..<16).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()

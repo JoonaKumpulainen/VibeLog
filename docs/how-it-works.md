@@ -153,7 +153,14 @@ leaves the standard setup on its own evidence, so a workaround for one never rea
 - **Encoders:** `EncoderSupport` times each codec once per phone and iOS version. `bestDefault`
   picks the first launch's codec and size: the wanted codec if it holds full size at 36 fps or
   more, otherwise the most pixels, then room to spare, then the same chroma. Only an untouched
-  default moves.
+  default moves. The first launch's check is quick, with the camera running and 20 frames, and
+  under-reads: on the 14 Pro, HEVC at full size read 27.5 fps against 30.5 with the camera
+  stopped, ProRes 422 HQ 81 against 194. **Measure encoders again** in Diagnostics measures with
+  the camera stopped, 45 frames, at nominal heat when it can, and records the method and heat.
+- **Takes outrank trials:** a log take in the chosen size, five seconds or more, that held 29.5
+  fps with the encoder refusing nothing goes into `proven`, and that codec and size never warns
+  again; one whose encoder refused frames goes into `strained` and always warns.
+  `tools/check_benchmark.py` lists where a phone's figures disagree with its takes.
 - **Adding a fallback:** give it a step on the ladder or a measured trial, never a model name, and
   put the costlier change later.
 

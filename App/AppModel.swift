@@ -1062,9 +1062,8 @@ final class AppModel: ObservableObject {
         }
         if isStorageLow { return "\(timeLeftLabel) of storage left" }
         if isBatteryLow { return "Battery at \(batteryLabel), so the take may stall" }
-        if !bakeLook, let rate = encoderSupport.fps[twelveBitProRes ? EncoderSupport.twelveBitID : encoderPreset.id]?[encoderSize.label],
-            rate < EncoderSupport.realTimeFPS {
-            return String(format: "This codec and size encoded at %.0f fps on this phone, so frames may drop", rate)
+        if !bakeLook, let warning = encoderSupport.warning(for: encoderKey, size: encoderSize.label) {
+            return warning
         }
         return nil
     }
@@ -1235,19 +1234,65 @@ final class AppModel: ObservableObject {
         Log.shared.info("Capture setup kept for \(captureSupport.device): \(captureSupport.setup.label)")
     }
 
+    /// How the encoder limits were measured, for Diagnostics.
+    var encoderLimitsText: String {
+        guard encoderSupport.measured else { return "Not measured yet" }
+        var text = encoderSupport.method == .careful ? "Camera stopped" : "Quick check"
+        if !encoderSupport.heat.isEmpty { text += ", \(encoderSupport.heat)" }
+        if let date = encoderSupport.measuredAt { text += ", " + date.formatted(date: .abbreviated, time: .omitted) }
+        let proven = encoderSupport.proven.values.reduce(0) { $0 + $1.count }
+        if proven > 0 { text += "; \(proven) proven by takes" }
+        return text
+    }
+
+    /// The key a take's codec has in `EncoderSupport`, with 12-bit ProRes apart.
+    var encoderKey: String { twelveBitProRes ? EncoderSupport.twelveBitID : encoderPreset.id }
+
+    /// How long **Measure encoders again** waits for the phone to cool before measuring anyway.
+    static let encoderCoolingLimit: TimeInterval = 300
+
+    /// **Measure encoders again**: stops the camera, waits up to five minutes for nominal heat,
+    /// writes the full encoder report, and replaces the quick first-launch figures with careful
+    /// ones, which the warnings and defaults then use. What real takes showed is kept, since a
+    /// take outranks any trial.
     func runEncoderTest() {
         guard !isRecording, isBusy == nil else { return }
         isBusy = "Releasing camera"
         isStreaming = false
         camera.teardown { [self] in
-            EncoderProbe.run(progress: { text in
-                DispatchQueue.main.async { self.isBusy = text }
-            }, completion: { [self] url in
-                isBusy = nil
-                lastResult = "Encoder test saved: probes/\(url.lastPathComponent)"
-                startStreamAfterConfigure = true
-                reconfigure()
-            })
+            waitForNominalHeat(until: Date().addingTimeInterval(Self.encoderCoolingLimit)) { [self] in
+                EncoderProbe.run(progress: { text in
+                    DispatchQueue.main.async { self.isBusy = text }
+                }, completion: { [self] url in
+                    isBusy = "Saving encoder limits"
+                    EncoderSupport.measure(frames: 45, careful: true) { [self] fresh in
+                        var support = fresh
+                        support.proven = encoderSupport.proven
+                        support.strained = encoderSupport.strained
+                        encoderSupport = support
+                        support.save()
+                        fitToPhone(choosingDefaults: false)
+                        isBusy = nil
+                        lastResult = "Encoders measured at \(support.heat) heat; report in probes/\(url.lastPathComponent)"
+                        startStreamAfterConfigure = true
+                        reconfigure()
+                    }
+                })
+            }
+        }
+    }
+
+    /// Calls back on the main queue once the phone is at nominal heat, or at the deadline.
+    private func waitForNominalHeat(until deadline: Date, then: @escaping () -> Void) {
+        DispatchQueue.main.async { [self] in
+            if SystemStatus.thermalName == "nominal" || Date() >= deadline {
+                then()
+                return
+            }
+            isBusy = "Letting the phone cool first: \(SystemStatus.thermalName)"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [self] in
+                waitForNominalHeat(until: deadline, then: then)
+            }
         }
     }
 
@@ -1942,6 +1987,12 @@ final class AppModel: ObservableObject {
         return seconds > 0 ? seconds : 3600
     }
 
+    /// The take's codec and size as it started, for what it shows about the encoder.
+    private var takeBaked = false
+    private var takeSize = ""
+    private var takeChosenSize = ""
+    private var takeEncoderKey = ""
+
     private func startEncoding() {
         guard let pipeline, processing.enabled, method.isPhoto else {
             Log.shared.error("Encoding needs a photo method and the GPU pipeline")
@@ -1949,6 +2000,10 @@ final class AppModel: ObservableObject {
                 title: "Can't record", detail: "Recording needs a photo method and the GPU pipeline.")
             return
         }
+        takeBaked = bakeLook
+        takeSize = outputSize.label
+        takeChosenSize = encoderSize.label
+        takeEncoderKey = encoderKey
         let name = "video_\(Storage.timestamp())"
         let url = Storage.videos.appendingPathComponent(name + ".mov")
         let metadata: [String: String] = [
@@ -2065,6 +2120,14 @@ final class AppModel: ObservableObject {
         let gpu = pipeline?.currentStats() ?? PipelineStats()
         encoder.finish { [self] finished in
             let encoderDrops = finished.framesDropped
+            // What the take showed about its encoder, for log takes in the chosen size only: a
+            // baked take adds GPU work and may write another codec, and 16:9 is a smaller size.
+            logUploader.takeFinished()
+            if !takeBaked, takeSize == takeChosenSize {
+                encoderSupport.record(take: takeEncoderKey, size: takeChosenSize, seconds: finished.seconds,
+                                      fps: finished.fps, encoderDrops: encoderDrops)
+                if encoderSupport.measured { encoderSupport.save() }
+            }
             var result = finished
             // The library and the sidecar show one number for frames the file lost.
             result.framesDropped = encoderDrops + gpu.dropped

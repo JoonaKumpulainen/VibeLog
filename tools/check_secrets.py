@@ -13,7 +13,8 @@ It refuses:
   to INVITE_CODES, ADMIN_TOKEN, testToken and the like, ngrok and other tunnel addresses, and
   Cloudflare account IDs in dashboard links.
 - On this machine, also the exact values of the real secrets, read from where they're kept:
-  ~/.vibelog_logs_secrets.json, ~/.vibelog_logs, and the test server's token files. CI doesn't
+  ~/.vibelog_logs_secrets.json, ~/.vibelog_logs, the test server's token files, and the Apple
+  team ID in the USB fetch's usb_app_id. CI doesn't
   have them, so it relies on the patterns.
 
 A line can be let through with `check-secrets: allow` on it, for an example that only looks like
@@ -78,6 +79,12 @@ def local_secrets():
         for key, value in data.items():
             if key != "url":
                 take(value)
+    # SideStore's bundle ID for the USB fetch ends in the owner's Apple team ID.
+    try:
+        bundle = (default_folder() / "usb_app_id").read_text().strip()
+        take(bundle.rsplit(".", 1)[-1])
+    except OSError:
+        pass
     for name in ("token", "public_token"):
         try:
             take((default_folder() / name).read_text())

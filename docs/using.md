@@ -174,9 +174,12 @@ sidecar names both. Curve constants match colour-science's implementations of th
 
 With **Encode video** on, recording writes the log image to `videos/video_*.mov` with stereo
 microphone audio, plus a `.json` sidecar naming the curve, gamut, look, and the take's shutter, ISO
-and white balance with how each behaved. **Run encoder test** benchmarks every codec and size on
-synthetic frames, without the camera, and saves `probes/encoders_*.txt`. Support differs by phone,
-so check that before trusting a preset. **Run GPU cost test** times each stage of a frame on the
+and white balance with how each behaved. **Measure encoders again** stops the camera, lets the phone
+cool to nominal heat for up to five minutes, times every codec and size on synthetic frames, saves
+`probes/encoders_*.txt`, and replaces the quick first-launch figures the warnings use. **Encoder
+limits** below it says how and when they were measured. A take of five seconds or more that holds
+30 fps in a codec and size proves it, and its warning stops for good; a take whose encoder drops
+frames makes it warn from then on. **Run GPU cost test** times each stage of a frame on the
 GPU the same way, for both pipelines and debayers, and saves `probes/gpu_cost_*.txt`.
 
 The default is ProRes 422 HQ at 4032x3024. On an iPhone 14 Pro it recorded 60 seconds at about 30

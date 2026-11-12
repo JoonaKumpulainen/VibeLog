@@ -2,11 +2,11 @@
   {"needs": "0.1.117"},
 
   {"use": "video_20261112_000714.mov"},
-  {"export": {"stabilize": "on", "smooth": "0.6"}, "of": "take", "label": "Test 6: 000714 stabilized", "expect": {"result": "saved"}},
+  {"export": {"stabilize": "on", "smooth": "0.6", "target": "sdr"}, "of": "take", "label": "Test 6: 000714 stabilized", "expect": {"result": "saved"}},
   {"fetch": ["take", "take.gcsv", "take.json", "copy", "copy.json", "lens"]},
   {"measure": {"copy": true}, "label": "Test 6: 000714 steadiness", "expect": {"copy.keeps.x": "<=0.4", "copy.keeps.y": "<=0.4", "copy.keeps.roll": "<=0.5"}},
   {"use": "video_20261111_220644.mov"},
-  {"export": {"stabilize": "on", "smooth": "0.6"}, "of": "take", "label": "Test 6: 220644 stabilized", "expect": {"result": "saved"}},
+  {"export": {"stabilize": "on", "smooth": "0.6", "target": "sdr"}, "of": "take", "label": "Test 6: 220644 stabilized", "expect": {"result": "saved"}},
   {"fetch": ["take", "take.gcsv", "take.json", "copy", "copy.json", "lens"]},
   {"measure": {"copy": true}, "label": "Test 6: 220644 steadiness", "expect": {"copy.keeps.roll": "<=0.6"}},
 
@@ -36,7 +36,7 @@
   {"set": {"lens": "0.5x", "bakeLook": false, "codec": "hevc422", "shutter": "250", "iso": "800"}},
   {"pause": "Test 5, take A, 25 s, held sideways at straight lines near the edges of the frame: hold still 3 s, small quick shakes 5 s, slow pans left and right 10 s, hold still 3 s, walk forward 4 s. Starts on Enter."},
   {"take": 25, "label": "Test 5: ultra wide take A", "gbPerSecond": 0.05, "expect": {"lost": "<=2"}},
-  {"export": {"stabilize": "on", "smooth": "0.6"}, "of": "take", "label": "Test 5: take A stabilized", "expect": {"result": "saved"}},
+  {"export": {"stabilize": "on", "smooth": "0.6", "target": "sdr"}, "of": "take", "label": "Test 5: take A stabilized", "expect": {"result": "saved"}},
   {"fetch": ["take", "take.gcsv", "take.json", "copy", "copy.json", "lens"]},
   {"measure": {"copy": true}, "label": "Test 5: take A steadiness", "expect": {"copy.keeps.x": "<=0.3", "copy.keeps.y": "<=0.3"}},
   {"ask": "Test 5: in take A's copy, do the edges bend as the picture moves while the middle stays steady? Do vertical lines lean during fast moves?"},

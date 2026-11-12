@@ -575,30 +575,44 @@ an item from **Not verified** once it is.
     Likely a tap on the picture, which meters and returns exposure to auto, before the take.
     Not checked.
 
+- **The first self-checking round, 14 Pro on 0.1.117, 2026-11-12** (`round_20261112_184319.md`,
+  19 checks passed, none failed):
+  - **FX keep the shadows (`eed6df9`):** a dim log take at ISO 2000 exported with ACES 2.0 and
+    no FX, grain +20 and bloom +20: the darkest tenth sat at 19 of 255 in all three, and the
+    darkest pixel moved by under 0.1.
+  - **Returning to the app (`eed6df9`):** back after 71 s and 189 s, the camera kept running both
+    times, with no idle pause. The fix holds on the 14 Pro.
+  - **Stabilize keeps a baked take's codec (`8c7f7d5`):** ProRes 422 HQ and HEVC 4:2:2 copies
+    kept their take's codec and 10 bits.
+  - **Stabilize's timing fix (`2368f1d`) on the 0.5x:** `000714`'s new copy keeps 21%, 26% and
+    34% of the take's fast shake, sideways, up and down and roll, against 65%, 64% and 51% for
+    the copy before the fix.
+  - **The 1x copy of `220644` is steadier wherever the camera is held,** roll falling from about
+    1.1 to 0.3 mrad a frame, but lets two fast tilts of 25 to 40 degrees a second through as
+    jumps, since they can't be hidden at 130%. The copy from before the fix measures the same, so
+    it isn't a regression: it's the missing limit that follows the shake's size.
+  - **The ultra wide's edges in hard shake (Test 5):** the owner saw the edges shake in the
+    hardest shaking but not bend or warp. That points to rolling shutter before lens distortion.
+    Take B, for the readout time, is in the results folder, unanalysed.
+- **The first-launch encoder check under-reads:** on the 14 Pro it read HEVC at full size at 27.3
+  to 27.5 fps and ProRes 422 HQ at 81, where Diagnostics' test with the camera stopped read 30.1
+  to 30.5 and 194, and 12-bit ProRes 4444 at 25.6 against 57.5. Its sessions' 65 full-size HEVC
+  4:2:0 takes and 7 HEVC 4:2:2 takes never lost a frame at the encoder, so their warning was false.
+  12-bit ProRes 4444 lost frames at the encoder in 2 of 8 takes, so its warning was partly right
+  even though the careful test reads it fast. `tools/check_benchmark.py` finds these.
+- **Log sharing works on the 14 Pro:** 195 files reached the service, and none held a date, a
+  full timestamp, an address or the name of the imported LUT. USB fetching through
+  `pymobiledevice3` ran at about 39 MB/s against a few hundred KB/s over the phone's Wi-Fi.
+
 ## Not verified
 
-- **FX after `eed6df9`:** on the iPhone 16 on 2026-11-12, a screen recording of export's grade
-  editor showed any FX above zero turning a take flat and grey: with FX off, half the picture sat
-  under 26 of 255, and with FX on nothing did. The owner later found the take was a baked one,
-  graded as log on an older build, which the Stabilize screen now prevents. Read as log, its
-  blacks fell below the curve's black, and the FX step clamped all of that to one floor. In a
-  real log take only noise near black goes that low. `eed6df9` keeps it, as the path without FX
-  always did, so log takes lose nothing; how little it changes in a dark log take isn't seen.
-- **The 14 Pro's ultra wide edges:** the owner reported on 2026-11-12 that a stabilized copy's
-  edges shake and bend, which fits the missing lens distortion and rolling shutter. Unmeasured;
-  Test 5 in next-tests.md.
 - **What the 16's tester saw as added shake on the ultra wide:** take `140255`'s copy added none
   (see above). Most likely an older build's 20 ms offset, before 0.1.112, or 1/50 s motion blur;
   which build made the shaky copy isn't known.
 - **Why the base iPhone 16's sliders lag in Export:** not a stalled main thread, measured on
   0.1.116 (see above). Suspected next: the grade editor's sliders sit in a scrolling form, and
   on iOS 26 the scroll may take a drag with any vertical movement. Unproven.
-- **Returning to the app after two minutes away, after `eed6df9`:** the camera should keep
-  streaming. In the iPhone 16's log of 2026-11-11 it started and the idle pause stopped it within
-  a second, three times, so it needed a tap.
 
-- **Stabilize with its timing fixed, on the 14 Pro:** whether its ultra wide's copy is now steady,
-  as the base 16's was, and how much rolling shutter leaves in.
 - **What maker note keys 15 and 12 read in a running take,** frame by frame, still and shaken:
   whether 15 changes from the probe's 5, and whether 12 grows with the shake.
 - **The `.gcsv`'s orientation for upright takes:** which string Gyroflow needs for each way of
