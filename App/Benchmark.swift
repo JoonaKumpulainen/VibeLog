@@ -1,6 +1,7 @@
 import Foundation
 import VLCapture
 import VLCore
+import VLRecording
 
 /// The benchmark: one guided run that measures this phone, offered at first launch and after an
 /// iOS update, never started unasked. Each step is one of the measurements Diagnostics already
