@@ -6,29 +6,30 @@ short.
 
 ## Latest build
 
-As of mid Phase 7, with Phase 8's stabilized export begun. The latest build is `2368f1d`, CI run
-112, version 0.1.112, which passed with 188 tests and one skip. It fixes **Stabilize**'s timing, eases its limit at 130%
-instead of cutting frames off, turns a baked take's export into a **Stabilize** screen and
-explains smoothness. None of that has been tried on a phone.
+As of mid Phase 7, with Phase 8's stabilized export begun. The latest build is `eed6df9`, CI run
+113, version 0.1.113. It keeps light below zero through FX, so a dark picture no longer turns flat
+and grey with any FX on, and stops the idle pause from stopping the camera right after returning
+to the app. Both came from the iPhone 16's logs and screen recording. None of it has been tried
+on a phone, and nor has `2368f1d`'s Stabilize timing fix.
 
 The builds before it, all from the sessions of 2026-11-11 and 12:
 
 | Build | Run | What it added | On the phone |
 |---|---|---|---|
+| `2368f1d` | 112 | Stabilize's timing fixed, its limit eased at 130%, a Stabilize screen for baked takes | Not yet |
 | `652ba7a` | 111 | Ultra wide corrects every speed, maker note probe, legal and Gyroflow wording | Probe ran; stabilized copies measured |
 | `7e2b514` | 110 | Stabilized export, its preview, stabilized copies of baked takes, stabilizer names in the probe | Probe ran |
 | `35d43dc` | 108 | Baked-FX takes make the monitor image and glow every other frame | Proven: 20 minutes back to back |
 | `907287d` | 107 | GPU cost test | Ran |
 | `b740eab` | 106 | Baked-FX takes on the Efficient path, probe crash fix | Proven |
-| `02d2d11` | 105 | The take's glow from a pool, handed over when a frame finishes | Proven |
 
 Run 109 never started and can be ignored. Every session is in
-[history/2026-11.md](history/2026-11.md); the last is **Session on 2026-11-12**.
+[history/2026-11.md](history/2026-11.md); the last is **Session on 2026-11-12, iPhone 16 logs**.
 
 ## Start here next session
 
-1. **Ask the owner how Stabilize looks on 0.1.112,** on takes `000714` (0.5x) and `220644` (1x),
-   both upright and baked, still on the phone. The 0.5x's first copy kept two thirds of its
+1. **Ask how FX on a dark take looks on 0.1.113,** on both phones, then **how Stabilize looks,**
+   on takes `000714` (0.5x) and `220644` (1x), both upright and baked, still on the phone. The 0.5x's first copy kept two thirds of its
    shake; the timing fix should remove most of that.
 2. **If the phone is linked, measure the new copies** against their gyro logs, as was done for
    the first ones. The method is under **How the copies were measured** below.
@@ -43,25 +44,29 @@ Diagnostics. The server prints its address and token, which have stayed the same
 and are kept out of this public repo. Over the link,
 `set` takes name and value as two arguments, and `sendFile` fetches a take whole.
 
-**The 14 Pro, on 0.1.112:**
+**The 14 Pro, on 0.1.113:**
 
-1. **Stabilize:** open a baked take in the player and tap **Stabilize**, or a log take and
+1. **FX on a dark scene:** in export's grade editor, or the look panel's FX page, raise any FX
+   slider on a dark take and check the shadows stay where they were, with no grey veil. Then
+   leave the app for over two minutes and come back: the camera should keep running.
+2. **Stabilize:** open a baked take in the player and tap **Stabilize**, or a log take and
    **Export** with **Stabilize** on. Watch the preview with the switch off and on, move
    **Smoothness**, and save a copy. Say whether the copy is steadier than the take, whether
    anything shakes that didn't before, whether the 0.5x still shakes, and whether an edge shows.
-2. **A log take stabilized,** since both copies so far came from baked takes.
-3. **Gyroflow's axes:** a take held sideways, with a few seconds held still, played in Gyroflow,
+3. **A log take stabilized,** since both copies so far came from baked takes.
+4. **Gyroflow's axes:** a take held sideways, with a few seconds held still, played in Gyroflow,
    to check `yXZ` is right there. Upright takes are corrected a quarter-turn off until the
    `.gcsv` says how the phone was held.
-4. **Look panel:** the red reset arrow and the change dots in all four holds, and the
+5. **Look panel:** the red reset arrow and the change dots in all four holds, and the
    confirmation sideways.
-5. **Export:** whether "Wheels •" fits its tab upright; the fullscreen preview upright and
+6. **Export:** whether "Wheels •" fits its tab upright; the fullscreen preview upright and
    sideways, with a crop outline on; the scope's drag, snap and resize, on the camera too.
-6. **SideStore:** whether a new build shows as an update by itself.
-7. **Later:** a colour chart shot; the matched pair for Apple's preview; ARRI Wide Gamut 3;
+7. **SideStore:** whether a new build shows as an update by itself.
+8. **Later:** a colour chart shot; the matched pair for Apple's preview; ARRI Wide Gamut 3;
    `scope_cost.json`, which needs about 112 GB free.
 
-**The iPhone 16:** **Run probe**, phone still, for its overlapped bracket cases and stabilizer
+**The iPhone 16:** on 0.1.113, the same dark take with FX on as in the screen recording, and a
+return to the app after two minutes away; then **Run probe**, phone still, for its overlapped bracket cases and stabilizer
 names; a five-minute HEVC 4:2:2 take at full size, started cold and unplugged, and one at
 2880x2160.
 

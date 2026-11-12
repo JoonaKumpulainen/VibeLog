@@ -81,7 +81,7 @@ the phone can sustain. When quality and convenience conflict, quality wins.
 | `Modules/VLProcessing` | Log curves, color math, `GamutPairing`, `.cube` parser, Metal pipeline with `LookParams`, `ACES2.swift`, `ACES13.swift`, `BuiltInLook` with the grade and HDR encodings, `LookExporter`, `LookPlayback`, `LookEffects`, `ScopeMeter`, still export, `Shaders.metal` |
 | `Modules/VLRecording` | RAW dump writer, `VideoEncoder`, encoder presets, encoder benchmark, `TakeLibrary` |
 | `Modules/ObjCGuard` | Catches Objective-C exceptions from AVFoundation, runtime scan |
-| `Tests/VLTests` | 188 tests, including real GPU tests on the simulator |
+| `Tests/VLTests` | 189 tests, including real GPU tests on the simulator |
 | `tools/inspect_clip.py` | Summarizes a RAW clip and exports a frame |
 | `tools/test_server.py` | The test link's server, which sends the phone commands and collects its files |
 | `tools/sidestore_source.py`, `tools/sidestore/icon.png` | Writes the SideStore source from the built IPA, in CI |
