@@ -304,6 +304,7 @@ extension AppModel {
 
     private var testStatus: [String: String] {
         [
+            "app": SystemStatus.appVersion, "phone": SystemStatus.deviceModel,
             "recording": String(isRecording), "streaming": String(isStreaming),
             "screen": playingTake == nil ? openScreen : "player", "busy": isBusy ?? "",
             "method": method.rawValue, "encodeVideo": String(recordEncoded),
@@ -337,7 +338,7 @@ extension AppModel {
             "gpuMs": String(format: "%.1f", pipelineStats.gpuRecentMs),
             "thermal": status.thermal, "battery": status.battery, "freeGB": String(status.freeDiskGB),
             "shutter": exposureLocked ? shutterLabel : "auto", "iso": exposureLocked ? String(Int(iso)) : "auto",
-            "lastResult": lastResult ?? "",
+            "lastResult": lastResult ?? "", "lastTake": lastTakeFile,
         ].merging(exportValues) { $1 }
     }
 

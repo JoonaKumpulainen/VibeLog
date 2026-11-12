@@ -43,7 +43,14 @@ the phone can sustain. When quality and convenience conflict, quality wins.
   `logs/session_*.log`, JSON sidecars, screenshots and the owner's observations. Say exactly what to
   test and what to send. Never claim camera behavior works from CI alone.
 - **Screenshots:** taking one during a recording may disturb it, so long tests should run hands-off.
-- **Public repo:** keep commits and files free of private details.
+- **Public repo:** keep commits and files free of private details. `tools/check_secrets.py`
+  runs as a pre-commit hook and in CI; in a new clone, turn the hook on with `git config
+  core.hooksPath .githooks`. Secrets live outside the repo: `~/.vibelog_logs_secrets.json` (the
+  log service's invite codes and owner key), `~/.vibelog_logs` (its address and the owner key)
+  and the test server's token files. Never paste their values into files, commits or chat
+  output.
+- **Privacy:** [PRIVACY.md](PRIVACY.md) is the promise to testers. Any change to what the app
+  sends, or where, updates it in the same change.
 - **Accessibility:** the owner won't test it, so leave it out of test lists. VoiceOver labels,
   announcements, Increase Contrast and Reduce Motion support were added, and none has been tested.
 
@@ -86,7 +93,12 @@ the phone can sustain. When quality and convenience conflict, quality wins.
 | `Modules/ObjCGuard` | Catches Objective-C exceptions from AVFoundation, runtime scan |
 | `Tests/VLTests` | 189 tests, including real GPU tests on the simulator |
 | `tools/inspect_clip.py` | Summarizes a RAW clip and exports a frame |
-| `tools/test_server.py` | The test link's server, which sends the phone commands and collects its files |
+| `tools/test_server.py` | The test link's server, which sends the phone commands and collects its files, and runs suites and rounds |
+| `tools/rounds/*.json` | A round of phone tests that checks its own results and writes `round_*.md` |
+| `tools/measure_steady.py` | Fits a take's motion to its gyro log, and measures what a stabilized copy leaves |
+| `tools/read_log.py` | Sums up session logs: takes, exports, stalls, heat, returning to the app, slider drags |
+| `tools/log_service/` | The Cloudflare Worker that takes testers' opt-in log uploads; `cf dev`, `cf deploy` |
+| `tools/pull_logs.py` | Pulls those uploads, sorted by phone model, into `phones/` and writes `phones/report.md` |
 | `tools/sidestore_source.py`, `tools/sidestore/icon.png` | Writes the SideStore source from the built IPA, in CI |
 | `tools/suites/export_matrix_1.json`, `_2.json` | Record 2 s in every curve and gamut and export each take |
 | `tools/suites/fx_baked.json`, `fx_cost.json`, `scope_cost.json` and others | Long takes that measure what FX and tools cost when hot |

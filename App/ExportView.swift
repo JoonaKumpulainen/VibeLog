@@ -8,6 +8,22 @@ import VLRecording
 /// Bakes a look into a copy of a take: Monitor's Rec.709 view, an ACES look or a LUT, with its
 /// grade and effects, played through first. The copy is tagged Rec.709, or PQ or HLG for HDR,
 /// and saved beside the take with its audio; the take itself is left as it is.
+/// Logs each slider drag, how long it lasted and how far it moved. A drag the form's scroll takes
+/// never starts one, which is how the log tells a slider that refused to move.
+final class SliderDragLog {
+    private var drag: (title: String, at: Date, from: Double)?
+
+    func note(_ title: String, editing: Bool, value: Double) {
+        if editing {
+            drag = (title, Date(), value)
+        } else if let drag, drag.title == title {
+            Log.shared.info(String(format: "Slider %@ dragged %.2f s, from %.2f to %.2f",
+                                   title, Date().timeIntervalSince(drag.at), drag.from, value))
+            self.drag = nil
+        }
+    }
+}
+
 struct ExportView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -21,6 +37,7 @@ struct ExportView: View {
     @State private var crop = ExportCrop.none
     @State private var stabilize = false
     @State private var stabilizeSeconds = 0.6
+    @State private var dragLog = SliderDragLog()
     /// What the stabilized preview did, or why it couldn't: its enlargement, or what's missing.
     @State private var steadyNote: String?
     /// Where the crop sits, -1 to 1 across what it leaves out, as the take plays.
@@ -384,7 +401,9 @@ struct ExportView: View {
                                 }
                                 HStack(spacing: 8) {
                                     Text("Follows you").font(.caption).foregroundStyle(.secondary)
-                                    Slider(value: $stabilizeSeconds, in: 0.2...2, step: 0.1)
+                                    Slider(value: $stabilizeSeconds, in: 0.2...2, step: 0.1) { editing in
+                                        dragLog.note("Smoothness", editing: editing, value: stabilizeSeconds)
+                                    }
                                     Text("Holds still").font(.caption).foregroundStyle(.secondary)
                                 }
                                 if let steadyNote {
@@ -915,6 +934,7 @@ struct ExportGradeEditor: View {
     @Binding var scopeKind: ScopeKind?
     @State private var tab = Tab.adjust
     @State private var haptics = DetentHaptics()
+    @State private var dragLog = SliderDragLog()
     @State private var naming = false
     @State private var styleName = ""
     @State private var confirmingReset = false
@@ -1148,6 +1168,7 @@ struct ExportGradeEditor: View {
             }
             Slider(value: ticking(value, range: range), in: range) { editing in
                 if editing { haptics.prepare() }
+                dragLog.note(title, editing: editing, value: value.wrappedValue)
             }
             .tint(tint)
             .accessibilityLabel(title)

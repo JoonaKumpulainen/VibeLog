@@ -5,7 +5,8 @@ GPU and records log video in ProRes or HEVC, or a look baked in. The goal is the
 sensor, and where quality and convenience conflict, quality wins.
 [docs/findings.md](docs/findings.md) records what's been proven on the phone.
 
-See [ROADMAP.md](ROADMAP.md) for the plan. Working on it with an AI agent? Start with
+See [ROADMAP.md](ROADMAP.md) for the plan, and [PRIVACY.md](PRIVACY.md) for what stays on the
+phone and what can leave it. Working on it with an AI agent? Start with
 [AGENTS.md](AGENTS.md).
 
 ## Install on the phone

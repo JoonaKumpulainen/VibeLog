@@ -5,3 +5,11 @@ DerivedData/
 *.ipa
 App/Info.plist
 __pycache__/
+.wrangler/
+# Secrets never go in the repo: tools/check_secrets.py and the pre-commit hook enforce it.
+.dev.vars
+.env
+*secrets*.json
+.vibelog_logs*
+token
+public_token

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Refuses a commit that would put secrets or private details in the public repo.
+# Turned on for a clone with: git config core.hooksPath .githooks
+exec python3 "$(git rev-parse --show-toplevel)/tools/check_secrets.py"

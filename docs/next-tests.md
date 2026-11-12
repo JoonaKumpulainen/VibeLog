@@ -28,6 +28,20 @@ Rewrite this file when a new round of tests is planned, and move the results to
 - **Always send the session log** from `logs/` for the time of the tests, the newest
   `session_*.log`, even when a test looks fine.
 
+## On the 14 Pro with the test link: one round
+
+From 0.1.117, Tests 1, 2, 3, 5 and 6 run as one round from the owner's computer, which records,
+exports, fetches and judges them itself and puts the settings back after:
+
+```bash
+python3 tools/test_server.py round tools/rounds/2026-11-13.json
+```
+
+The phone stays on the camera screen. The round waits for Enter before each step that needs a
+person: pointing at a dim scene, walking, the two ultra wide takes, and leaving the app for 3
+minutes. It writes `round_*.md` in the results folder, with the questions it can't answer. The
+steps below are the same tests by hand, for the iPhone 16's tester.
+
 ## Test 1: FX keep the shadows (both phones)
 
 Checks `eed6df9`. FX used to lift the darkest parts of the picture to a grey floor.
@@ -136,8 +150,9 @@ scrolling form the sliders sit in, which may take a drag that moves even slightl
 3. Drag the same slider **diagonally**, a little up or down as it moves, ten times.
 4. Do the same with **Smoothness** under **Stabilize**, which sits in the same form.
 
-**Send:** a screen recording, and say for each whether the slider refused to move. If only the
-diagonal drags stick, the scroll is taking them.
+**Send:** a screen recording, the session log, and say for each how many drags you made. From
+0.1.117 the log counts the drags each slider took, so a drag the scroll took shows as missing.
+If only the diagonal drags go missing, the scroll is taking them.
 
 ## What the results decide
 

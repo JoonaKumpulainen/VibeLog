@@ -4,6 +4,11 @@ import UIKit
 import os
 
 public enum SystemStatus {
+    /// The app's version, such as 0.1.116, which CI sets from its run number.
+    public static var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-"
+    }
+
     public static var deviceModel: String {
         var info = utsname()
         uname(&info)

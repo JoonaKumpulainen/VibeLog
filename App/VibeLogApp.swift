@@ -10,7 +10,7 @@ struct VibeLogApp: App {
     init() {
         Log.shared.installCrashHandlers()
         Log.shared.info("VibeLog started on \(SystemStatus.deviceModel), "
-            + "\(ProcessInfo.processInfo.operatingSystemVersionString)")
+            + "\(ProcessInfo.processInfo.operatingSystemVersionString), app \(SystemStatus.appVersion)")
     }
 
     @UIApplicationDelegateAdaptor(AppOrientation.self) private var orientation

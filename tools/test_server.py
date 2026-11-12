@@ -6,6 +6,7 @@
     python3 tools/test_server.py send set tools peaking,grid
     python3 tools/test_server.py send record 20 --wait
     python3 tools/test_server.py suite tools/suites/heat_paths.json
+    python3 tools/test_server.py round tools/rounds/2026-11-13.json
 
 The phone connects out to `serve`, takes commands and sends files, which land in the results
 folder. `send` queues a command from this machine and prints the phone's reply. Traffic is plain
@@ -28,6 +29,7 @@ import re
 import secrets
 import shutil
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -387,6 +389,27 @@ class Suite:
         {"export": {"look": "ACES 2.0", "target": "sdr", "codec": "hevc420"}, "label": "S-Log3"}
                         bakes the newest take in log, as the export screen would
 
+    A round (`round` instead of `suite`) also takes these, and writes round_*.md with each check:
+
+        {"needs": "0.1.117"}    the oldest app version the round works with
+        {"take": 10, "expect": {"lost": "<=2", "written": ">=29.5"}}
+        {"export": {...}, "expect": {"result": "saved"}}
+        {"fetch": ["take", "take.gcsv", "take.json", "copy", "copy.json"]}
+                        fetches the newest take and export, and their files, unless already here
+        {"export": {...}, "of": "take"}   exports the round's own take, as a baked take needs
+        {"same": ["preset"]}    the copy's sidecar must match the take's in these fields
+        {"levels": "no FX"}     the newest copy's dark end, kept under that name, which is then
+        {"levels": "grain", "against": "no FX", "expect": {"darkLift": "<=2"}}   compared
+        {"measure": {"copy": true}, "expect": {"copy.keeps.x": "<=0.4"}}
+                        runs tools/measure_steady.py on the fetched take, and its copy
+        {"log": true, "expect": {"flaggedTakes": 0, "pausedAfterReturn": 0}}
+                        fetches the session log and sums it up with tools/read_log.py
+        {"use": "video_20261112_000714.mov"}   makes a take already on the phone the round's take
+        {"pause": "Walk slowly with the phone"}   waits for Enter here, for what needs a person
+        {"ask": "Did the shadows stay as dark?"}  a question for a person, listed in the report
+
+    A round puts back every setting it changed when it ends, even after a failure.
+
     Results go to suite_*.csv and a reading every 10 seconds to heat_*.csv, in the results folder.
     Exports go to exports_*.csv, and a failed one doesn't stop the suite. At the end the phone
     sends its session log and its own exports.csv, which says which step each failure stopped in.
@@ -408,6 +431,13 @@ class Suite:
         self.exports = None
         self.export_log = None
         self.export_counts = {"saved": 0, "failed": 0}
+        self.round = getattr(options, "round", False)
+        self.checks = []        # (label, verdict, detail) for the report
+        self.blocks = []        # (title, text) of tool output for the report
+        self.questions = []
+        self.original = {}      # each setting's value before the round changed it
+        self.last_take = ""
+        self.last_copy = ""
 
     def ask(self, command):
         """Keeps trying while the phone is away, then stops the suite."""
@@ -426,15 +456,23 @@ class Suite:
         self.heat.flush()
         return values
 
-    def set_values(self, values):
+    def set_values(self, values, restoring=False):
+        if self.round and not restoring:
+            current = self.ask({"action": "status"})["values"]
+            for name in values:
+                if name not in self.original and name in current:
+                    self.original[name] = current[name]
         for name, value in values.items():
             text = str(value).lower() if isinstance(value, bool) else str(value)
             reply = self.ask({"action": "set", "name": name, "value": text})
             if not reply["ok"]:
+                if restoring:
+                    print(f"  couldn't put back {name} = {text}: {reply['message']}", flush=True)
+                    continue
                 sys.exit(f"{name}: {reply['message']}")
         time.sleep(1)
 
-    def take(self, seconds, label):
+    def take(self, seconds, label, expect=None):
         print(f"take: {label}, {seconds} s", flush=True)
         previous = self.status(label).get("lastResult", "")
         reply = self.ask({"action": "record", "seconds": float(seconds)})
@@ -455,10 +493,13 @@ class Suite:
         row.update(parsed.groupdict() if parsed else {})
         self.result_log.writerow(row)
         self.results.flush()
-        print(f"  {result[:150]}", flush=True)
+        self.last_take = values.get("lastTake", "")
+        print(f"  {self.last_take} {result[:150]}", flush=True)
+        if expect:
+            self.expect(label, {k: v for k, v in row.items() if v is not None}, expect)
         time.sleep(3)
 
-    def export(self, choices, label):
+    def export(self, choices, label, expect=None, of="newest"):
         """Bakes the newest take and waits for it. A failure is written down, not fatal."""
         if self.export_log is None:
             self.exports = open(self.options.folder / f"exports_{self.stamp}.csv", "w", newline="", encoding="utf-8")
@@ -468,7 +509,8 @@ class Suite:
         started = time.time()
         before = self.status(label).get("exports", "0")
         value = ";".join(f"{name}={text}" for name, text in choices.items())
-        reply = self.ask({"action": "export", "name": "newest", "value": value})
+        name = self.file_name(of) if of != "newest" else "newest"
+        reply = self.ask({"action": "export", "name": name, "value": value})
         if reply["ok"]:
             deadline = started + self.EXPORT_GIVE_UP_SECONDS
             while True:
@@ -489,6 +531,10 @@ class Suite:
             {"label": label, "result": result, "seconds": f"{time.time() - started:.1f}", "message": message})
         self.exports.flush()
         print(f"  {result}: {message[:150]}", flush=True)
+        if message.startswith("Saved as "):
+            self.last_copy = message[len("Saved as "):].split()[0]
+        if expect:
+            self.expect(label, {"result": result, "message": message, "seconds": time.time() - started}, expect)
         # The camera stops for an export and needs a moment to start again.
         time.sleep(3)
 
@@ -512,6 +558,214 @@ class Suite:
         self.ask({"action": "stream", "value": "on"})
         time.sleep(5)
 
+    def expect(self, label, values, expectations):
+        """Judges each expectation, prints it and keeps it for the report."""
+        for key, wanted in expectations.items():
+            actual = values
+            for part in key.split("."):
+                actual = actual.get(part) if isinstance(actual, dict) else None
+            passed = judge(actual, wanted)
+            verdict = "PASS" if passed else "FAIL" if passed is False else "?"
+            shown = f"{actual:.3g}" if isinstance(actual, float) else actual
+            detail = f"{key} {wanted} : {shown}"
+            self.checks.append((label, verdict, detail))
+            print(f"  {verdict} {detail}", flush=True)
+
+    LENS_FILES = {"0.5x": "back-ultrawide", "1x": "back-wide", "2x": "back-wide", "3x": "back-tele"}
+
+    def file_name(self, what):
+        """take, take.gcsv, take.json, copy, copy.json, lens (the take's lens profile), or a name as
+        it is."""
+        if what == "lens":
+            meta = json.loads((self.options.folder / self.file_name("take.json")).read_text())
+            lens = self.LENS_FILES.get(meta.get("metadata", {}).get("lens", ""), "back-wide")
+            return f"{lens}-4032x3024.json"
+        base, _, kind = what.partition(".")
+        name = {"take": self.last_take, "copy": self.last_copy}.get(base)
+        if name is None:
+            return what
+        if not name:
+            sys.exit(f"No {base} to fetch yet")
+        if kind == "gcsv":
+            return str(Path(name).with_suffix(".gcsv"))
+        if kind == "json":
+            return name + ".json"
+        return name
+
+    def fetch(self, names, give_up_minutes=45):
+        """Fetches each file unless it's already in the results folder, and waits for it."""
+        for what in names:
+            name = self.file_name(what)
+            target = self.options.folder / name
+            if target.exists():
+                print(f"fetch: {name} is already here", flush=True)
+                continue
+            print(f"fetch: {name}", flush=True)
+            reply = self.ask({"action": "sendFile", "name": name})
+            if not reply["ok"]:
+                self.checks.append((f"fetch {name}", "FAIL", reply["message"]))
+                print(f"  {reply['message']}", flush=True)
+                continue
+            deadline = time.time() + give_up_minutes * 60
+            part = self.options.folder / (name + ".part")
+            while not target.exists():
+                if time.time() > deadline:
+                    sys.exit(f"{name} didn't arrive in {give_up_minutes} minutes")
+                if part.exists():
+                    print(f"  {part.stat().st_size / 1e6:.0f} MB so far", end="\r", flush=True)
+                time.sleep(5)
+            print(f"  received {name}" + " " * 20, flush=True)
+
+    def tool(self, script, arguments, label):
+        """Runs one of the analysis tools, keeps its report and returns its figures."""
+        output = self.options.folder / f"{label.replace(' ', '_')}_{self.stamp}.json"
+        command = [sys.executable, str(Path(__file__).with_name(script)), *arguments, "--json", str(output)]
+        print(f"{script}: {label}", flush=True)
+        run = subprocess.run(command, capture_output=True, text=True)
+        notes = "\n".join(line for line in run.stderr.splitlines() if not line.startswith("Reading "))
+        text = (run.stdout + ("\n" + notes if notes else "")).strip()
+        print("\n".join("  " + line for line in text.splitlines()), flush=True)
+        self.blocks.append((label, text))
+        return json.loads(output.read_text()) if output.exists() else {}
+
+    def measure(self, step):
+        take = self.options.folder / self.file_name("take")
+        arguments = [str(take), "--lenses", str(self.options.folder)]
+        if step["measure"].get("copy"):
+            arguments += ["--copy", str(self.options.folder / self.file_name("copy"))]
+        label = step.get("label", "measure " + take.stem)
+        figures = self.tool("measure_steady.py", arguments, label)
+        if "expect" in step:
+            self.expect(label, figures, step["expect"])
+
+    def read_session_log(self, step):
+        asked = time.time()
+        self.ask({"action": "sendLog"})
+        deadline = asked + 120
+        while True:
+            logs = [p for p in self.options.folder.glob("session_*.log") if p.stat().st_mtime >= asked - 2]
+            if logs or time.time() > deadline:
+                break
+            time.sleep(2)
+        if not logs:
+            self.checks.append(("session log", "FAIL", "it didn't arrive"))
+            return
+        log = max(logs, key=lambda p: p.stat().st_mtime)
+        label = step.get("label", "session log")
+        summary = self.tool("read_log.py", [str(log)], label)
+        figures = {
+            "flaggedTakes": sum(1 for t in summary.get("takes", []) if t.get("flagged")),
+            "problems": len(summary.get("problems", [])),
+            "pausedAfterReturn": sum(1 for r in summary.get("returns", []) if r.get("pausedAfter") is not None),
+            "returns": len(summary.get("returns", [])),
+            "drags": len(summary.get("drags", [])),
+            "app": summary.get("app"),
+        }
+        if "expect" in step:
+            self.expect(label, figures, step["expect"])
+
+    def levels(self, step):
+        """The copy's darkest tenth and darkest pixel, in 8-bit codes, averaged over two frames a
+        second, from ffmpeg's signalstats."""
+        name = self.file_name("copy")
+        self.fetch(["copy"])
+        run = subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", str(self.options.folder / name), "-vf",
+             "fps=2,format=yuv420p,signalstats,metadata=print:file=-", "-f", "null", "-"],
+            capture_output=True, text=True)
+        readings = {"YLOW": [], "YMIN": [], "YAVG": []}
+        for line in run.stdout.splitlines():
+            key, _, value = line.partition("=")
+            key = key.rsplit(".", 1)[-1]
+            if key in readings:
+                readings[key].append(float(value))
+        if not readings["YLOW"]:
+            self.checks.append((f"levels {step['levels']}", "FAIL", f"ffmpeg read nothing from {name}"))
+            return
+        figures = {key.lower(): sum(v) / len(v) for key, v in readings.items()}
+        if not hasattr(self, "level_sets"):
+            self.level_sets = {}
+        self.level_sets[step["levels"]] = figures
+        print(f"levels {step['levels']}: {name} darkest tenth {figures['ylow']:.1f}, darkest {figures['ymin']:.1f}, "
+              f"mean {figures['yavg']:.1f}", flush=True)
+        if "against" in step:
+            base = self.level_sets.get(step["against"])
+            if base:
+                figures["darkLift"] = figures["ylow"] - base["ylow"]
+                figures["blackLift"] = figures["ymin"] - base["ymin"]
+        if "expect" in step:
+            self.expect(step.get("label", f"levels {step['levels']}"), figures, step["expect"])
+
+    def same(self, fields, label):
+        take = json.loads((self.options.folder / self.file_name("take.json")).read_text())
+        copy = json.loads((self.options.folder / self.file_name("copy.json")).read_text())
+        for field in fields:
+            a, b = take.get(field, take.get("metadata", {}).get(field)), copy.get(field, copy.get("metadata", {}).get(field))
+            verdict = "PASS" if a == b else "FAIL"
+            self.checks.append((label, verdict, f"{field}: take {a}, copy {b}"))
+            print(f"  {verdict} {field}: take {a}, copy {b}", flush=True)
+
+    def needs(self, version):
+        have = self.ask({"action": "status"})["values"].get("app", "")
+        if not have or version_tuple(have) < version_tuple(version):
+            sys.exit(f"This round needs VibeLog {version} or later; the phone has {have or 'an older one'}")
+        print(f"app {have}", flush=True)
+
+    def restore(self):
+        if self.original:
+            print("putting back: " + ", ".join(f"{k} = {v}" for k, v in self.original.items()), flush=True)
+            self.set_values(self.original, restoring=True)
+
+    def write_report(self, plan):
+        path = self.options.folder / f"round_{self.stamp}.md"
+        passed = sum(1 for _, v, _ in self.checks if v == "PASS")
+        failed = sum(1 for _, v, _ in self.checks if v == "FAIL")
+        lines = [f"# Round {plan}, {self.stamp}", "", f"{passed} passed, {failed} failed.", ""]
+        if self.checks:
+            lines += ["| Step | Verdict | Detail |", "|---|---|---|"]
+            lines += [f"| {label} | {verdict} | {detail} |" for label, verdict, detail in self.checks]
+            lines.append("")
+        if self.questions:
+            lines += ["## For a person", ""] + [f"- {q}" for q in self.questions] + [""]
+        for title, text in self.blocks:
+            lines += [f"## {title}", "", "```", text, "```", ""]
+        path.write_text("\n".join(lines), encoding="utf-8")
+        print(f"report: {path}\n{passed} passed, {failed} failed", flush=True)
+
+    def step(self, step):
+        if "needs" in step:
+            pass
+        elif "set" in step:
+            self.set_values(step["set"])
+        elif "take" in step:
+            self.take(step["take"], step.get("label", "take"), step.get("expect"))
+        elif "cool" in step:
+            self.cool(step["cool"])
+        elif "wait" in step:
+            time.sleep(step["wait"])
+        elif "export" in step:
+            self.export(step["export"], step.get("label", "export"), step.get("expect"), step.get("of", "newest"))
+        elif "fetch" in step:
+            self.fetch(step["fetch"])
+        elif "levels" in step:
+            self.levels(step)
+        elif "same" in step:
+            self.same(step["same"], step.get("label", "sidecars"))
+        elif "measure" in step:
+            self.measure(step)
+        elif "log" in step:
+            self.read_session_log(step)
+        elif "use" in step:
+            self.last_take = step["use"]
+            print(f"take: {self.last_take}, already on the phone", flush=True)
+        elif "pause" in step:
+            input(f"\n>>> {step['pause']}\n    Press Enter when done. ")
+        elif "ask" in step:
+            self.questions.append(step["ask"])
+            print(f"for a person: {step['ask']}", flush=True)
+        else:
+            sys.exit(f"Unknown step: {step}")
+
     def check(self, steps):
         """Stops before anything runs, rather than partway through a long plan."""
         values = self.ask({"action": "status"})["values"]
@@ -524,21 +778,18 @@ class Suite:
         if float(values.get("freeGB", 0)) < needed:
             sys.exit(f"The phone needs about {needed:.0f} GB free and has {values.get('freeGB')} GB")
 
-    def run(self, steps):
-        self.check(steps)
+    def run(self, steps, plan=""):
         for step in steps:
-            if "set" in step:
-                self.set_values(step["set"])
-            elif "take" in step:
-                self.take(step["take"], step.get("label", "take"))
-            elif "cool" in step:
-                self.cool(step["cool"])
-            elif "wait" in step:
-                time.sleep(step["wait"])
-            elif "export" in step:
-                self.export(step["export"], step.get("label", "export"))
-            else:
-                sys.exit(f"Unknown step: {step}")
+            if "needs" in step:
+                self.needs(step["needs"])
+        self.check(steps)
+        try:
+            for step in steps:
+                self.step(step)
+        finally:
+            if self.round:
+                self.restore()
+                self.write_report(plan)
         print(f"results: {self.results.name}\nheat: {self.heat.name}", flush=True)
         if self.exports:
             self.collect()
@@ -546,8 +797,31 @@ class Suite:
             print(f"exports: {self.exports.name}, {counts['saved']} saved, {counts['failed']} failed", flush=True)
 
 
+def version_tuple(text):
+    return tuple(int(part) for part in re.findall(r"\d+", text)[:3])
+
+
+def judge(actual, wanted):
+    """True, False, or None when it can't be judged. wanted is a value, or a string such as
+    "<=2", ">=29.5", "<0.4", "==saved" or "!=0"."""
+    if actual is None:
+        return None
+    match = re.fullmatch(r"\s*(<=|>=|==|!=|<|>)\s*(.+)", str(wanted)) if isinstance(wanted, str) else None
+    op, target = (match.group(1), match.group(2)) if match else ("==", wanted)
+    try:
+        a, b = float(actual), float(target)
+    except (TypeError, ValueError):
+        a, b = str(actual), str(target)
+    return {"<=": a <= b, ">=": a >= b, "<": a < b, ">": a > b, "==": a == b, "!=": a != b}[op]
+
+
 def suite(options):
-    Suite(options).run(json.loads(Path(options.plan).read_text()))
+    Suite(options).run(json.loads(Path(options.plan).read_text()), options.plan.stem)
+
+
+def round_(options):
+    options.round = True
+    suite(options)
 
 
 def main():
@@ -570,6 +844,10 @@ def main():
     suiting.add_argument("plan", type=Path)
     suiting.add_argument("--timeout", type=float, default=30)
     suiting.set_defaults(run=suite)
+    rounding = commands.add_parser("round", help="a suite that checks results, puts settings back and writes a report")
+    rounding.add_argument("plan", type=Path)
+    rounding.add_argument("--timeout", type=float, default=30)
+    rounding.set_defaults(run=round_)
     options = parser.parse_args()
     options.run(options)
 

@@ -3160,3 +3160,83 @@ final class SteadyPathTests: XCTestCase {
     }
 }
 
+
+final class LogSharingTests: XCTestCase {
+    private let salt = "0123456789abcdef"
+
+    func testDatesBecomeTheSameCodeEverywhere() {
+        let code = LogSanitizer.code(for: "20261112_140255", salt: salt)
+        XCTAssertEqual(code.count, 8)
+        let log = "I VIDEO RESULT video_20261112_140255.mov: HEVC, then video_20261112_140255_look.mov"
+        let clean = LogSanitizer.clean(log, salt: salt)
+        XCTAssertFalse(clean.contains("20261112"))
+        XCTAssertEqual(clean, "I VIDEO RESULT video_\(code).mov: HEVC, then video_\(code)_look.mov")
+        XCTAssertEqual(LogSanitizer.uploadName(for: "videos/video_20261112_140255.mov.json", salt: salt),
+                       "video_\(code).mov.json")
+        XCTAssertNotEqual(LogSanitizer.code(for: "20261112_140255", salt: "another salt"), code)
+    }
+
+    func testAddressesDatesAndNamesAreRemoved() {
+        let text = """
+        13:48:11.454 W Test link connecting over the internet, to 5991-2001-f00.ngrok-free.app
+        Server: http://192.168.1.148:8765/next and 172.20.10.4
+        "measured" : "2026-11-12T11:56:15Z",
+        timestamp,1794484976
+        Built My Secret Grade · Apple Log 2, preset Joona's Night
+        version 26.6.2, fov:68.157, 0.0001243470120243728
+        """
+        let clean = LogSanitizer.clean(text, salt: salt, privateNames: ["My Secret Grade", "Joona's Night", "ab"])
+        for gone in ["ngrok", "192.168", "172.20", "2026-11-12", "1794484976", "My Secret", "Joona"] {
+            XCTAssertFalse(clean.contains(gone), gone)
+        }
+        for kept in ["13:48:11.454", "timestamp,0", "Apple Log 2", "26.6.2", "68.157", "0.0001243470120243728", "<name"] {
+            XCTAssertTrue(clean.contains(kept), kept)
+        }
+    }
+
+    func testOnlySmallTextFilesAreCandidates() throws {
+        let documents = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: documents) }
+        let files = [
+            "logs/session_20261112_134734.log", "logs/exports.csv", "videos/video_20261112_140255.mov",
+            "videos/video_20261112_140255.mov.json", "videos/video_20261112_140255.gcsv",
+            "probes/probe_1.txt", "probes/still.jpg", "lenses/iPhone15,2/back-wide-4032x3024.json",
+            "capture_support.json", "VibeLog.config.json",
+        ]
+        for path in files {
+            let url = documents.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("x".utf8).write(to: url)
+        }
+        let without = LogSharing.candidates(documents: documents, gyro: false).map(\.path)
+        XCTAssertEqual(Set(without), [
+            "logs/session_20261112_134734.log", "logs/exports.csv", "videos/video_20261112_140255.mov.json",
+            "probes/probe_1.txt", "lenses/iPhone15,2/back-wide-4032x3024.json", "capture_support.json",
+        ])
+        let with = LogSharing.candidates(documents: documents, gyro: true).map(\.path)
+        XCTAssertTrue(with.contains("videos/video_20261112_140255.gcsv"))
+        XCTAssertEqual(LogSanitizer.uploadName(for: "lenses/iPhone15,2/back-wide-4032x3024.json", salt: salt),
+                       "lenses_back-wide-4032x3024.json")
+    }
+
+    func testOnlyChangedFilesGoInBoundedBatches() {
+        let files = [LogShareFile(path: "a", size: 10), LogShareFile(path: "b", size: 20), LogShareFile(path: "c", size: 15)]
+        XCTAssertEqual(LogSharing.changed(files, sent: ["a": 10, "b": 5]).map(\.path), ["b", "c"])
+        XCTAssertEqual(LogSharing.batches(files, limit: 30).map { $0.map(\.path) }, [["a", "b"], ["c"]])
+    }
+
+    func testSettingsSurviveAMissingField() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data(#"{"on": true, "inviteCode": "abc123"}"#.utf8).write(to: url)
+        let loaded = LogSharingSettings.load(from: url)
+        XCTAssertTrue(loaded.on)
+        XCTAssertEqual(loaded.inviteCode, "abc123")
+        XCTAssertFalse(loaded.gyro)
+        XCTAssertEqual(loaded.installID.count, 36)
+        var fresh = loaded
+        fresh.startAfresh()
+        XCTAssertNotEqual(fresh.installID, loaded.installID)
+        XCTAssertNotEqual(fresh.salt, loaded.salt)
+    }
+}

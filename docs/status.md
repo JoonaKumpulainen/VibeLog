@@ -170,6 +170,9 @@ In rough order of what's most useful next:
   - Every line comes from this phone's own measurement, never a model name, by the rules in
     [decisions/per-phone-fitting.md](decisions/per-phone-fitting.md). A new iOS version measures
     again, as now.
+- **Automated testing, agreed:** scripts decide results, a round runner on the server, guided
+  takes with movement cues, and **Calibrate stabilizer** built on them. See
+  [decisions/automated-testing.md](decisions/automated-testing.md); step 1 needs no build.
 - **Laggy sliders on the base iPhone 16:** the main-thread check, in 0.1.116, ruled out a busy
   main thread in Export. Test 7 now asks whether diagonal drags stick, which would mean the
   form's scroll takes them. The viewfinder's draw stays on the main thread: it held it 0.2 to

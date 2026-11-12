@@ -11,8 +11,9 @@ from the app completely.
 
 - The link is off at every launch, and only you can turn it on, in Diagnostics. The server can't
   turn it on.
-- If you never turn it on, the app sends nothing. There are no accounts, analytics or cloud
-  services, and the test link is the only network code in the app.
+- If you never turn it on, the app sends nothing through it. There are no accounts or analytics.
+  The only other network code is **Log sharing**, also off until you turn it on: see
+  [decisions/log-service.md](decisions/log-service.md).
 - For full privacy, you can leave it off, deny Local Network permission or build the app without it.
 
 ## What the link can do
@@ -179,6 +180,29 @@ python3 tools/test_server.py suite tools/suites/export_matrix_2.json
 
 Part 1 covers Apple Log, Apple Log 2, S-Log3 and S-Log2, and part 2 covers LogC3, LogC4 and Canon
 Log 3. Between parts, delete the takes in the library if the phone is short of room.
+
+### Rounds: tests that check themselves
+
+A round is a suite that also judges its results, fetches what it needs, runs the analysis tools
+and puts back every setting it changed, even after a failure. It writes `round_*.md` in the
+results folder: each check as PASS or FAIL with its figure, the questions left for a person, and
+the tools' reports. A round needs 0.1.117 or later, which reports its version and newest take.
+
+```bash
+python3 tools/test_server.py round tools/rounds/2026-11-13.json
+```
+
+Steps that need a person, such as pointing the phone at a scene or walking with it, wait for
+Enter on this computer. The step types are listed in the `Suite` class in `tools/test_server.py`.
+The analysis tools also run on their own:
+
+```bash
+python3 tools/measure_steady.py ~/VibeLogTest/video_20261112_140255.mov --copy ~/VibeLogTest/video_20261112_140255_look.mov
+```
+
+```bash
+python3 tools/read_log.py ~/VibeLogTest/session_20261112_134734.log
+```
 
 `send status` also reports which screen is open and why the camera is busy. A wrong setting replies
 with the values it accepts. `send` and `suite` only work from the computer running the server.
@@ -494,7 +518,8 @@ This should print nothing:
 grep -rnE 'testLink|TestLink|testServer|testToken|testSends|sessionStamp|TestCommand|TestReply|sendTakeFiles|sendTimingFile|sendPreview|updateTestLink|takeSeconds|testExport|openScreen|NSLocalNetwork|NSAllowsLocalNetworking' App Modules Tests project.yml
 ```
 
-This should print nothing too, which confirms the app has no network code left:
+After also removing **Log sharing**, as [decisions/log-service.md](decisions/log-service.md)
+says, this should print nothing too, which confirms the app has no network code left:
 
 ```bash
 grep -rlE 'URLSession|URLRequest|NWConnection|NWListener|WebSocket' App Modules

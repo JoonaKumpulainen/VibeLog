@@ -60,6 +60,8 @@ final class AppModel: ObservableObject {
     @Published var isRecording = false
     @Published var isBusy: String?
     @Published var lastResult: String?
+    /// The newest take's file name, which the test link reports so a round can fetch it.
+    var lastTakeFile = ""
     /// A short message on the camera screen. Tapping it clears it.
     @Published var notice: String?
     @Published var takeAlert: TakeAlert?
@@ -377,6 +379,8 @@ final class AppModel: ObservableObject {
     /// What the link reports as open: camera, settings or diagnostics.
     private(set) var openScreen = "camera"
     let testLink = TestLink()
+    /// Sends test logs to the owner's log service, once the tester turns it on in Diagnostics.
+    let logUploader = LogUploader()
     /// Bakes the takes the test link asks for, one at a time. Only touched on the main thread.
     private(set) lazy var testExport: LookExportJob = MainActor.assumeIsolated { LookExportJob() }
     /// The preset the app opens with. Empty keeps the last choices used.
@@ -433,6 +437,8 @@ final class AppModel: ObservableObject {
     /// The camera screen opens live, so the first configuration starts the stream.
     private var startStreamAfterConfigure = true
     private var resumeInForeground = false
+    /// When the app last left the screen, so returning can log how long it was away.
+    private var backgroundSince: Date?
     private var hasReference = false
     private var pendingControls: Set<Control> = []
     private var recordingFile: URL?
@@ -491,6 +497,8 @@ final class AppModel: ObservableObject {
             Log.shared.info("Capture setup for \(captureSupport.device): \(captureSupport.setup.label)")
         }
         loadLastTake()
+        // The previous session's logs go once the camera has settled, if sharing is on.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in self?.shareLogs("launch") }
         router.onRecordingElapsed = { [weak self] in
             DispatchQueue.main.async { self?.stopRecording() }
         }
@@ -546,15 +554,41 @@ final class AppModel: ObservableObject {
     }
 
     func enteredBackground() {
+        backgroundSince = Date()
+        Log.shared.info("Left the app" + (isRecording ? " during a take" : "") + (isStreaming ? ", camera streaming" : ""))
         if isRecording { stopRecording() }
         resumeInForeground = isStreaming
         if isStreaming { toggleStream() }
+        // A take that just stopped finishes writing first, then the logs go, with the few
+        // seconds iOS gives an app on its way out.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self else { return }
+            var task = UIBackgroundTaskIdentifier.invalid
+            task = UIApplication.shared.beginBackgroundTask(withName: "Log sharing") {
+                UIApplication.shared.endBackgroundTask(task)
+            }
+            self.shareLogs("left the app") { UIApplication.shared.endBackgroundTask(task) }
+        }
+    }
+
+    /// The names the owner typed, which log sharing takes out of every file.
+    var privateNames: [String] {
+        presets.map(\.name) + savedStyles.map(\.name) + lutNames + lutNames.map { ($0 as NSString).deletingPathExtension }
+    }
+
+    func shareLogs(_ reason: String, completion: (() -> Void)? = nil) {
+        logUploader.sendIfDue(recording: isRecording, names: privateNames, reason: reason, completion: completion)
     }
 
     func enteredForeground() {
         // Time away isn't idle time on the camera. Without this, coming back after two minutes
         // restarted the stream and the idle pause stopped it again within a second.
         lastTouch = Date()
+        if let since = backgroundSince {
+            Log.shared.info(String(format: "Returned to the app after %.0f s away", Date().timeIntervalSince(since))
+                + (resumeInForeground ? ", restarting the camera" : ""))
+            backgroundSince = nil
+        }
         guard resumeInForeground else { return }
         resumeInForeground = false
         if !isStreaming { toggleStream() }
@@ -1970,7 +2004,7 @@ final class AppModel: ObservableObject {
                 }
             }
             if saveGyroLog {
-                let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-"
+                let version = SystemStatus.appVersion
                 motion.start(url: TakeLibrary.gyroLog(for: url), videoName: url.lastPathComponent, version: version)
                 encoder.onFirstFrame = { [motion] seconds in motion.setFirstFrame(seconds: seconds) }
             }
@@ -2056,6 +2090,7 @@ final class AppModel: ObservableObject {
                 Log.shared.error("VIDEO FAILED \(result.file): \(failure)")
             }
             Log.shared.info("VIDEO RESULT \(result.file): \(summary)")
+            lastTakeFile = result.file
             lastResult = summary
             guard result.framesWritten > 0 else {
                 testLink.holdFiles(false)

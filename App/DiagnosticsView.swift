@@ -67,6 +67,7 @@ struct DiagnosticsView: View {
                     ? "Lets a computer elsewhere change settings, start takes, take stills of what the camera sees and fetch files, through an https:// tunnel such as ngrok, whose servers see everything sent. Only connect to a server you trust, with its long token. Off at every launch."
                     : "Lets your computer change settings and start takes, using tools/test_server.py. It can't delete takes, and videos only go when asked for. Off at every launch. Plain HTTP, so use it on your own network.")
             }
+            LogSharingSection(uploader: model.logUploader) { model.shareLogs("asked") }
             Section("Capture") {
                 Picker("Method", selection: $model.method) {
                     ForEach(CaptureMethod.allCases) { Text($0.label).tag($0) }
@@ -191,5 +192,52 @@ struct DebugOverlay: View {
 
     private func line(_ text: String) -> some View {
         Text(text).lineLimit(1).minimumScaleFactor(0.7)
+    }
+}
+
+/// Opt-in sharing of test logs with the owner's log service. See docs/decisions/log-service.md.
+private struct LogSharingSection: View {
+    @ObservedObject var uploader: LogUploader
+    let sendNow: () -> Void
+    @State private var asksFirst = false
+
+    private func binding<T>(_ key: WritableKeyPath<LogSharingSettings, T>) -> Binding<T> {
+        Binding(get: { uploader.settings[keyPath: key] }, set: { value in uploader.update { $0[keyPath: key] = value } })
+    }
+
+    var body: some View {
+        Section {
+            Toggle("Share test logs", isOn: Binding(
+                get: { uploader.settings.on },
+                set: { on in if on { asksFirst = true } else { uploader.update { $0.on = false } } }))
+            if uploader.settings.on {
+                TextField("Server, as https://…", text: binding(\.server))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                SecureField("Invite code", text: binding(\.inviteCode))
+                Toggle("Include gyro logs", isOn: binding(\.gyro))
+                LabeledContent("State", value: uploader.stateText)
+                // The first part of the random ID, to quote when asking for uploads to be deleted.
+                LabeledContent("Anonymous ID", value: String(uploader.settings.installID.prefix(8)))
+                    .textSelection(.enabled)
+                if let last = uploader.settings.lastUpload {
+                    LabeledContent("Last sent", value: last.formatted(date: .abbreviated, time: .shortened))
+                }
+                Button("Send now", action: sendNow)
+                    .disabled(uploader.busy)
+                Button("New anonymous ID") { uploader.update { $0.startAfresh() } }
+            }
+        } header: {
+            Text("Log sharing")
+        } footer: {
+            Text("Sends session logs, take details, test reports and lens profiles to the VibeLog test service, on Wi-Fi and never during a take. Never videos, stills or what the camera sees. Dates, network addresses and names you typed are taken out first, and the phone is known only by a random ID. Gyro logs, which describe how the phone moved, only go with their switch on.")
+        }
+        .alert("Share test logs?", isPresented: $asksFirst) {
+            Button("Share") { uploader.update { $0.on = true } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Your phone model, iOS and app versions, settings, frame counts, heat and errors go to the VibeLog test service, with a random ID instead of anything about you. You can turn it off, or start a new ID, at any time.")
+        }
     }
 }
