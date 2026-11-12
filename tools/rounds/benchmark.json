@@ -1,5 +1,5 @@
 [
-  {"needs": "0.1.128"},
+  {"needs": "0.1.129"},
   {"pause": "Benchmark: the phone lies still on a table, pointing at anything, for about 6 minutes."},
   {"run": "benchmark", "until": {"benchmark": "finished"}, "minutes": 15, "label": "Benchmark"},
   {"status": {"benchmark": "~finished", "encoderLimits": "~Camera stopped", "gpuLimits": "~setups timed"}, "label": "Benchmark results"},
