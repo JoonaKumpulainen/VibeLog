@@ -50,11 +50,12 @@ struct DiagnosticsView: View {
                 }
             }
             Section {
-                TextField("Server, as 192.168.1.20:8765 or https://…", text: $model.testServer)
+                TextField(model.testOverInternet ? "Server, as https://…" : "Server, as 192.168.1.20:8765", text: $model.testServer)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
                 SecureField("Token", text: $model.testToken)
+                Toggle("Over the internet", isOn: $model.testOverInternet)
                 Toggle("Connect", isOn: $model.testLinkOn)
                 LabeledContent("State", value: model.testLinkState)
                 Toggle("Send logs and sidecars after each take", isOn: $model.testSendsResults)
@@ -62,7 +63,9 @@ struct DiagnosticsView: View {
             } header: {
                 Text("Test link")
             } footer: {
-                Text("Lets your computer change settings and start takes, using tools/test_server.py. It can't delete takes, and videos only go when asked for. Off at every launch. Plain HTTP, so use it on your own network.")
+                Text(model.testOverInternet
+                    ? "Lets a computer elsewhere change settings, start takes, take stills of what the camera sees and fetch files, through an https:// tunnel such as ngrok, whose servers see everything sent. Only connect to a server you trust, with its long token. Off at every launch."
+                    : "Lets your computer change settings and start takes, using tools/test_server.py. It can't delete takes, and videos only go when asked for. Off at every launch. Plain HTTP, so use it on your own network.")
             }
             Section("Capture") {
                 Picker("Method", selection: $model.method) {

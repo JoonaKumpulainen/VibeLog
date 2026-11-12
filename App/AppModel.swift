@@ -366,6 +366,11 @@ final class AppModel: ObservableObject {
     @Published var testServer = ""
     @Published var testToken = ""
     @Published var testLinkOn = false { didSet { if testLinkOn != oldValue { updateTestLink() } } }
+    /// A server reached through a tunnel such as ngrok, by its https:// address. Off at every launch,
+    /// like the link, kept out of presets, and never set from the server. Switching it disconnects.
+    @Published var testOverInternet = false {
+        didSet { if testOverInternet != oldValue, testLinkOn { testLinkOn = false } }
+    }
     @Published var testLinkState = "Off"
     @Published var testSendsResults = true
     @Published var testSendsGyro = true
@@ -450,6 +455,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var idlePaused = false
     /// A dial or panel is open, which counts as using the camera.
     var isCameraControlOpen = false
+    /// Logs when the main thread answers late, and on which screen.
+    private let mainWatch = MainThreadWatch()
     /// Names the log the test link sends, so one session keeps one file.
     let sessionStamp = Storage.timestamp()
     private let statsQueue = DispatchQueue(label: "vibelog.stats", qos: .utility)
@@ -458,6 +465,18 @@ final class AppModel: ObservableObject {
         guard !started else { return }
         started = true
         router.pipeline = pipeline
+        mainWatch.screen = { [unowned self] in
+            if playingTake != nil { return "player" }
+            if openScreen == "camera", isCameraControlOpen { return "camera with a panel open" }
+            return openScreen
+        }
+        mainWatch.drawSummary = { [weak pipeline] in
+            guard let stats = pipeline?.currentStats(), stats.mainDrawMaxMs > 0 else { return nil }
+            return String(
+                format: "viewfinder draw on the main thread %.1f ms recently, %.0f ms at most",
+                stats.mainDrawMs, stats.mainDrawMaxMs)
+        }
+        mainWatch.start()
         SystemStatus.enableBatteryMonitoring()
         refreshLUTs()
         loadConfig()

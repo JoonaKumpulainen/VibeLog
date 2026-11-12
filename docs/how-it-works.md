@@ -96,7 +96,7 @@ stays out, so a preset never brings back a choice made for another scene.
 | Viewfinder | ISP preview, look and **LUT made for**, the look's grade, COLOR and FX, **Overlay scope channels**, freeze during a take, peaking sensitivity, frame guide, desqueeze, **Pause camera when idle** | Yes |
 | Tools | Monitoring tools, zebras and false color | Yes |
 | The shot | Lens, shutter, ISO, shutter priority, white balance, tint, focus, exposure bias, punch-in position | No, these belong to the scene |
-| Test link | Server, token, connection, send switches | No, private to the device |
+| Test link | Server, token, connection, **Over the internet**, send switches | No, private to the device |
 | Diagnostics | Capture method, RAW and photo formats, **Encode video**, **Write frames to disk**, **Log capture timing** | No, they're for test runs and reset at launch |
 | Interface | **FINE** on the dials, debug overlay | No, they're saved on the device apart from settings |
 | Presets | The presets and the default, and saved styles | No, they're libraries kept beside the settings |
@@ -190,7 +190,8 @@ and removing it. It's off at every launch, and can't be switched on from the ser
 - **Limits:** the app only acts on the fixed list in `App/TestCommands.swift`. Nothing there deletes
   a take. Only tools, look and punch-in change during a take. Files wait until a take ends, and
   videos only go by `sendFile`. It's plain HTTP with a token, so it suits a private network only,
-  apart from `serve --public` behind an ngrok tunnel, with its long token and lockouts.
+  apart from `serve --public` behind an ngrok tunnel, with its long token and lockouts, which the
+  app reaches only with **Over the internet** on.
   The phone must be awake, with VibeLog open, and someone must point it at the scene.
 - **Cost:** one idle request stays open during a take, on its own queue. 40-second takes lost
   nothing with it connected, but no take has compared it with the link off.

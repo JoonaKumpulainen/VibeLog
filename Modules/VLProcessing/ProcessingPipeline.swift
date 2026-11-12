@@ -199,6 +199,10 @@ public struct PipelineStats: Sendable {
     public var queueMs = 0.0
     public var appendMs = 0.0
     public var drawMs = 0.0
+    /// How long the viewfinder's draw holds the main thread, recent and at most since the stream
+    /// started. `drawMs` is the GPU's time for it.
+    public var mainDrawMs = 0.0
+    public var mainDrawMaxMs = 0.0
     public var gpuLastMs = 0.0
     public var gpuAverageMs = 0.0
     public var gpuRecentMs = 0.0
@@ -1262,7 +1266,14 @@ public final class ProcessingPipeline: NSObject {
         lock.unlock()
         guard schedule else { return }
         DispatchQueue.main.async { [weak self] in
-            self?.view?.draw()
+            guard let self else { return }
+            let start = CFAbsoluteTimeGetCurrent()
+            self.view?.draw()
+            let milliseconds = (CFAbsoluteTimeGetCurrent() - start) * 1000
+            self.lock.lock()
+            self.stats.mainDrawMs = self.stats.mainDrawMs * 0.95 + milliseconds * 0.05
+            self.stats.mainDrawMaxMs = max(self.stats.mainDrawMaxMs, milliseconds)
+            self.lock.unlock()
         }
     }
 

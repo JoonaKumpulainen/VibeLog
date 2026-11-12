@@ -22,12 +22,17 @@ extension AppModel {
             testLink.stop()
             return
         }
-        guard let base = TestLinkAddress.base(testServer), !testToken.isEmpty else {
-            testLinkState = "Needs a server and a token"
+        guard let base = TestLinkAddress.base(testServer, overInternet: testOverInternet), !testToken.isEmpty else {
+            let secure = testServer.trimmingCharacters(in: .whitespaces).lowercased().hasPrefix("https://")
+            testLinkState = testServer.isEmpty || testToken.isEmpty ? "Needs a server and a token"
+                : testOverInternet && !secure ? "Over the internet needs an https:// address"
+                : !testOverInternet && secure ? "An https:// address needs Over the internet on"
+                : "Needs a server and a token"
             testLinkOn = false
             return
         }
-        testLink.start(base: base, token: testToken)
+        if testOverInternet { Log.shared.warn("Test link connecting over the internet, to \(base.host ?? "?")") }
+        testLink.start(base: base, token: testToken, overInternet: testOverInternet)
     }
 
     /// Sends what's selected in Diagnostics. Videos only go when asked for by name.

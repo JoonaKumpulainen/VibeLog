@@ -7,7 +7,7 @@ Rewrite this file when a new round of tests is planned, and move the results to
 
 ## Before you start
 
-- **Install 0.1.115 or later.** SideStore should offer it as an update. If it doesn't, install
+- **Install 0.1.116 or later.** SideStore should offer it as an update. If it doesn't, install
   the `.ipa` from the latest green build. Say which version you tested; SideStore shows it.
 - **Charge to at least 50%,** and let the phone cool for a few minutes if it was hot.
 - **Where the files are:** Files app, **On My iPhone**, **VibeLog**. Takes are in `videos/`:
@@ -17,13 +17,14 @@ Rewrite this file when a new round of tests is planned, and move the results to
 - **Sending files:** select them in Files and share by AirDrop, or upload them to a shared
   folder. A take's `.mov` is large: for the stabilization tests, keep takes short, 20 to 30
   seconds. On the 14 Pro, plugging into the owner's computer or the test link also works.
-- **Through the test link instead:** on 0.1.115 a phone elsewhere can connect to the owner's
+- **Through the test link instead:** on 0.1.116 a phone elsewhere can connect to the owner's
   computer through ngrok, and the owner fetches files and runs the steps marked for the link.
   The owner sends the address and token privately. In Settings, **Advanced**, **Diagnostics**,
-  enter the whole `https://` address as the server and the token, and turn on **Connect**.
+  turn on **Over the internet**, enter the whole `https://` address as the server and the token,
+  and turn on **Connect**.
   While connected, the owner's computer can start takes, take stills of what the camera sees
-  and fetch files, and the files pass through ngrok's servers. Turn **Connect** off and clear
-  both fields when done.
+  and fetch files, and the files pass through ngrok's servers. Turn **Connect** and **Over the
+  internet** off and clear both fields when done.
 - **Always send the session log** from `logs/` for the time of the tests, the newest
   `session_*.log`, even when a test looks fine.
 
@@ -158,10 +159,28 @@ before, whether the 0.5x still shakes, and whether an edge of the picture ever s
 **Send:** the three copies with their `.mov.json`, and the session log. With the test link on,
 the copies can be fetched instead.
 
+## Test 7: laggy sliders (base iPhone 16)
+
+0.1.116 logs when the main thread answers late, and how long the viewfinder's draws hold it, which
+is the suspected cause. Nothing about the sliders has changed yet.
+
+1. Open the camera, with the picture moving.
+2. Open **LOOK**, pick ACES 2.0, and drag **ADJUST**'s and **FX**'s sliders slowly and quickly for
+   about 30 seconds, noting when one refuses to move.
+3. Close the look panel and wait a full minute, so the log writes its summary.
+4. Open a log take, tap **Export**, and do the same with the grade editor's sliders for 30
+   seconds, then wait a minute there too.
+
+**Send:** a screen recording of steps 2 and 4, and the session log. Lines starting "Main thread"
+say how late it was and where; none at all means the main thread kept up and the cause is
+elsewhere.
+
 ## What the results decide
 
 - **Tests 1 to 3** close `eed6df9` and `8c7f7d5`, or show what's still wrong.
 - **Test 4** decides the fix for the 16: a timing offset or a flipped direction for that lens,
   saved per phone by the planned **Measure stabilizer**.
+- **Test 7** decides the slider fix: the viewfinder's draw moved off the main thread if its time
+  explains the stalls on the camera, or the export screen's redraws if the stalls are there.
 - **Tests 5 and 6** decide what comes after: lens distortion in the warp first if the edges bend
   while the middle stays steady, rolling-shutter correction first if lines lean in Take B.

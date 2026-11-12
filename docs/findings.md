@@ -556,6 +556,9 @@ an item from **Not verified** once it is.
   the base iPhone 16's ultra wide, Stabilize adds small fast shake, which reads as a timing or
   direction error, and that on the 14 Pro's ultra wide the edges shake and bend, which fits the
   missing lens distortion and rolling shutter. Neither is measured.
+- **Why the base iPhone 16's sliders lag:** the tester reported on 2026-11-12 that sliders
+  sometimes refuse to move while Liquid Glass shows them pressed. Suspected: the viewfinder
+  draws on the main thread, on a 60 Hz screen. The main-thread check logs it from 0.1.116.
 - **Returning to the app after two minutes away, after `eed6df9`:** the camera should keep
   streaming. In the iPhone 16's log of 2026-11-11 it started and the idle pause stopped it within
   a second, three times, so it needed a tap.

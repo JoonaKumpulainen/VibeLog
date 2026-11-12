@@ -18,6 +18,8 @@ final class TestLink {
     private let session: URLSession
     private var base: URL?
     private var token = ""
+    /// Through a tunnel such as ngrok, which needs a header to skip its warning page.
+    private var overInternet = false
     /// Each start gets a new number, so a request from before a stop ends its loop.
     private var generation = 0
     private var pending: [(name: String, source: Upload)] = []
@@ -36,11 +38,12 @@ final class TestLink {
         session = URLSession(configuration: configuration)
     }
 
-    func start(base: URL, token: String) {
+    func start(base: URL, token: String, overInternet: Bool = false) {
         queue.async { [self] in
             generation += 1
             self.base = base
             self.token = token
+            self.overInternet = overInternet
             report("Connecting")
             poll(generation)
         }
@@ -92,7 +95,7 @@ final class TestLink {
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         // ngrok's free tunnels can answer with a warning page instead of the server; this skips it.
-        request.setValue("1", forHTTPHeaderField: "ngrok-skip-browser-warning")
+        if overInternet { request.setValue("1", forHTTPHeaderField: "ngrok-skip-browser-warning") }
         return request
     }
 

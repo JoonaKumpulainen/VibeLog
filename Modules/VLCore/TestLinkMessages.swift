@@ -35,12 +35,14 @@ public struct TestReply: Codable, Equatable, Sendable {
 public enum TestLinkAddress {
     public static let defaultPort = 8765
 
-    /// Turns what was typed into a server URL. A bare address is plain HTTP on port 8765, which only
-    /// suits a private network. An `https://` address, such as a tunnel's, keeps HTTPS's own port.
-    public static func base(_ text: String) -> URL? {
+    /// Turns what was typed into a server URL. On the local network, a bare address is plain HTTP on
+    /// port 8765. Over the internet, only an `https://` address is taken, such as an ngrok tunnel's,
+    /// on HTTPS's own port, so a plain address never leaves the network by mistake.
+    public static func base(_ text: String, overInternet: Bool = false) -> URL? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let secure = trimmed.lowercased().hasPrefix("https://")
-        guard !trimmed.isEmpty, !trimmed.contains("://") || trimmed.lowercased().hasPrefix("http://") || secure
+        guard !trimmed.isEmpty, secure == overInternet,
+            overInternet || !trimmed.contains("://") || trimmed.lowercased().hasPrefix("http://")
         else { return nil }
         let withScheme = trimmed.contains("://") ? trimmed : "http://" + trimmed
         guard var parts = URLComponents(string: withScheme), parts.host?.isEmpty == false else { return nil }

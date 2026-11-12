@@ -44,7 +44,8 @@ Run 109 never started and can be ignored. Every session is in
 
 ## Waiting on the phone
 
-A phone elsewhere, such as the iPhone 16, can join the test link through ngrok on 0.1.115: see
+A phone elsewhere, such as the iPhone 16, can join the test link through ngrok with **Over the
+internet** on, from 0.1.116: see
 **A phone elsewhere, through ngrok** in [test-link.md](test-link.md).
 Files can be read straight from a phone plugged in here, under `/run/user/<uid>/gvfs/afc:*/`.
 The test server is `python3 tools/test_server.py serve`; the phone then needs **Connect** on in
@@ -87,6 +88,88 @@ In rough order of what's most useful next:
   correction off for a lens whose fit is poor; then lens distortion in the warp, from a Gyroflow
   calibration import for the ultra wide, which Apple gives no table for in RAW; then rolling
   shutter, once the readout time is measured.
+- **Notices, internal limits, fitted defaults and a rerun button from the first-launch
+  benchmark, proposed:** the app already
+  times every codec and size once per phone and iOS version (`EncoderSupport`), picks the first
+  launch's default from it, and warns before a take whose codec encoded under 30 fps. The owner
+  asked on 2026-11-12 to show the results:
+  - **In the format panel,** each codec and size marked by its measured rate: holds 30 fps with
+    room, at the limit (under 36 fps, the margin `bestDefault` uses), or too slow, with the
+    figure. On the base iPhone 16, ProRes 422 HQ at full size would read too slow, 17.7 fps.
+  - **A one-time notice after the benchmark,** in plain words: what this phone records best, and
+    what it can't, such as "ProRes is encoded in software here, so it can't hold 30 fps at full
+    size; HEVC 4:2:2 at 2880x2160 is the best fit". Kept in the take's details and Diagnostics.
+  - **Other measured limits in the same notice:** a capture setup off the standard one, such as
+    "fast capture off", and the lenses with RAW.
+  - **Nothing visible is locked:** every codec, size and setting the screens offer stays
+    pickable, whatever the benchmark says. A choice at or over the limit is marked and warned
+    about, nothing more. Presets and the test link apply what they hold, with the same warning.
+  - **What isn't in Settings is limited from it:** choices the app makes by itself follow the
+    measurement, such as the path a baked-FX take runs on, how often the monitor image and glow
+    are made during a take, the viewfinder's LUT size, the scope's rate, the export preview's
+    size and the capture setup, so a phone with less room gets the lighter internal setting
+    without anyone choosing it. A phone with room keeps today's internal settings, so the 14
+    Pro's proven Maximum quality setup stays as it is.
+  - **Defaults comply with the tests:** on the first launch, and after **Measure encoders
+    again**, every default, codec, size, pipeline and the hot paths, is set to what this phone
+    measured holding 30 fps with room. Only a setting nobody has touched moves, as `fitToPhone`
+    does for codec and size today, and the notice says what moved.
+  - **Measure encoders again:** one button in Settings, **Advanced**, **Diagnostics**, where
+    tests live by the design rules. It merges with the existing **Encoder test**, which only
+    writes a report today, so one run saves the report and updates the limits. It stops the
+    camera first and waits for nominal heat, since the first-launch check ran with the stream
+    open and a hot phone encodes slower, and it records the heat it ran at. The notice says
+    when the limits were measured, and offers a new measurement after an iOS update.
+  - **Quiet when there's room:** nothing shows for a setting that holds 30 fps with room to
+    spare. The format panel marks only the codecs and sizes at or over the limit, the warning
+    chip appears only when the current setup is at or over it, and the one-time notice is shown
+    only if a limit touches something this phone would otherwise offer.
+  - **Baked looks and FX count:** today's warning skips baked takes altogether. The judgement
+    should be of the whole setup a take would run: the codec the bake really writes, with
+    **Bake to ProRes** and HDR's HEVC, and the GPU work of the look, the grade and baked FX on
+    top of the debayer. The benchmark then also times the GPU for each setup, log, baked look,
+    baked look with FX, and HDR, on the path each really uses, as the existing GPU cost test
+    does, and the encoder and GPU limits are judged together.
+  - **Calibrated against takes, not the cost test alone:** a take's GPU time reads two to three
+    times its isolated cost on the 14 Pro, and baked FX on the Maximum path fell behind after
+    about two minutes while the Efficient path held 20. So the GPU limit is set from the
+    measured cost times a margin taken from those takes, and is trusted for the app's own
+    internal choices and defaults only once a long take on a second phone confirms it.
+  - **What the benchmark measures,** once per phone and iOS version, about 4 to 5 minutes with
+    the phone lying still, pointed at any scene:
+    1. **Capture per lens,** about 10 s of RAW on each, counting fps, missed, duplicates and
+       stalls, and trying the capture setups in order: the setup per lens is known before first
+       use, so the base 16 skips its 12 s of stalls. 30 to 60 s.
+    2. **Lens profiles,** **Measure Lenses** as today, which Stabilize needs. 20 to 30 s.
+    3. **Encoders,** every codec and size as today, longer, with the camera stopped and at
+       nominal heat, plus the 10-bit HEVC control the 12-bit check still owes. 1 to 2 minutes.
+    4. **GPU per setup,** the GPU cost test on each path: Maximum and Efficient, both debayers,
+       baked look, baked FX, HDR and the scope. About a minute.
+    5. **Two or three real 20 s takes** of the best candidates, camera, GPU and encoder
+       together, to a scratch file deleted after: the separate trials miss what only shows
+       together, as full-size ProRes on the 16 looked fine for 6 s and then lost half its frames.
+       About a minute.
+    6. **The probe, quietly:** formats, RAW types, stabilizer switches, and video formats for
+       the native log mode. Under a minute.
+    7. **Read, not tested:** the screen's refresh rate, for the viewfinder's draw rate, and free
+       space.
+  - **Left to real takes:** heat endurance, which would take 10 minutes or more and heat the
+    phone, so each long take's heat and GPU history adjusts the internal choices instead; write
+    speed past 8 GB, keeping the 10 GB stop; and anything needing movement or a target,
+    stabilizer timing and direction, the optics' share, readout time and a colour chart, which
+    could become an optional guided step once Measure stabilizer exists.
+  - **How it runs:** offered at first launch and after an iOS update, never started unasked. It
+    asks for the phone lying still, at 50% battery or more, nominal heat and preferably
+    unplugged. Each step shows, it can be cancelled, a cancelled run resumes where it stopped,
+    and an unfinished run leaves the defaults alone. Results are saved per model and iOS
+    version, written to the session log and shown in Diagnostics.
+  - Every line comes from this phone's own measurement, never a model name, by the rules in
+    [decisions/per-phone-fitting.md](decisions/per-phone-fitting.md). A new iOS version measures
+    again, as now.
+- **Laggy sliders on the base iPhone 16:** the main-thread check is built, in 0.1.116, and
+  Test 7 asks for its log and a screen recording. If the
+  viewfinder's draw on the main thread is the cause, as suspected, draw it on its own queue, then
+  repeat a 10-minute take on the 14 Pro before calling it safe.
 - **Stabilize, after the phone's verdict:** see
   [decisions/stabilized-export.md](decisions/stabilized-export.md) for the design and its
   limits. Left: rolling-shutter correction, lens distortion in the warp, a horizon lock, a view

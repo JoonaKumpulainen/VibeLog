@@ -219,7 +219,11 @@ afterward.
 - The phone sends `ngrok-skip-browser-warning`, so ngrok's free tier doesn't put its warning page
   in front of the server.
 
-The app accepts an `https://` address from 0.1.115 on. Older builds only take plain HTTP.
+**Over the internet** in Diagnostics is its own switch, from 0.1.116 on. Off, the link only takes a
+plain address on your network; on, it only takes an `https://` address, so neither reaches the
+wrong place by mistake. Like **Connect**, it's off at every launch, kept out of presets, and the
+server can't turn it on. Switching it disconnects. 0.1.115 took `https://` addresses without the
+switch; older builds only take plain HTTP.
 
 ### Run it
 
@@ -239,15 +243,17 @@ The app accepts an `https://` address from 0.1.115 on. Older builds only take pl
 
    It prints a `Forwarding` address such as `https://abc-123.ngrok-free.app`.
 
-3. Send the tester the address and the token, privately. In Diagnostics, they enter the whole
-   `https://` address as the server, the token, and turn on **Connect**. The state should read
+3. Send the tester the address and the token, privately. In Diagnostics, they turn on **Over
+   the internet**, enter the whole `https://` address as the server and the token, and turn on
+   **Connect**. The state should read
    **Connected**, and the server prints `phone connected`.
 
 4. Send commands from this computer as usual, `python3 tools/test_server.py send status`.
 
 ### End it
 
-1. Ask the tester to turn off **Connect** and clear the server and token fields.
+1. Ask the tester to turn off **Connect** and **Over the internet**, and clear the server and
+   token fields.
 2. Press Ctrl+C in both terminals: ngrok's first, then the server's.
 3. Delete `public_token` from the results folder, so the next session gets a new one:
 
@@ -303,6 +309,30 @@ If you opened the firewall, close it again with the same rule:
 sudo ufw delete allow from 192.168.1.0/24 to any port 8765 proto tcp
 ```
 
+## Removing only the internet link
+
+This keeps the test link on your own network and takes out everything that reaches a server over
+the internet. Find each item by name.
+
+1. **App, `App/DiagnosticsView.swift`:** delete the **Over the internet** toggle, and keep only the
+   local wording of the server field's placeholder and the footer.
+2. **App, `App/AppModel.swift`:** delete `testOverInternet` and its comment.
+3. **App, `App/TestCommands.swift`:** in `updateTestLink`, call `TestLinkAddress.base(testServer)`
+   without `overInternet`, set the state to "Needs a server and a token" on failure as before,
+   delete the "connecting over the internet" log line, and call `testLink.start(base:token:)`
+   without `overInternet`.
+4. **App, `App/TestLink.swift`:** delete the `overInternet` property, the parameter of `start`,
+   and the `ngrok-skip-browser-warning` line.
+5. **`Modules/VLCore/TestLinkMessages.swift`:** in `base`, delete the `overInternet` parameter and
+   the `secure` checks, so only plain addresses are taken.
+6. **`Tests/VLTests/VLTests.swift`:** delete the five `overInternet` and `https` lines from the
+   address test.
+7. **Server, `tools/test_server.py`:** delete the `--public` argument, `public_token_for`, the
+   public branch of `serve`, `public_token` on `Link`, and `"public_token"` from `safe_name`. Keep
+   the forwarded-header and lockout checks: they cost nothing and still guard a local server.
+8. **Docs:** delete **A phone elsewhere, through ngrok** from this file, its pointers in
+   `docs/status.md` and `docs/next-tests.md`, and the line in `docs/how-it-works.md`.
+
 ## Removing it from the app completely
 
 This builds an app with no network code and no Local Network permission. Recording doesn't use any
@@ -351,6 +381,7 @@ Delete these properties:
 @Published var testServer = ""
 @Published var testToken = ""
 @Published var testLinkOn = false { didSet { if testLinkOn != oldValue { updateTestLink() } } }
+@Published var testOverInternet = false { ... }
 @Published var testLinkState = "Off"
 @Published var testSendsResults = true
 @Published var testSendsGyro = true
