@@ -7,7 +7,7 @@ Rewrite this file when a new round of tests is planned, and move the results to
 
 ## Before you start
 
-- **Install 0.1.114 or later.** SideStore should offer it as an update. If it doesn't, install
+- **Install 0.1.115 or later.** SideStore should offer it as an update. If it doesn't, install
   the `.ipa` from the latest green build. Say which version you tested; SideStore shows it.
 - **Charge to at least 50%,** and let the phone cool for a few minutes if it was hot.
 - **Where the files are:** Files app, **On My iPhone**, **VibeLog**. Takes are in `videos/`:
@@ -17,6 +17,13 @@ Rewrite this file when a new round of tests is planned, and move the results to
 - **Sending files:** select them in Files and share by AirDrop, or upload them to a shared
   folder. A take's `.mov` is large: for the stabilization tests, keep takes short, 20 to 30
   seconds. On the 14 Pro, plugging into the owner's computer or the test link also works.
+- **Through the test link instead:** on 0.1.115 a phone elsewhere can connect to the owner's
+  computer through ngrok, and the owner fetches files and runs the steps marked for the link.
+  The owner sends the address and token privately. In Settings, **Advanced**, **Diagnostics**,
+  enter the whole `https://` address as the server and the token, and turn on **Connect**.
+  While connected, the owner's computer can start takes, take stills of what the camera sees
+  and fetch files, and the files pass through ngrok's servers. Turn **Connect** off and clear
+  both fields when done.
 - **Always send the session log** from `logs/` for the time of the tests, the newest
   `session_*.log`, even when a test looks fine.
 
