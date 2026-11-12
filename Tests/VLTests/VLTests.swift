@@ -3350,10 +3350,14 @@ final class GPUSupportTests: XCTestCase {
         XCTAssertNotNil(gpu.warning(for: "efficient-fx-malvar"))
         XCTAssertNil(gpu.warning(for: "efficient-log-malvar"))
         // Falling behind at serious heat only warns without the heat fallback: the 14 Pro's
-        // 170 s Maximum log take, 2026-11-12, with Efficient when hot off.
-        gpu.record(take: "maximum-log-malvar", seconds: 170, frames: 4895, gpuDropped: 203, reachedSerious: true)
-        XCTAssertNil(gpu.warning(for: "maximum-log-malvar", hotFallback: true))
-        XCTAssertNotNil(gpu.warning(for: "maximum-log-malvar", hotFallback: false))
+        // 170 s Maximum log take, 2026-11-12, with Efficient when hot off. On its own record, so
+        // no proven setup makes it warn for being heavier.
+        var hot = GPUSupport(device: "iPhone15,2", system: "27.2")
+        hot.costs = ["maximum-log-malvar": 12.6]
+        hot.record(take: "maximum-log-malvar", seconds: 170, frames: 4895, gpuDropped: 203, reachedSerious: true)
+        XCTAssertTrue(hot.strained.isEmpty)
+        XCTAssertNil(hot.warning(for: "maximum-log-malvar", hotFallback: true))
+        XCTAssertTrue(hot.warning(for: "maximum-log-malvar", hotFallback: false)!.contains("got hot"))
         // A take that fell behind while not seriously hot always warns.
         gpu.record(take: "maximum-log-malvar", seconds: 120, frames: 3400, gpuDropped: 200)
         XCTAssertTrue(gpu.warning(for: "maximum-log-malvar")!.contains("fell behind"))
