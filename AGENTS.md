@@ -18,8 +18,10 @@ the phone can sustain. When quality and convenience conflict, quality wins.
 ## How we work
 
 - **No Mac:** the owner cannot build locally, and this Linux machine has no Swift or Xcode. Every
-  build runs on GitHub Actions (`macos-26`), and pushes to `main` trigger it. `.md` changes don't
-  build.
+  build runs on GitHub Actions (`macos-26`), and pushes to `main` trigger it. The tests and the
+  IPA run as two jobs at once, so the IPA is ready in about 3 minutes; SideStore only gets it once
+  the tests pass too. Changes only to `.md` files, `docs/` or `tools/` (other than the SideStore
+  tool) don't build. Batch app changes: a cycle takes about 10 minutes.
 - **Project file:** XcodeGen generates it from `project.yml`. Never hand-write a `.pbxproj`.
 - **After each code change:** ask the owner before committing, pushing or starting a build. Once
   they say so, push, wait for CI with `gh run watch`, and read the logs until it's green. Then
