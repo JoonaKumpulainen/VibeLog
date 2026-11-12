@@ -2403,7 +2403,7 @@ final class LookGradeTests: XCTestCase {
         let looks: [(String, (SIMD3<Double>) -> SIMD3<Double>)] = [
             ("ACES 2.0", { BuiltInLook.aces20.display(linearRec2020: $0) }),
             ("ACES 1.3", { BuiltInLook.aces13.display(linearRec2020: $0) }),
-            ("Monitor", MonitorTransform.display(linearRec2020:)),
+            ("Monitor", { MonitorTransform.display(linearRec2020: $0) }),
         ]
         for curve in LogCurve.allCases {
             let gamut = curve.nativeGamut
