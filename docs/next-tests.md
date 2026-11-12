@@ -73,51 +73,17 @@ copy no smaller than its take.
 **Send:** both takes' and both copies' `.mov.json`, and the session log. The videos aren't
 needed.
 
-## Test 4: the ultra wide's stabilization on the iPhone 16
+## Test 4: the ultra wide's stabilization on the iPhone 16 (done)
 
-The tester reported that Stabilize adds small fast shake on this lens. This take lets the cause
-be measured against the gyro log: timing, direction or scale. The phone is the base iPhone 16,
-`iPhone17,3`, whose ultra wide has no optical stabilizer.
+Run over the internet link on 2026-11-12: take `140255` and its copy, measured. The copy steadied
+the take everywhere and added no shake; the results are in [findings.md](findings.md). Two
+questions for the tester remain:
 
-**Once, before the take:** Settings, **Advanced**, **Lenses**, **Measure Lenses**, with the
-phone lying still. It must list the 0.5x.
-
-**Settings:**
-
-- Lens **0.5x**. Look **LOG**, nothing baked, no FX.
-- **FORMAT:** HEVC 4:2:2, the size the phone uses normally.
-- **SHUTTER** at 1/250 s, set by hand, so frames are sharp. **ISO** whatever gives a normal
-  picture; a bright room or daylight helps.
-- **Save gyro data** on, which is the default.
-
-**The scene:** something with plenty of detail and straight lines, at least 3 metres away: a
-bookshelf, a building, a room with furniture. No people or cars moving through it.
-
-**The take, about 25 seconds, holding the phone sideways (landscape) with both hands:**
-
-1. Hold as still as you can for **3 seconds**.
-2. **Three slow pans:** turn left over 2 seconds, then back right over 2 seconds, three times.
-3. Hold still for **3 seconds**.
-4. **Small fast shake for 4 seconds:** keep the phone pointed at the same spot and shake it in
-   small quick movements, as a tired hand or a running engine would.
-5. Hold still for **3 seconds**.
-6. **Two slow tilts:** up over 2 seconds and back down over 2 seconds, twice.
-7. Stop.
-
-**Then:** open the take, tap **Export**, turn **Stabilize** on, leave **Smoothness** at
-Medium, 0.6 s, and export. Watch the preview with Stabilize off and on before exporting, and
-write down where the copy shakes more than the take: during the fast shake, the holds or the
-pans.
-
-**Send all of these:**
-
-- The take: `video_…mov`, `video_…mov.json` and `video_…gcsv`
-- The copy: `video_…_look.mov` and its `.mov.json`
-- The lens profiles: everything in `lenses/<phone model>/`
-- The session log
-- What you wrote down, and whether the phone was held sideways the whole time
-
-If the files are too large to send, record step 4 only, with 3 seconds still before and after.
+1. **Which build made the copy that shook more?** Before 0.1.112, every copy was 20 ms out of
+   step, which on this lens works against small fast shake.
+2. **If a copy on 0.1.116 still looks shakier,** send that take and its copy, and its shutter
+   speed. At 1/50 s the picture holds still but its motion blur changes direction with each shake,
+   which can look like vibration; stabilized takes want 1/250 s or faster.
 
 ## Test 5: the ultra wide's edges on the 14 Pro
 
@@ -161,26 +127,24 @@ the copies can be fetched instead.
 
 ## Test 7: laggy sliders (base iPhone 16)
 
-0.1.116 logs when the main thread answers late, and how long the viewfinder's draws hold it, which
-is the suspected cause. Nothing about the sliders has changed yet.
+The first part ran on 2026-11-12: dragging Export's grade sliders for a minute stalled the main
+thread only twice, worst 128 ms, so a busy main thread isn't the cause. The next suspect is the
+scrolling form the sliders sit in, which may take a drag that moves even slightly up or down.
 
-1. Open the camera, with the picture moving.
-2. Open **LOOK**, pick ACES 2.0, and drag **ADJUST**'s and **FX**'s sliders slowly and quickly for
-   about 30 seconds, noting when one refuses to move.
-3. Close the look panel and wait a full minute, so the log writes its summary.
-4. Open a log take, tap **Export**, and do the same with the grade editor's sliders for 30
-   seconds, then wait a minute there too.
+1. Open a log take, tap **Export**, open the grade editor.
+2. Drag one slider **slowly and exactly sideways**, keeping the finger level, ten times.
+3. Drag the same slider **diagonally**, a little up or down as it moves, ten times.
+4. Do the same with **Smoothness** under **Stabilize**, which sits in the same form.
 
-**Send:** a screen recording of steps 2 and 4, and the session log. Lines starting "Main thread"
-say how late it was and where; none at all means the main thread kept up and the cause is
-elsewhere.
+**Send:** a screen recording, and say for each whether the slider refused to move. If only the
+diagonal drags stick, the scroll is taking them.
 
 ## What the results decide
 
 - **Tests 1 to 3** close `eed6df9` and `8c7f7d5`, or show what's still wrong.
-- **Test 4** decides the fix for the 16: a timing offset or a flipped direction for that lens,
-  saved per phone by the planned **Measure stabilizer**.
-- **Test 7** decides the slider fix: the viewfinder's draw moved off the main thread if its time
-  explains the stalls on the camera, or the export screen's redraws if the stalls are there.
+- **Test 4** showed the 16 needs no per-phone timing or direction fix; its two questions say
+  whether anything is left.
+- **Test 7** decides the slider fix: if diagonal drags stick, keep the form from scrolling while
+  a slider is held, or give the grade editor's sliders a layout that doesn't scroll.
 - **Tests 5 and 6** decide what comes after: lens distortion in the warp first if the edges bend
   while the middle stays steady, rolling-shutter correction first if lines lean in Take B.

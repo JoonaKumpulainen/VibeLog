@@ -543,6 +543,38 @@ an item from **Not verified** once it is.
     roll fell from 2.2 to 1.5 mrad rms a frame, and the shake left to the optics was the same or
     a little less once the enlargement is divided out.
 
+- **Base iPhone 16 over the internet link, on 0.1.116, 2026-11-12:** the first session through
+  ngrok, with **Over the internet** on and `serve --public`. Commands, status, a GPU cost test,
+  **Measure Lenses**, the probe, a 25 s take and a stabilized export all ran over it. Files came
+  back at about 1 MB/s: the 945 MB take took about 11 minutes. In about 40 minutes, internet
+  scanners tried three wrong tokens, all refused.
+  - **The ultra wide follows the gyro as the 14 Pro's does.** Take `140255`, 0.5x, upright,
+    1/50 s and ISO 320, 749 frames with none lost, fitted at the 14 Pro's 1585.7 px: picture x
+    follows gyro x at +1.02 (r 0.99) and y follows gyro y at -0.95 (r 0.78), best at 0 to -5 ms,
+    roll gyro z at 0.67 (r 0.88). Same axes, signs and timing, so no per-phone fix is needed.
+    Slow moves read 1.22 and 1.42, against 1.03 and 1.14 on the 14 Pro, which suggests the
+    focal length from the field of view is short at the centre.
+  - **Its stabilized copy steadied it, and added no shake.** Enlarged 130%, fast shake per frame
+    fell from 6.4 to 0.55 px sideways and 2.6 to 0.46 px up and down at the centre, 3.7 to 0.49
+    px in the left third and 5.4 to 2.1 px in the right, and roll from 2.6 to 1.0 mrad. The right
+    third's remainder is lopsided, so more likely the scene than distortion.
+  - **The sliders' lag isn't a stalled main thread.** `MainThreadWatch` saw, in a minute of
+    dragging Export's grade sliders, two answers over 100 ms, the worst 128 ms, with the
+    viewfinder's draws holding the main thread 0.2 ms on average. Settings and Diagnostics
+    stalled once each, 207 and 279 ms.
+  - **Its GPU has room.** `gpu_cost_20261112_135143.txt`, nominal heat, median ms: Maximum with
+    the look 8.4, with the look and FX 12.8; Efficient log 5.2, baked FX as recorded 8.5. The 14
+    Pro's are 18.7 and 12.0 for the FX setups, so the 16's GPU does the same work in about two
+    thirds of the time. Its limit is the software ProRes encoder, not the GPU.
+  - **Its stabilizer switch fails the condition, as on the 14 Pro.** `probe_20261112_135737.txt`:
+    the 1x reports `off` and `active` as asked in brackets, at 5.7 fps in brackets of 1 and
+    18.7 fps at best in brackets of 8; plain RAW came 42 ms apart. The ultra wide raises when
+    asked to turn it on.
+  - **Lens profiles saved** for the 1x and ultra wide over the link.
+  - **A take set to 1/250 s over the link recorded at 1/50 s, ISO 320, "frozen at start".**
+    Likely a tap on the picture, which meters and returns exposure to auto, before the take.
+    Not checked.
+
 ## Not verified
 
 - **FX after `eed6df9`:** on the iPhone 16 on 2026-11-12, a screen recording of export's grade
@@ -552,19 +584,21 @@ an item from **Not verified** once it is.
   blacks fell below the curve's black, and the FX step clamped all of that to one floor. In a
   real log take only noise near black goes that low. `eed6df9` keeps it, as the path without FX
   always did, so log takes lose nothing; how little it changes in a dark log take isn't seen.
-- **The ultra wide's stabilization on other phones:** the owner reported on 2026-11-12 that on
-  the base iPhone 16's ultra wide, Stabilize adds small fast shake, which reads as a timing or
-  direction error, and that on the 14 Pro's ultra wide the edges shake and bend, which fits the
-  missing lens distortion and rolling shutter. Neither is measured.
-- **Why the base iPhone 16's sliders lag:** the tester reported on 2026-11-12 that sliders
-  sometimes refuse to move while Liquid Glass shows them pressed. Suspected: the viewfinder
-  draws on the main thread, on a 60 Hz screen. The main-thread check logs it from 0.1.116.
+- **The 14 Pro's ultra wide edges:** the owner reported on 2026-11-12 that a stabilized copy's
+  edges shake and bend, which fits the missing lens distortion and rolling shutter. Unmeasured;
+  Test 5 in next-tests.md.
+- **What the 16's tester saw as added shake on the ultra wide:** take `140255`'s copy added none
+  (see above). Most likely an older build's 20 ms offset, before 0.1.112, or 1/50 s motion blur;
+  which build made the shaky copy isn't known.
+- **Why the base iPhone 16's sliders lag in Export:** not a stalled main thread, measured on
+  0.1.116 (see above). Suspected next: the grade editor's sliders sit in a scrolling form, and
+  on iOS 26 the scroll may take a drag with any vertical movement. Unproven.
 - **Returning to the app after two minutes away, after `eed6df9`:** the camera should keep
   streaming. In the iPhone 16's log of 2026-11-11 it started and the idle pause stopped it within
   a second, three times, so it needed a tap.
 
-- **Stabilize with its timing fixed:** whether the ultra wide's copy is now steady, and how
-  much rolling shutter leaves in.
+- **Stabilize with its timing fixed, on the 14 Pro:** whether its ultra wide's copy is now steady,
+  as the base 16's was, and how much rolling shutter leaves in.
 - **What maker note keys 15 and 12 read in a running take,** frame by frame, still and shaken:
   whether 15 changes from the probe's 5, and whether 12 grows with the shake.
 - **The `.gcsv`'s orientation for upright takes:** which string Gyroflow needs for each way of

@@ -74,6 +74,8 @@ copy is enlarged just enough to hide its moving edges, up to 130%, and moves too
 that are steadied less. Fast small shake is left to the lens's own stabilizer, which already
 took most of it out. The preview plays the take stabilized and says how far it's enlarged; switch
 **Stabilize** off and on to compare. It needs the take's lens measured under Advanced, Lenses.
+For a take you mean to stabilize, use a shutter of 1/250 s or faster: Stabilize holds the frame
+still, but blur from a slow shutter still changes direction with each shake.
 
 A take with its look baked in can't be given another look, so the player offers **Stabilize** for
 it instead of Export: a screen with only smoothness, which saves the same picture, steadied and

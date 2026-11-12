@@ -9,13 +9,15 @@ short.
 As of mid Phase 7, with Phase 8's stabilized export begun. The latest build is `b1cc9a8`, CI run
 116, version 0.1.116, which passed with 189 tests and one skip. **Over the internet** in
 Diagnostics is now its own switch for the ngrok link, and `MainThreadWatch` logs main-thread
-stalls for the base iPhone 16's laggy sliders. Nothing from 0.1.113 on has been tried on a phone.
+stalls for the base iPhone 16's laggy sliders. On the base 16, 0.1.116 ran a whole session over
+the internet link: the main-thread check, the over-internet switch and Stabilize on its ultra
+wide all worked there. The 14 Pro hasn't tried anything from 0.1.113 on.
 
 The builds before it, all from the sessions of 2026-11-11 and 12:
 
 | Build | Run | What it added | On the phone |
 |---|---|---|---|
-| `d232d7e` | 115 | The test link reaches a phone elsewhere through ngrok, `serve --public` | Checked through a real tunnel, not with a phone |
+| `d232d7e` | 115 | The test link reaches a phone elsewhere through ngrok, `serve --public` | Proven on the base 16, with 0.1.116's switch |
 | `8c7f7d5` | 114 | A baked take's stabilized copy keeps its own codec | Not yet |
 | `eed6df9` | 113 | FX keep light below zero; returning to the app no longer idle-pauses the camera | Not yet |
 | `2368f1d` | 112 | Stabilize's timing fixed, its limit eased at 130%, a Stabilize screen for baked takes | Not yet |
@@ -26,21 +28,21 @@ The builds before it, all from the sessions of 2026-11-11 and 12:
 | `b740eab` | 106 | Baked-FX takes on the Efficient path, probe crash fix | Proven |
 
 Run 109 never started and can be ignored. Every session is in
-[history/2026-11.md](history/2026-11.md); the last is **Session on 2026-11-12, iPhone 16 logs**.
+[history/2026-11.md](history/2026-11.md); the last is **Session on 2026-11-12, iPhone 16 logs**,
+which ends with the base 16 over the internet link.
 
 ## Start here next session
 
-1. **Ask for the results of [next-tests.md](next-tests.md)** from both phones, 0.1.116. Tests
-   1 to 3 close `eed6df9` and `8c7f7d5`; Test 6 says how Stabilize looks with its timing fixed.
-2. **If the phone is linked, measure the new copies** against their gyro logs, as was done for
-   the first ones. The method is under **How the copies were measured** below.
-3. **The ultra wide's stabilization:** on the base iPhone 16 it adds small fast shake, and on
-   the 14 Pro its edges shake and bend. Fit Test 4's take and copy as under **How the copies
-   were measured**, at lags of ±100 ms and both signs, to tell timing from direction from
-   scale; Test 5 separates distortion from rolling shutter. The plan, not yet agreed, is in
-   **Still to build**.
-4. **Then pick from Still to build.** Measure stabilizer, per lens, is the natural next step if
-   Stabilize now works; rolling shutter if fast moves still lean or wobble.
+1. **Ask for the 14 Pro's results of [next-tests.md](next-tests.md)** on 0.1.116: Tests 1 to 3
+   close `eed6df9` and `8c7f7d5`, Test 5 the ultra wide's edges, Test 6 Stabilize's timing fix.
+2. **Ask the base 16's tester** Test 4's two questions, which build made the shaky copy and
+   whether 0.1.116's copies still look shaky, and for Test 7's straight and diagonal drags.
+3. **If Test 7's diagonal drags stick,** fix the sliders: keep Export's form from scrolling while
+   one is held, or lay the grade editor out without scrolling. A screen-only change, at no risk
+   to recording.
+4. **Then pick from Still to build.** Measure stabilizer, per lens, is the natural next step; lens
+   distortion in the warp if Test 5's edges bend while the middle holds; rolling shutter if lines
+   lean in its fast pans.
 
 ## Waiting on the phone
 
@@ -73,9 +75,10 @@ Step-by-step instructions for every test below, with what to send, are in
 8. **Later:** a colour chart shot; the matched pair for Apple's preview; ARRI Wide Gamut 3;
    `scope_cost.json`, which needs about 112 GB free.
 
-**The iPhone 16, base model, on 0.1.116:** Tests 1, 2 and 4, the ultra wide's stabilization.
-Then **Run probe**, phone still, for its overlapped bracket cases and stabilizer names; a
-five-minute HEVC 4:2:2 take at full size, started cold and unplugged, and one at 2880x2160.
+**The iPhone 16, base model, on 0.1.116:** Tests 1 and 2, Test 4's two questions and Test 7's
+drags. Test 4's take, the probe, the GPU cost test and its lens profiles were done over the
+internet link on 2026-11-12. Still owed: a five-minute HEVC 4:2:2 take at full size, started cold
+and unplugged, and one at 2880x2160.
 
 **Friends' 15 Pro, 16 Pro and 17 Pro:** nothing yet. The probe must first list video formats.
 
@@ -83,8 +86,9 @@ five-minute HEVC 4:2:2 take at full size, started cold and unplugged, and one at
 
 In rough order of what's most useful next:
 
-- **The ultra wide's stabilization, proposed:** measure the 16's take first; then build Measure
-  stabilizer below, saving each lens's timing offset, direction and optics share, with fast
+- **The ultra wide's stabilization, proposed:** the 16's take showed no per-phone timing or
+  direction fix is needed, and that the field of view's focal length reads short at the centre.
+  Build Measure stabilizer below, saving each lens's timing offset, direction and optics share, with fast
   correction off for a lens whose fit is poor; then lens distortion in the warp, from a Gyroflow
   calibration import for the ultra wide, which Apple gives no table for in RAW; then rolling
   shutter, once the readout time is measured.
@@ -166,10 +170,10 @@ In rough order of what's most useful next:
   - Every line comes from this phone's own measurement, never a model name, by the rules in
     [decisions/per-phone-fitting.md](decisions/per-phone-fitting.md). A new iOS version measures
     again, as now.
-- **Laggy sliders on the base iPhone 16:** the main-thread check is built, in 0.1.116, and
-  Test 7 asks for its log and a screen recording. If the
-  viewfinder's draw on the main thread is the cause, as suspected, draw it on its own queue, then
-  repeat a 10-minute take on the 14 Pro before calling it safe.
+- **Laggy sliders on the base iPhone 16:** the main-thread check, in 0.1.116, ruled out a busy
+  main thread in Export. Test 7 now asks whether diagonal drags stick, which would mean the
+  form's scroll takes them. The viewfinder's draw stays on the main thread: it held it 0.2 to
+  0.5 ms on average there.
 - **Stabilize, after the phone's verdict:** see
   [decisions/stabilized-export.md](decisions/stabilized-export.md) for the design and its
   limits. Left: rolling-shutter correction, lens distortion in the warp, a horizon lock, a view
@@ -191,7 +195,7 @@ In rough order of what's most useful next:
 **Decisions waiting on the owner:**
 
 - **Strike the stabilizer switch for takes off the list?** Brackets reach 20.8 fps at best on
-  the 14 Pro, and the probes found no other switch.
+  the 14 Pro and 18.7 on the base 16, and the probes found no other switch.
 
 **Done for now:** FX in baked takes. They run on the Efficient path with the glow every other
 frame, and held 20 minutes back to back with no cooling, 32 frames lost.
