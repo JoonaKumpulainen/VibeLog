@@ -94,6 +94,10 @@ struct ExportChoice: Sendable {
     var asShot = false
     var takeTag: FileTag?
     var takeLook: String?
+    /// A baked take's own codec, which its stabilized copy keeps. Encoding again can't win back
+    /// what the take lost, so the copy loses as little more as it can: ProRes stays in its
+    /// profile, and HEVC keeps its chroma at no less than the take's own rate.
+    var takePreset: EncoderPreset?
 
     /// This choice, keeping a baked take's picture, or as it is for nil.
     func keepingAsShot(_ take: Take?) -> ExportChoice {
@@ -108,6 +112,21 @@ struct ExportChoice: Sendable {
         asShot = true
         takeTag = FileTag.allCases.first { $0.label == take.info?.metadata["fileTag"] } ?? .rec709
         takeLook = take.info?.metadata["look"]
+        takePreset = Self.ownPreset(of: take)
+    }
+
+    /// The preset a take was recorded or exported with, as its sidecar names it, or nil when the
+    /// sidecar is missing or names none this build knows.
+    static func ownPreset(of take: Take) -> EncoderPreset? {
+        guard let info = take.info else { return nil }
+        let known = EncoderPreset.all + [EncoderPreset.proRes422LT]
+        guard var preset = known.first(where: { $0.label == info.preset }) else { return nil }
+        if info.metadata["bitDepth"] == "12" { preset = preset.twelveBit }
+        if let base = preset.bitrate {
+            let own = Int(info.megabytesPerSecond * 8_000_000)
+            preset = preset.withBitrate(max(base, own))
+        }
+        return preset
     }
 
     struct SteadyFailure: Error, CustomStringConvertible {
@@ -193,6 +212,7 @@ struct ExportChoice: Sendable {
     /// The preset for a picture this size. HEVC's rate is the quality's at 12 MP, falling with the
     /// pixels to the power 0.75, so a smaller picture keeps the same look per pixel, about.
     func preset(width: Int, height: Int) -> EncoderPreset {
+        if asShot, let takePreset { return takePreset }
         let base = basePreset
         guard base.bitrate != nil else { return base }
         let share = Double(width * height) / Double(4032 * 3024)

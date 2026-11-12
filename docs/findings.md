@@ -545,12 +545,13 @@ an item from **Not verified** once it is.
 
 ## Not verified
 
-- **FX on a dark take, after `eed6df9`:** whether the export preview, an export and a baked-FX
-  take keep their shadows with FX on. On the iPhone 16 on 2026-11-12, a screen recording of
-  export's grade editor showed any FX above zero turning a dark Apple Log take flat and grey:
-  with FX off, half the picture sat under 26 of 255, and with FX on nothing did, while the
-  highlights matched. The code clamped light below zero before the curve, which puts Apple Log's
-  code 0 at about 0.15. The fix is read from the code and the recording, not yet seen.
+- **FX after `eed6df9`:** on the iPhone 16 on 2026-11-12, a screen recording of export's grade
+  editor showed any FX above zero turning a take flat and grey: with FX off, half the picture sat
+  under 26 of 255, and with FX on nothing did. The owner later found the take was a baked one,
+  graded as log on an older build, which the Stabilize screen now prevents. Read as log, its
+  blacks fell below the curve's black, and the FX step clamped all of that to one floor. In a
+  real log take only noise near black goes that low. `eed6df9` keeps it, as the path without FX
+  always did, so log takes lose nothing; how little it changes in a dark log take isn't seen.
 - **Returning to the app after two minutes away, after `eed6df9`:** the camera should keep
   streaming. In the iPhone 16's log of 2026-11-11 it started and the idle pause stopped it within
   a second, three times, so it needed a tap.

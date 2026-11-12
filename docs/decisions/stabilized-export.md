@@ -27,8 +27,10 @@ optics steady two axes and leave roll alone. The figures are in [findings.md](..
   the export uses, and says how far it's enlarged. Switching **Stabilize** off and on compares.
   Live stabilization while recording stays ruled out.
 - **Baked takes too.** A take with its look baked in has no log to export, so its screen is
-  **Stabilize**, with only the codec, HEVC's size and smoothness to set, and offers only this: the same picture, steadied and encoded again in the take's own tag, with no
-  look applied. It costs one more encode of an already encoded picture.
+  **Stabilize**, with only smoothness to set, and offers only this: the same picture, steadied
+  and encoded again in the take's own tag and codec, with no look applied. Encoding again can't
+  win anything back, so it only loses as little as it can: ProRes stays in its profile, and HEVC
+  keeps its chroma at no less than the take's own rate. It costs one more encode.
 - **It says what it did:** the export's sidecar has `steadied`, and it gets no copy of the gyro
   log, which no longer describes it.
 

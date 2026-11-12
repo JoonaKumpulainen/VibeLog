@@ -76,8 +76,8 @@ took most of it out. The preview plays the take stabilized and says how far it's
 **Stabilize** off and on to compare. It needs the take's lens measured under Advanced, Lenses.
 
 A take with its look baked in can't be given another look, so the player offers **Stabilize** for
-it instead of Export: a screen with only the codec and smoothness, which saves the same picture,
-steadied and encoded again.
+it instead of Export: a screen with only smoothness, which saves the same picture, steadied and
+encoded again in the take's own codec, so it loses as little as it can.
 
 **Export** in the player writes a copy of a log take with a look baked in, after a preview that
 plays it with the look: the Rec.709 view, an ACES look or a LUT, in HEVC 4:2:0 or ProRes 422 LT, 422

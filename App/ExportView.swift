@@ -330,6 +330,9 @@ struct ExportView: View {
                 }
                 }
                 Section {
+                    // Stabilize, a baked take's screen, keeps the take's codec, size and shape:
+                    // encoding again can't win anything back, so it only loses as little as it can.
+                    if isLog {
                     Picker("Codec", selection: $codec) {
                         Text("HEVC 4:2:0").tag("hevc420")
                         // ProRes only where the phone has its encoder.
@@ -340,8 +343,6 @@ struct ExportView: View {
                             ForEach(ExportQuality.allCases) { Text($0.label).tag($0) }
                         }
                     }
-                    // Stabilize, a baked take's screen, keeps the take's size and shape.
-                    if isLog {
                     Picker("Resolution", selection: $resolution) {
                         ForEach(ExportResolution.allCases) { Text($0.label).tag($0) }
                     }
