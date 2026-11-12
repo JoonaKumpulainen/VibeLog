@@ -2562,7 +2562,7 @@ final class LookGradeTests: XCTestCase {
         for (r, g, b) in [(4, 4, 4), (8, 2, 5), (3, 7, 1)] {
             let log = SIMD3(Double(r), Double(g), Double(b)) / Double(size - 1)
             let linear = toRec2020 * SIMD3(LogCurve.sLog3.decode(log.x), LogCurve.sLog3.decode(log.y), LogCurve.sLog3.decode(log.z))
-            let expected = MonitorTransform.display(linearRec2020: linear * pow(2, 0.5))
+            let expected = MonitorTransform.display(linearRec2020: linear * pow(2, 0.5), gamut: .sGamut3Cine)
             let got = lut.samples[(b * size + g) * size + r]
             XCTAssertEqual(Double(got.x), expected.x, accuracy: 1e-5)
             XCTAssertEqual(Double(got.y), expected.y, accuracy: 1e-5)
