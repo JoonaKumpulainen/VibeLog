@@ -193,7 +193,8 @@ python3 tools/test_server.py round tools/rounds/2026-11-13.json
 ```
 
 Steps that need a person, such as pointing the phone at a scene or walking with it, wait for
-Enter on this computer. The step types are listed in the `Suite` class in `tools/test_server.py`.
+Enter on this computer. With `--go`, they count down 5 seconds instead, for a test whose phone
+is already set up, such as one lying still: `round --go tools/rounds/<plan>.json`. The step types are listed in the `Suite` class in `tools/test_server.py`.
 The analysis tools also run on their own:
 
 ```bash

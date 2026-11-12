@@ -767,7 +767,12 @@ class Suite:
             self.last_take = step["use"]
             print(f"take: {self.last_take}, already on the phone", flush=True)
         elif "pause" in step:
-            input(f"\n>>> {step['pause']}\n    Press Enter when done. ")
+            if getattr(self.options, "go", 0):
+                # The person said the phone is ready, so the steps run without waiting for Enter.
+                print(f"\n>>> {step['pause']}\n    Going on in {self.options.go} s.", flush=True)
+                time.sleep(self.options.go)
+            else:
+                input(f"\n>>> {step['pause']}\n    Press Enter when done. ")
         elif "status" in step:
             values = self.ask({"action": "status"})["values"]
             for key, wanted in step["status"].items():
@@ -906,6 +911,8 @@ def main():
     rounding = commands.add_parser("round", help="a suite that checks results, puts settings back and writes a report")
     rounding.add_argument("plan", type=Path)
     rounding.add_argument("--timeout", type=float, default=30)
+    rounding.add_argument("--go", type=int, nargs="?", const=5, default=0, metavar="SECONDS",
+                          help="don't wait for Enter at pauses: the phone is ready; count down instead (5 s)")
     rounding.set_defaults(run=round_)
     options = parser.parse_args()
     options.run(options)
