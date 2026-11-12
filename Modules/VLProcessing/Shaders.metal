@@ -36,7 +36,7 @@ struct MonitorParams {
     float peakThreshold;  // The edge strength peaking marks.
     float desqueeze;  // Widens the picture by narrowing its short side, with black beside it.
     uint curve;  // The log curve to decode, as LogCurve's raw value.
-    float4 toRec709Row0;  // Linear in the recorded gamut to linear Rec.709.
+    float4 toRec709Row0;  // Linear in the recorded gamut to linear Rec.709; w is that channel's gamut compression scale.
     float4 toRec709Row1;
     float4 toRec709Row2;
     uint hdr;  // 0 SDR, 1 SDR shown in the HDR viewfinder, 2 the HDR look's PQ codes.
@@ -57,7 +57,7 @@ struct LookParams {
     float unused;
     float4 lutScale;
     float4 lutOffset;
-    float4 toRec709Row0;
+    float4 toRec709Row0;  // As MonitorParams': w is that channel's gamut compression scale.
     float4 toRec709Row1;
     float4 toRec709Row2;
     float4 luma;  // Kr, Kg, Kb of the file's matrix.
@@ -277,11 +277,28 @@ static inline float decodeLog(float y, uint curve) {
     }
 }
 
-// MonitorTransform.display: decode, convert to Rec.709, then roll highlights off to display white.
+// One channel of MonitorTransform.compressGamut, OpenColorIO's gamut_comp (BSD-3-Clause,
+// LICENSES/OpenColorIO-BSD-3-Clause.txt): its distance from neutral past the threshold eased in.
+static inline float compressChannel(float value, float neutral, float threshold, float scale) {
+    if (scale <= 0.0 || neutral == 0.0) return value;
+    float distance = (neutral - value) / fabs(neutral);
+    if (distance < threshold) return value;
+    const float power = 1.2;
+    float normalized = (distance - threshold) / scale;
+    float compressed = threshold + scale * normalized / pow(1.0 + pow(normalized, power), 1.0 / power);
+    return neutral - compressed * fabs(neutral);
+}
+
+// MonitorTransform.display: decode, convert to Rec.709, compress colours from outside it, then
+// roll highlights off to display white. Each row's w is its channel's compression scale.
 static inline float3 displayRec709(float3 logColor, uint curve, float4 row0, float4 row1, float4 row2) {
     float3 linear = float3(decodeLog(logColor.r, curve), decodeLog(logColor.g, curve),
                            decodeLog(logColor.b, curve));
     float3 rec709 = float3(dot(row0.xyz, linear), dot(row1.xyz, linear), dot(row2.xyz, linear));
+    float neutral = max(rec709.r, max(rec709.g, rec709.b));
+    rec709 = float3(compressChannel(rec709.r, neutral, 0.815, row0.w),
+                    compressChannel(rec709.g, neutral, 0.803, row1.w),
+                    compressChannel(rec709.b, neutral, 0.880, row2.w));
     const float peak = 8.0;
     const float shoulderB = 0.82 * peak / (peak - 1.0);
     const float shoulderA = 0.18 + shoulderB;

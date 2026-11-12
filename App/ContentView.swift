@@ -1303,8 +1303,18 @@ struct LookPanel: View {
                 VStack(spacing: 0) {
                     LookCarousel(
                         options: lookOptions, selection: $choice, hold: hold, label: Self.label, showsBand: false,
-                        subtitle: { $0 == BuiltInLook.aces20.name ? model.bakeTarget.shortLabel : nil },
-                        tappedChosen: { option in if option == BuiltInLook.aces20.name { choosingRange = true } })
+                        subtitle: lookSubtitle,
+                        subtitleChooses: { $0 == BuiltInLook.aces20.name },
+                        tappedChosen: { option in
+                            if option == BuiltInLook.aces20.name {
+                                choosingRange = true
+                            } else if Self.isImported(option) {
+                                // An imported LUT's input flips with a tap, and each LUT keeps its own.
+                                let rec709 = !model.lutMadeForRec709(option)
+                                model.setLUT(option, madeForRec709: rec709)
+                                model.showNotice("\(Self.label(option)) takes \(rec709 ? "Rec.709" : "log")", seconds: 2)
+                            }
+                        })
                     if !stylesHere.isEmpty {
                         LookCarousel(
                             options: [Self.noStyle] + stylesHere.map(\.name), selection: $styleChoice, hold: hold,
@@ -1459,6 +1469,18 @@ struct LookPanel: View {
     private func deleteStyle(_ name: String) {
         if styleChoice == name { styleChoice = Self.noStyle }
         model.deleteStyle(named: name)
+    }
+
+    /// A LUT the owner imported, as against LOG, MONITOR and the built-in looks.
+    static func isImported(_ option: String) -> Bool {
+        option != logChoice && !option.isEmpty && BuiltInLook.named(option) == nil
+    }
+
+    /// ACES 2.0's range, a menu, or what an imported LUT takes, which a tap switches.
+    private func lookSubtitle(_ option: String) -> String? {
+        if option == BuiltInLook.aces20.name { return model.bakeTarget.shortLabel }
+        if Self.isImported(option) { return model.lutMadeForRec709(option) ? "FOR 709" : "FOR LOG" }
+        return nil
     }
 
     static func label(_ option: String) -> String {
@@ -2398,6 +2420,9 @@ struct LookCarousel: View {
     var showsBand = true
     /// A second, grey line under a name, such as ACES 2.0's dynamic range.
     var subtitle: (String) -> String? = { _ in nil }
+    /// The line opens a menu, so it's drawn as <choice>. A plain line, such as what a LUT takes,
+    /// switches with a tap instead.
+    var subtitleChooses: (String) -> Bool = { _ in true }
     /// A tap on the name already in the middle, which opens its own choices.
     var tappedChosen: ((String) -> Void)? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -2462,7 +2487,7 @@ struct LookCarousel: View {
                     .font(Tokens.statusFont)
                     .foregroundStyle(isOn ? Tokens.held : Tokens.value)
                 if let line = subtitle(option) {
-                    Text("<\(line)>")
+                    Text(subtitleChooses(option) ? "<\(line)>" : line)
                         .font(Tokens.markFont)
                         .foregroundStyle(Tokens.label)
                 }

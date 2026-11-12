@@ -82,6 +82,7 @@ Legal**, since these licenses ask for their notices to travel with the app.
 |---|---|---|
 | ACES 2.0 look, `Modules/VLProcessing/ACES2.swift` | OpenColorIO's ACES 2.0 output transform, `src/OpenColorIO/ops/fixedfunction/ACES2` at commit `22dd9c4faa`. Copyright Contributors to the OpenColorIO Project. | [BSD 3-Clause](LICENSES/OpenColorIO-BSD-3-Clause.txt) |
 | ACES 1.3 look, `Modules/VLProcessing/ACES13.swift` | OpenColorIO's built-in ACES 1.0 SDR video output transform, `transforms/builtins/ACES.cpp` and the renderers it uses, at commit `22dd9c4faa`. Copyright Contributors to the OpenColorIO Project. | [BSD 3-Clause](LICENSES/OpenColorIO-BSD-3-Clause.txt) |
+| The Rec.709 view's gamut compression, `Modules/VLProcessing/MonitorLUT.swift` and `Shaders.metal` | OpenColorIO's ACES reference gamut compression, `ACES_GAMUT_COMP_13` in `FixedFunctionOpCPU.cpp` at commit `22dd9c4faa`, adapted to Rec.709. Copyright Contributors to the OpenColorIO Project. | [BSD 3-Clause](LICENSES/OpenColorIO-BSD-3-Clause.txt) |
 | Camera to ACES matrices, `Modules/VLProcessing/BuiltInLook.swift` | The OpenColorIO Configuration for ACES studio configs, ACES 2.0 and 1.3. Copyright Contributors to the OpenColorIO Project. | [BSD 3-Clause](LICENSES/OpenColorIO-BSD-3-Clause.txt) |
 | The ACES 2.0 algorithm the first port implements | The Academy Color Encoding System 2.0 output transform, `aces-aswf/aces-core`, formerly `ampas/aces-dev`. | [Apache License 2.0](LICENSES/ACES-Apache-2.0.txt) |
 

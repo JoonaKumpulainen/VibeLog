@@ -25,6 +25,10 @@ struct LegalView: View {
             detail: "Ported from OpenColorIO's ACES 1.0 SDR video output transform. Copyright Contributors to the OpenColorIO Project, BSD 3-Clause license.",
             file: "LICENSES/OpenColorIO-BSD-3-Clause.txt"),
         Notice(
+            title: "Rec.709 view's gamut compression",
+            detail: "Adapted from OpenColorIO's ACES reference gamut compression. Copyright Contributors to the OpenColorIO Project, BSD 3-Clause license.",
+            file: "LICENSES/OpenColorIO-BSD-3-Clause.txt"),
+        Notice(
             title: "Camera to ACES matrices",
             detail: "From the OpenColorIO Configuration for ACES studio configs. Copyright Contributors to the OpenColorIO Project, BSD 3-Clause license.",
             file: "LICENSES/OpenColorIO-BSD-3-Clause.txt"),

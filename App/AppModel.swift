@@ -330,10 +330,28 @@ final class AppModel: ObservableObject {
     private var builtInLUTs: [String: CubeLUT] = [:]
 
     func isAvailableLook(_ name: String) -> Bool { BuiltInLook.named(name) != nil || lutNames.contains(name) }
+
+    /// Imported LUTs made for Rec.709, by name, so each keeps its own input wherever it's chosen.
+    /// Kept on the phone, apart from presets. Built-in looks always work on log.
+    @Published private(set) var rec709LUTs: Set<String> = Set(UserDefaults.standard.stringArray(forKey: AppModel.rec709LUTsKey) ?? [])
+    static let rec709LUTsKey = "rec709LUTs"
+
+    func lutMadeForRec709(_ name: String) -> Bool { rec709LUTs.contains(name) }
+
+    /// Notes what an imported LUT expects, and follows it at once if it's the one in use.
+    func setLUT(_ name: String, madeForRec709: Bool) {
+        guard !name.isEmpty, BuiltInLook.named(name) == nil else { return }
+        if madeForRec709 { rec709LUTs.insert(name) } else { rec709LUTs.remove(name) }
+        UserDefaults.standard.set(rec709LUTs.sorted(), forKey: Self.rec709LUTsKey)
+        if name == selectedLUT, processing.lutExpectsRec709 != madeForRec709 { processing.lutExpectsRec709 = madeForRec709 }
+    }
+
     /// Empty selects the built-in Rec.709 view.
     @Published var selectedLUT = "" {
         didSet {
             guard selectedLUT != oldValue else { return }
+            let madeForRec709 = lutMadeForRec709(selectedLUT)
+            if processing.lutExpectsRec709 != madeForRec709 { processing.lutExpectsRec709 = madeForRec709 }
             loadSelectedLUT()
             if !adopting { followLUTPair() }
         }
@@ -865,7 +883,11 @@ final class AppModel: ObservableObject {
         idlePauseMinutes = saved.idlePauseMinutes
         processing.monitor = MonitorMode(rawValue: saved.monitor) ?? processing.monitor
         if saved.monitorLUT.isEmpty || isAvailableLook(saved.monitorLUT) { selectedLUT = saved.monitorLUT }
-        processing.lutExpectsRec709 = saved.lutExpectsRec709
+        // Before each LUT kept its own input, one switch served them all: it marks the LUT in use.
+        if saved.lutExpectsRec709, UserDefaults.standard.stringArray(forKey: Self.rec709LUTsKey) == nil {
+            setLUT(selectedLUT, madeForRec709: true)
+        }
+        processing.lutExpectsRec709 = lutMadeForRec709(selectedLUT)
         processing.pauseMonitorWhileRecording = saved.monitorOffWhileRecording
         lockAtRoll = saved.lockAtRoll
         saveGyroLog = saved.saveGyroLog

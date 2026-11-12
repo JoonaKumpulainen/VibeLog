@@ -119,7 +119,9 @@ public enum BuiltInLook: String, CaseIterable, Sendable {
     /// VibeLog's own Rec.709 view with a grade, as a LUT on log. Without a grade the view needs no
     /// LUT, since the GPU does its math per pixel.
     public static func rec709LUT(curve: LogCurve, gamut: Gamut, grade: LookGrade, size: Int = 65) -> CubeLUT {
-        makeLUT(curve: curve, gamut: gamut, grade: grade, size: size, display: MonitorTransform.display(linearRec2020:))
+        makeLUT(curve: curve, gamut: gamut, grade: grade, size: size) {
+            MonitorTransform.display(linearRec2020: $0, gamut: gamut)
+        }
     }
 
     /// A take's log turned into another curve and gamut, as a LUT on log, for writing log again,

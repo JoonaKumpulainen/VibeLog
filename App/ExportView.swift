@@ -196,7 +196,7 @@ struct ExportView: View {
             // The camera's look, or ACES 2.0 when the camera shows log or Apple's preview.
             let cameraLook = model.processing.monitor == .rec709 ? model.selectedLUT : BuiltInLook.aces20.name
             lutName = model.isAvailableLook(cameraLook) || cameraLook.isEmpty ? cameraLook : BuiltInLook.aces20.name
-            lutMadeForRec709 = model.processing.lutExpectsRec709
+            lutMadeForRec709 = model.lutMadeForRec709(lutName)
             if isLog, let kept = model.exportRecipe { apply(kept) }
             restoredGrade = true
             target = model.bakeTarget
@@ -236,7 +236,8 @@ struct ExportView: View {
             .environmentObject(model)
         }
         .task { takeTurns = (try? await LookExporter.describe(take.url).quarterTurns) ?? 0 }
-        .onChange(of: lutName) { _, _ in
+        .onChange(of: lutName) { _, name in
+            lutMadeForRec709 = model.lutMadeForRec709(name)
             refreshPreview()
             keepGrade()
         }
@@ -245,7 +246,9 @@ struct ExportView: View {
             if target != nil, codec == "hevc420" { codec = "prores422hq" }
             refreshPreview()
         }
-        .onChange(of: lutMadeForRec709) { _, _ in
+        .onChange(of: lutMadeForRec709) { _, value in
+            // What a LUT expects belongs to the LUT, so the camera and later exports follow.
+            model.setLUT(lutName, madeForRec709: value)
             refreshPreview()
             keepGrade()
         }
@@ -636,6 +639,7 @@ struct ExportView: View {
     /// Puts a kept or copied grade on screen. A look that's gone keeps the current one.
     private func apply(_ recipe: GradeRecipe) {
         if recipe.look.isEmpty || model.isAvailableLook(recipe.look) {
+            model.setLUT(recipe.look, madeForRec709: recipe.lutMadeForRec709)
             lutName = recipe.look
             lutMadeForRec709 = recipe.lutMadeForRec709
         }

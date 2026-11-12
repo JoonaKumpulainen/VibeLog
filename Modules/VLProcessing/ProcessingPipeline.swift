@@ -277,8 +277,10 @@ private struct MonitorParams {
     mutating func setDisplay(curve: LogCurve, gamut: Gamut) {
         self.curve = curve.rawValue
         let matrix = ColorMath.rec2020ToRec709 * gamut.fromRec2020.inverse
+        // The fourth place carries that channel's gamut compression scale, 0 for none.
+        let scales = MonitorTransform.compressionScales(gamut)
         func row(_ index: Int) -> SIMD4<Float> {
-            SIMD4(Float(matrix[0][index]), Float(matrix[1][index]), Float(matrix[2][index]), 0)
+            SIMD4(Float(matrix[0][index]), Float(matrix[1][index]), Float(matrix[2][index]), Float(scales[index]))
         }
         toRec709Row0 = row(0)
         toRec709Row1 = row(1)
@@ -318,8 +320,10 @@ struct LookParams {
         lutScale = SIMD4(1 / (high - low), 0)
         lutOffset = SIMD4(low, 0)
         let matrix = ColorMath.rec2020ToRec709 * settings.gamut.fromRec2020.inverse
+        // The fourth place carries that channel's gamut compression scale, 0 for none.
+        let scales = MonitorTransform.compressionScales(settings.gamut)
         func row(_ index: Int) -> SIMD4<Float> {
-            SIMD4(Float(matrix[0][index]), Float(matrix[1][index]), Float(matrix[2][index]), 0)
+            SIMD4(Float(matrix[0][index]), Float(matrix[1][index]), Float(matrix[2][index]), Float(scales[index]))
         }
         toRec709Row0 = row(0)
         toRec709Row1 = row(1)

@@ -347,11 +347,14 @@ struct SettingsView: View {
                 Button("Import .cube LUT") { importingLUT = true }
                 // Built-in looks always work on log.
                 if !model.selectedLUT.isEmpty, BuiltInLook.named(model.selectedLUT) == nil {
-                    Picker(selection: $model.processing.lutExpectsRec709) {
+                    Picker(selection: Binding(
+                        get: { model.lutMadeForRec709(model.selectedLUT) },
+                        set: { model.setLUT(model.selectedLUT, madeForRec709: $0) })
+                    ) {
                         Text("Log").tag(false)
                         Text("Rec.709").tag(true)
                     } label: {
-                        explained("LUT made for", "The signal this LUT expects.")
+                        explained("LUT made for", "The signal this LUT expects. Each LUT remembers its own; tapping it in the LOOK panel switches it too.")
                     }
                 }
             }

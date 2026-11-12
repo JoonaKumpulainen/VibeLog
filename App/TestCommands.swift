@@ -484,7 +484,7 @@ extension AppModel {
                 return nil
             }
             return pick(lookNames, { $0 }) { selectedLUT = $0 }
-        case "lutMadeFor": return pick(["log", "rec709"], { $0 }) { processing.lutExpectsRec709 = $0 == "rec709" }
+        case "lutMadeFor": return pick(["log", "rec709"], { $0 }) { setLUT(selectedLUT, madeForRec709: $0 == "rec709") }
         case "freezeViewfinder": return flag { processing.pauseMonitorWhileRecording = $0 }
         case "punch":
             guard let point = TestLinkAddress.point(value) else { return "punch takes x,y from 0 to 1" }
