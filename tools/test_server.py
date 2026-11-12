@@ -409,6 +409,8 @@ class Suite:
         {"ask": "Did the shadows stay as dark?"}  a question for a person, listed in the report
         {"run": "trialTakes", "until": {"trials": ""}, "minutes": 5}
                         sends a command, then waits until status says it's done
+        {"unchanged": ["codec", "size", "bakeLook"]}   these settings read as they did when the
+                        round started, for something on the phone that should put them back
         {"status": {"encoderLimits": "~proven by takes"}}   checks the phone's status reply;
                         "~text" means it contains the text
 
@@ -775,6 +777,13 @@ class Suite:
                 time.sleep(self.options.go)
             else:
                 input(f"\n>>> {step['pause']}\n    Press Enter when done. ")
+        elif "unchanged" in step:
+            now = self.ask({"action": "status"})["values"]
+            for key in step["unchanged"]:
+                before, after = self.at_start.get(key), now.get(key)
+                verdict = "PASS" if before == after else "FAIL"
+                self.checks.append((step.get("label", "settings put back"), verdict, f"{key}: before {before}, after {after}"))
+                print(f"  {verdict} {key}: before {before}, after {after}", flush=True)
         elif "run" in step:
             label = step.get("label", step["run"])
             print(f"run: {step['run']}", flush=True)
@@ -830,6 +839,7 @@ class Suite:
             if "needs" in step:
                 self.needs(step["needs"])
         self.check(steps)
+        self.at_start = self.ask({"action": "status"})["values"]
         try:
             for step in steps:
                 self.step(step)

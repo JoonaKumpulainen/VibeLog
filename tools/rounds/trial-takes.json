@@ -1,7 +1,8 @@
 [
-  {"needs": "0.1.126"},
+  {"needs": "0.1.127"},
   {"pause": "Trial takes: the phone lies still on a table, pointing at anything, for about 2 minutes."},
   {"run": "trialTakes", "until": {"trials": ""}, "minutes": 5, "label": "Trial takes"},
+  {"unchanged": ["codec", "size", "aspect", "bakeLook", "lut", "twelveBitProRes"], "label": "Settings put back"},
   {"status": {"encoderLimits": "~proven by takes"}, "label": "Trials proved their codecs"},
   {"log": true, "label": "Session log"}
 ]
