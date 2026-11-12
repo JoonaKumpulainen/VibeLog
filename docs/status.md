@@ -46,8 +46,8 @@ which ends with the base 16 over the internet link.
 2. **Ask for [next-tests.md](next-tests.md)'s results** on 0.1.118: Tests 1 to 3 on both phones,
    Tests 4 to 6 from the base 16's tester. Then run `tools/pull_logs.py` and
    `tools/check_benchmark.py`.
-3. **Then the benchmark plan below,** in order: the first-launch offer, GPU timing per setup, real
-   20 s trial takes, notices in the format panel, internal limits.
+3. **Then the benchmark batch** in [decisions/benchmark.md](decisions/benchmark.md): one batch,
+   then fixes batched from what log sharing brings in.
 
 ## Waiting on the phone
 
