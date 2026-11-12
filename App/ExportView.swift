@@ -65,6 +65,7 @@ struct ExportView: View {
 
     /// What the file comes out as, from the take's sidecar size and how it plays.
     private var fileFooter: String {
+        guard isLog else { return "The copy keeps the take's size and shape." }
         guard let info = take.info else { return "Crop centers on the picture as it plays." }
         let turns = takeTurns
         let size = choice.outputSize(width: info.width, height: info.height, quarterTurns: turns)
@@ -85,6 +86,12 @@ struct ExportView: View {
     private var gamut: Gamut { ExportChoice.gamut(of: take) }
 
     private var isLog: Bool { ExportChoice.isLog(take) }
+
+    /// Smoothness in a word, with its seconds for those who want them.
+    private var smoothnessLabel: String {
+        let word = stabilizeSeconds < 0.45 ? "Light" : stabilizeSeconds < 0.95 ? "Medium" : stabilizeSeconds < 1.45 ? "Strong" : "Strongest"
+        return String(format: "\(word), %.1f s", stabilizeSeconds)
+    }
 
     /// What the preview shows, under it.
     private var previewCaption: String {
@@ -126,7 +133,7 @@ struct ExportView: View {
                 .onChange(of: geometry.size) { _, _ in readOrientation() }
                 .onAppear { readOrientation() }
             }
-            .navigationTitle(editingGrade ? "Grade" : "Export with look")
+            .navigationTitle(editingGrade ? "Grade" : isLog ? "Export with look" : "Stabilize")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(fullscreen ? .hidden : .visible, for: .navigationBar)
             .toolbar {
@@ -163,7 +170,8 @@ struct ExportView: View {
             lutName = model.isAvailableLook(cameraLook) || cameraLook.isEmpty ? cameraLook : BuiltInLook.aces20.name
             lutMadeForRec709 = model.processing.lutExpectsRec709
             target = model.bakeTarget
-            scopeKind = model.isOn(.scope) ? model.scopeKind : nil
+            // A baked take's screen only steadies, so it has no use for the scope.
+            scopeKind = isLog && model.isOn(.scope) ? model.scopeKind : nil
             scopeScale = model.scopeScale
             configureScope()
             // A take with its look baked in can only be steadied, so its screen opens on that.
@@ -332,13 +340,16 @@ struct ExportView: View {
                             ForEach(ExportQuality.allCases) { Text($0.label).tag($0) }
                         }
                     }
+                    // Stabilize, a baked take's screen, keeps the take's size and shape.
+                    if isLog {
                     Picker("Resolution", selection: $resolution) {
                         ForEach(ExportResolution.allCases) { Text($0.label).tag($0) }
                     }
                     Picker("Crop", selection: $crop) {
                         ForEach(ExportCrop.allCases) { Text($0.label).tag($0) }
                     }
-                    if let aspect = crop.aspect {
+                    }
+                    if isLog, let aspect = crop.aspect {
                         let sides = aspect < (takeTurns % 2 == 0 ? 4.0 / 3 : 3.0 / 4)
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
@@ -359,23 +370,28 @@ struct ExportView: View {
                         .accessibilityLabel("Crop position")
                     }
                     if hasGyroLog {
-                        Toggle("Stabilize", isOn: $stabilize)
+                        // A baked take's copy is always stabilized, so there the switch only compares.
+                        Toggle(isLog ? "Stabilize" : "Show stabilized", isOn: $stabilize)
                         if stabilize {
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack {
                                     Text("Smoothness")
                                     Spacer()
-                                    Text(String(format: "%.1f s", stabilizeSeconds))
+                                    Text(smoothnessLabel)
                                         .monospacedDigit()
                                         .foregroundStyle(.secondary)
                                 }
-                                Slider(value: $stabilizeSeconds, in: 0.2...2, step: 0.1)
+                                HStack(spacing: 8) {
+                                    Text("Follows you").font(.caption).foregroundStyle(.secondary)
+                                    Slider(value: $stabilizeSeconds, in: 0.2...2, step: 0.1)
+                                    Text("Holds still").font(.caption).foregroundStyle(.secondary)
+                                }
                                 if let steadyNote {
                                     Text(steadyNote)
                                         .font(.caption)
                                         .monospacedDigit()
                                 }
-                                Text("Steadies the picture from the take's gyro log and enlarges it to hide the edges. Fast small shake is left to the lens's own stabilizer. The preview plays it stabilized: switch Stabilize off and on to compare.")
+                                Text("Smoothness is how long a stretch of the camera's movement is averaged into one steady path. A short stretch follows your pans closely and crops little. A long one holds the frame nearly still, lags behind a pan and crops more. The preview plays it stabilized: use the switch above to compare.")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -396,8 +412,8 @@ struct ExportView: View {
                         }
                         Button("Cancel", role: .destructive) { job.cancel() }
                     } else {
-                        Button(isLog ? "Export" : "Export stabilized copy") { startExport() }
-                            .disabled(!isLog && !stabilize)
+                        Button(isLog ? "Export" : "Save stabilized copy") { startExport() }
+                            .disabled(!isLog && !hasGyroLog)
                     }
                     if let message = job.message {
                         Text(message)
@@ -478,7 +494,7 @@ struct ExportView: View {
                             building.steadying = steadying
                             note = String(format: "Enlarged %.0f%% to hide the edges", steadying.zoom * 100)
                                 + (steadying.zoom >= steadying.path.settings.maxZoom - 0.001
-                                    ? ", the most allowed: some frames are steadied less. Try less smoothness." : ".")
+                                    ? ", the most allowed: the biggest moves are steadied less. Less smoothness keeps more of them." : ".")
                         }
                     } catch {
                         note = "\(error)"
@@ -540,7 +556,10 @@ struct ExportView: View {
         // Its full-size textures would sit beside the export's own.
         previewExporter = nil
         previewComposition = nil
-        job.start(take: take, choice: choice)
+        var chosen = choice
+        // A baked take's copy is stabilized whatever the comparing switch shows.
+        if !isLog { chosen.stabilize = true }
+        job.start(take: take, choice: chosen)
     }
 
     /// Gives the preview its take back where it was once an export ends, however it ends.

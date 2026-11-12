@@ -136,7 +136,9 @@ struct ExportChoice: Sendable {
         // The profile's focal length is in pixels of the sensor's full width.
         let focal = profile.fx * Double(width) / Double(profile.width)
         let zoom = path.zoom(width: Double(width), height: Double(height), focal: focal)
-        return LookExporter.Steadying(path: path, focal: focal, zoom: zoom)
+        // At the most enlargement, the moves too big to hide are eased rather than cut off.
+        let fitted = path.eased(width: Double(width), height: Double(height), focal: focal, zoom: zoom)
+        return LookExporter.Steadying(path: fitted, focal: focal, zoom: zoom)
     }
 
     /// The lens profile's name for a take's lens, as its sidecar labels it.

@@ -3104,5 +3104,37 @@ final class SteadyPathTests: XCTestCase {
             XCTAssertTrue(SteadyPath.fits(matrix, width: 4032, height: 3024))
         }
     }
+
+    func testEasingKeepsEveryMomentInsideWithoutCuttingOff() throws {
+        // A sway too wide to hide, as a pan's start and stop are.
+        let amplitude = 25 * Double.pi / 180
+        var settings = SteadyPath.Settings()
+        settings.frameOffset = 0
+        let wild = try XCTUnwrap(SteadyPath(samples: samples(seconds: 12) {
+            SIMD3(amplitude * 2 * Double.pi * 0.7 * cos(2 * Double.pi * 0.7 * $0), 0, 0)
+        }, settings: settings))
+        let zoom = wild.zoom(width: 4032, height: 3024, focal: 2840)
+        let eased = wild.eased(width: 4032, height: 3024, focal: 2840, zoom: zoom)
+        var biggestStep = 0.0
+        var last = eased.excess(at: 2)
+        for index in 1..<800 {
+            let now = eased.excess(at: 2 + Double(index) / 100)
+            // It fits as it is, with nothing left for the frame-by-frame limit to cut.
+            let warp = SteadyPath.warp(SteadyPath.pictureTurn(now), width: 4032, height: 3024, focal: 2840, zoom: zoom)
+            XCTAssertTrue(SteadyPath.fits(warp, width: 4032, height: 3024))
+            biggestStep = max(biggestStep, simd_length(now - last))
+            last = now
+        }
+        // And it moves gently: the sway itself turns up to 1.9 degrees in a hundredth of a second.
+        XCTAssertLessThan(biggestStep, 0.5 * Double.pi / 180)
+
+        // A path that already fits is left as it is.
+        let gentle = try XCTUnwrap(SteadyPath(samples: samples(seconds: 12) {
+            SIMD3(0.01 * cos(2 * Double.pi * 0.7 * $0), 0, 0)
+        }, settings: settings))
+        let gentleZoom = gentle.zoom(width: 4032, height: 3024, focal: 2840)
+        let same = gentle.eased(width: 4032, height: 3024, focal: 2840, zoom: gentleZoom)
+        XCTAssertEqual(simd_length(same.excess(at: 5) - gentle.excess(at: 5)), 0, accuracy: 1e-12)
+    }
 }
 

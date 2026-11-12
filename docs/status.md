@@ -52,9 +52,9 @@ Files can be read straight from a phone plugged in here, under `/run/user/<uid>/
 
 **The 14 Pro:**
 
-5. **Stabilized export:** in the player's **Export**, turn on **Stabilize** for a take shot on a
-   measured lens, baked or log, and watch the preview with it on and off; or over the link
-   `export <file> "stabilize=on"`. Take `220644`, upright and baked, is a good first one. Say
+5. **Stabilize again, on the next build:** the first copies were measured, and the 0.5x's kept
+   two thirds of its shake from a timing error, now fixed. Stabilize `000714` and `220644`
+   again, and say whether the 0.5x still shakes. Say
    whether the copy is steadier than the take, whether anything shakes that didn't before, and
    whether an edge ever shows. Then **Run probe** and send the newest `probes/probe_*.txt`, for
    its stabilizer names.

@@ -67,14 +67,17 @@ HEVC or ProRes in SDR or HDR. The scope works as the camera's does: tap it for t
 it to any corner of the preview, and drag from just outside its inner corner to resize it. The
 arrows at the preview's top right fill the screen with the preview and bring the settings back.
 
-**Stabilize** in Export steadies the copy from the take's gyro log, with **Smoothness** setting
-how many seconds the camera's path is smoothed over. The copy is enlarged just enough to hide its
-moving edges, up to 140%. Fast small shake is left to the lens's own stabilizer, which already
+**Stabilize** in Export steadies the copy from the take's gyro log. **Smoothness** is how long a
+stretch of the camera's movement is averaged into one steady path: a short one follows your pans
+and crops little, a long one holds the frame nearly still, lags behind a pan and crops more. The
+copy is enlarged just enough to hide its moving edges, up to 130%, and moves too big to hide at
+that are steadied less. Fast small shake is left to the lens's own stabilizer, which already
 took most of it out. The preview plays the take stabilized and says how far it's enlarged; switch
 **Stabilize** off and on to compare. It needs the take's lens measured under Advanced, Lenses.
 
-A take with its look baked in can't be given another look, but its Export screen still writes a
-stabilized copy: the same picture, steadied and encoded again.
+A take with its look baked in can't be given another look, so the player offers **Stabilize** for
+it instead of Export: a screen with only the codec and smoothness, which saves the same picture,
+steadied and encoded again.
 
 **Export** in the player writes a copy of a log take with a look baked in, after a preview that
 plays it with the look: the Rec.709 view, an ACES look or a LUT, in HEVC 4:2:0 or ProRes 422 LT, 422

@@ -54,9 +54,11 @@ public struct SteadyPath: Sendable {
         /// The spread that stands for what the optics already took out: about 2 Hz.
         public var opticsSeconds = 0.08
         /// How far the picture may be enlarged to hide its moving edges.
-        public var maxZoom = 1.4
-        /// The gyro's time for a frame's time. Pans in take 220644 fitted best 10 to 30 ms early.
-        public var frameOffset = -0.02
+        public var maxZoom = 1.3
+        /// The gyro's time for a frame's time. Fast shake fits best at 0 to 5 ms on both the 1x,
+        /// take 220644, and the ultra wide, take 000714. The first guess, 20 ms early, came from
+        /// slow pans, which barely tell, and left two thirds of the ultra wide's shake in.
+        public var frameOffset = 0.0
 
         public init() {}
     }
@@ -66,6 +68,13 @@ public struct SteadyPath: Sendable {
     private let step: Double
     /// What to undo at each step, as turns about the phone's x, y and z, in radians.
     private let excess: [SIMD3<Double>]
+
+    private init(settings: Settings, start: Double, step: Double, excess: [SIMD3<Double>]) {
+        self.settings = settings
+        self.start = start
+        self.step = step
+        self.excess = excess
+    }
 
     /// Nil when the log is too short to steady anything.
     public init?(samples: [MotionSample], settings: Settings = Settings()) {
@@ -131,20 +140,44 @@ public struct SteadyPath: Sendable {
     /// its edge even so is turned back less.
     public func matrix(at seconds: Double, width: Double, height: Double, focal: Double, zoom: Double) -> simd_double3x3 {
         let turn = Self.pictureTurn(excess(at: seconds))
-        var share = 1.0
-        if !Self.fits(Self.warp(turn, width: width, height: height, focal: focal, zoom: zoom), width: width, height: height) {
-            var low = 0.0
-            for _ in 0..<12 {
-                let middle = (low + share) / 2
-                if Self.fits(Self.warp(turn * middle, width: width, height: height, focal: focal, zoom: zoom), width: width, height: height) {
-                    low = middle
-                } else {
-                    share = middle
-                }
-            }
-            share = low
-        }
+        let share = Self.share(of: turn, width: width, height: height, focal: focal, zoom: zoom)
         return Self.warp(turn * share, width: width, height: height, focal: focal, zoom: zoom)
+    }
+
+    /// How much of `turn` can be undone at `zoom` before an edge shows: 1 for all of it.
+    static func share(of turn: SIMD3<Double>, width: Double, height: Double, focal: Double, zoom: Double) -> Double {
+        if fits(warp(turn, width: width, height: height, focal: focal, zoom: zoom), width: width, height: height) { return 1 }
+        var low = 0.0
+        var high = 1.0
+        for _ in 0..<12 {
+            let middle = (low + high) / 2
+            if fits(warp(turn * middle, width: width, height: height, focal: focal, zoom: zoom), width: width, height: height) {
+                low = middle
+            } else {
+                high = middle
+            }
+        }
+        return low
+    }
+
+    /// This path with every moment turned back only as far as fits at `zoom`, eased in and out
+    /// over about a third of a second. Cut off frame by frame, the picture stopped dead against
+    /// its edge and started again, which showed as a shake of its own on take 000714. A path
+    /// that already fits comes back as it is.
+    public func eased(width: Double, height: Double, focal: Double, zoom: Double) -> SteadyPath {
+        let shares = excess.map {
+            Self.share(of: Self.pictureTurn($0), width: width, height: height, focal: focal, zoom: zoom)
+        }
+        guard shares.contains(where: { $0 < 1 }) else { return self }
+        // The least share nearby, so the easing starts before the edge is reached.
+        let reach = max(Int((0.3 / step).rounded()), 1)
+        let least = shares.indices.map { index -> SIMD3<Double> in
+            let nearby = shares[max(0, index - reach)...min(shares.count - 1, index + reach)]
+            return SIMD3(nearby.min() ?? 1, 0, 0)
+        }
+        let soft = Self.smoothed(least, spread: 0.12 / step)
+        let eased = excess.indices.map { excess[$0] * min(shares[$0], soft[$0].x) }
+        return SteadyPath(settings: settings, start: start, step: step, excess: eased)
     }
 
     /// The least enlargement, up to the settings' most, that keeps every frame's edges out of

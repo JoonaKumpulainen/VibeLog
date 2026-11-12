@@ -222,7 +222,8 @@ struct TakePlayer: View {
                     player.pause()
                     showsExport = true
                 } label: {
-                    action("Export", symbol: "wand.and.stars")
+                    // A take with its look baked in can only be steadied.
+                    action(ExportChoice.isLog(take) ? "Export" : "Stabilize", symbol: ExportChoice.isLog(take) ? "wand.and.stars" : "gyroscope")
                 }
                 Button(role: .destructive) {
                     confirmsDelete = true

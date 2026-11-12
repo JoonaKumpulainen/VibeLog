@@ -520,8 +520,30 @@ an item from **Not verified** once it is.
   - So an exact correction from each frame's own lens shift isn't on offer through photo
     metadata. A measurement per lens is the way left.
 
+- **The ultra wide follows the gyro at every speed, and its first stabilized copy barely
+  steadied, 14 Pro on `652ba7a`, 2026-11-12:** take `000714`, 10.7 seconds upright on the 0.5x at
+  1/50 s, and its copy from **Stabilize** at 0.6 s, both read frame by frame against the `.gcsv`
+  at the profile's 1585.7 px.
+  - **No optics there, as expected:** fast shake reached the picture at 1.03 and 0.98 of the
+    gyro's prediction, with correlations of 0.98 and 0.99, and roll at 0.89. Slow motion at 0.85
+    and 1.12. So the focal length from the field of view, and the 1x's directions, hold for it.
+  - **The gyro and the frames line up within 5 ms.** Fast shake fitted best at 0 ms here, and at
+    5 ms on the 1x's take `220644`. The 20 ms lead first used came from slow pans, which fit
+    nearly as well at any lag.
+  - **The copy kept about two thirds of the shake:** 9.1 and 10.9 px rms a frame against the
+    take's 10.2 and 11.4, still following the gyro at 0.69 and 0.63, best 20 ms off. That's what
+    a 20 ms timing error leaves of a shake near 5 Hz. Roll was worse than in the take, 5.9 mrad
+    against 4.7.
+  - **It was enlarged the full 140%,** so some frames were cut off at the edge one by one, which
+    adds a stop and start of its own. The take tilted at about 0.5 rad/s, and a pan's start and
+    stop are what a long smoothing can't hide.
+  - The fixes, unbuilt: the frame offset is 0, and moves too big to hide are eased in and out
+    instead of cut off, at 130% at most.
+
 ## Not verified
 
+- **Stabilize with its timing fixed:** whether the ultra wide's copy is now steady, and how
+  much rolling shutter leaves in.
 - **What maker note keys 15 and 12 read in a running take,** frame by frame, still and shaken:
   whether 15 changes from the probe's 5, and whether 12 grows with the shake.
 - **The `.gcsv`'s orientation for upright takes:** which string Gyroflow needs for each way of

@@ -15,15 +15,19 @@ optics steady two axes and leave roll alone. The figures are in [findings.md](..
   export corrects what lies between the wanted smoothness and about 2 Hz, and leaves faster
   motion to the optics. A plain gyro correction would add that shake back in reverse.
 - **Roll is all the gyro's.** It's corrected at every speed.
-- **One enlargement for the take,** the least that hides every frame's edges, up to 140%. A
-  frame that would still show an edge is turned back less.
+- **One enlargement for the take,** the least that hides every frame's edges, up to 130%. Moves
+  too big to hide at that are turned back less, eased in and out over about a third of a
+  second, since cutting them off frame by frame showed as a shake of its own.
+- **Smoothness is a length of time,** the stretch of the camera's movement averaged into the
+  steady path, 0.2 to 2 seconds. Short follows a pan closely and crops little; long holds the
+  frame nearly still, lags behind a pan and crops more. The screen names it Light to Strongest.
 - **A full perspective warp per frame,** from the lens profile's focal length, before the FX and
   the look. The picture's middle is taken as the optical centre.
 - **The preview shows it.** Export's preview plays the take stabilized, through the same step
   the export uses, and says how far it's enlarged. Switching **Stabilize** off and on compares.
   Live stabilization while recording stays ruled out.
-- **Baked takes too.** A take with its look baked in has no log to export, so its Export screen
-  offers only this: the same picture, steadied and encoded again in the take's own tag, with no
+- **Baked takes too.** A take with its look baked in has no log to export, so its screen is
+  **Stabilize**, with only the codec, HEVC's size and smoothness to set, and offers only this: the same picture, steadied and encoded again in the take's own tag, with no
   look applied. It costs one more encode of an already encoded picture.
 - **It says what it did:** the export's sidecar has `steadied`, and it gets no copy of the gyro
   log, which no longer describes it.
@@ -42,7 +46,7 @@ and `LookExporter.Look.steadying` carries them into an export. In the export scr
   has. The preview shows the result, not what was cut away.
 - **A baked HDR take previews with its codes shown as SDR,** so it looks flat there. The copy
   keeps its PQ or HLG tag.
-- **The 2 Hz and the gyro's 20 ms lead come from one take** on the 1x. The tele, the ultra wide,
+- **The 2 Hz comes from one take** on the 1x. The tele, the ultra wide,
   which has no optical stabilizer, and other phones are unmeasured. The ultra wide corrects
   every speed on all three axes.
 - **It guesses what the optics did.** The share they take is a figure from one take, not each
