@@ -50,7 +50,7 @@ struct DiagnosticsView: View {
                 }
             }
             Section {
-                TextField("Server, as 192.168.1.20:8765", text: $model.testServer)
+                TextField("Server, as 192.168.1.20:8765 or https://…", text: $model.testServer)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)

@@ -10,6 +10,14 @@
 The phone connects out to `serve`, takes commands and sends files, which land in the results
 folder. `send` queues a command from this machine and prints the phone's reply. Traffic is plain
 HTTP with a token, so use it on your own network only.
+
+    python3 tools/test_server.py serve --public
+    ngrok http 8765
+
+`--public` is for a phone elsewhere, through a tunnel such as ngrok that ends HTTPS on this
+machine. It listens on this machine only, gives the tunnel its own long token, refuses commands
+and replies that came through a tunnel, and locks out a sender after a few wrong tokens. See
+docs/test-link.md before using it.
 """
 import argparse
 import csv
@@ -48,11 +56,26 @@ def default_folder():
     return Path(chosen) if chosen else Path.home() / "VibeLogTest"
 
 
+# Wrong tokens a sender may give before it's locked out, and for how long.
+LOCKOUT_TRIES = 5
+LOCKOUT_SECONDS = 15 * 60
+
+# Headers a proxy or tunnel adds. Their presence means the request came from outside, whatever
+# address it arrives from: ngrok's agent connects from 127.0.0.1.
+FORWARDED_HEADERS = ("X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "Forwarded")
+
+
 class Link:
     """Commands waiting for the phone, and the phone's replies."""
 
-    def __init__(self, token, folder):
+    def __init__(self, token, folder, public_token=None):
         self.token = token
+        # With --public, what a phone through the tunnel must give. The short token then only
+        # works for requests made on this machine itself.
+        self.public_token = public_token
+        self.failures = {}
+        self.locked = {}
+        self.guard = threading.Lock()
         self.folder = folder
         self.changed = threading.Condition()
         self.commands = []
@@ -102,7 +125,7 @@ class Link:
 def safe_name(name):
     """Keeps an upload inside the results folder."""
     base = os.path.basename(name.replace("\\", "/"))
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,200}", base) or base in ("token", "replies.jsonl"):
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,200}", base) or base in ("token", "public_token", "replies.jsonl"):
         return None
     return base
 
@@ -114,11 +137,48 @@ def make_handler(link):
         def log_message(self, *_):
             pass
 
+        def forwarded(self):
+            return any(self.headers.get(name) for name in FORWARDED_HEADERS)
+
+        def sender(self):
+            """Who sent it. For a tunnelled request, the last forwarded address, the one the tunnel
+            added itself: earlier ones are whatever the sender wrote, and could dodge a lockout."""
+            if self.forwarded():
+                chain = self.headers.get("X-Forwarded-For", "") or self.headers.get("Forwarded", "")
+                return "via tunnel " + (chain.split(",")[-1].strip() or "unknown")
+            return self.client_address[0]
+
+        def local(self):
+            """Made on this machine, not through a tunnel that also connects from 127.0.0.1."""
+            return self.client_address[0].startswith("127.") and not self.forwarded()
+
         def allowed(self):
-            given = self.headers.get("Authorization", "")
-            if hmac.compare_digest(given.encode(), f"Bearer {link.token}".encode()):
+            sender = self.sender()
+            now = time.time()
+            with link.guard:
+                if link.locked.get(sender, 0) > now:
+                    locked = True
+                else:
+                    link.locked.pop(sender, None)
+                    locked = False
+            if locked:
+                self.answer(429, {"error": "locked out"})
+                return False
+            given = self.headers.get("Authorization", "").encode()
+            # Through a tunnel, only the long token works.
+            expected = link.public_token if (link.public_token and self.forwarded()) else link.token
+            if hmac.compare_digest(given, f"Bearer {expected}".encode()):
+                with link.guard:
+                    link.failures.pop(sender, None)
                 return True
-            print(f"refused a wrong token from {self.client_address[0]}", flush=True)
+            with link.guard:
+                count = link.failures.get(sender, 0) + 1
+                link.failures[sender] = count
+                if count >= LOCKOUT_TRIES:
+                    link.failures.pop(sender, None)
+                    link.locked[sender] = now + LOCKOUT_SECONDS
+            print(f"refused a wrong token from {sender}"
+                  + (f", locked out for {LOCKOUT_SECONDS // 60} minutes" if count >= LOCKOUT_TRIES else ""), flush=True)
             self.answer(401, {"error": "bad token"})
             return False
 
@@ -143,7 +203,7 @@ def make_handler(link):
                 command = link.take(min(float(query.get("wait", ["20"])[0]), 30))
                 self.answer(200, command) if command else self.answer(204)
             elif url.path == "/result":
-                if not self.client_address[0].startswith("127."):
+                if not self.local():
                     self.answer(403, {"error": "local only"})
                     return
                 reply = link.wait_reply(int(query["id"][0]), float(query.get("wait", ["30"])[0]))
@@ -163,7 +223,7 @@ def make_handler(link):
             elif url.path == "/upload":
                 self.upload(parse_qs(url.query).get("name", [""])[0])
             elif url.path == "/queue":
-                if not self.client_address[0].startswith("127."):
+                if not self.local():
                     self.answer(403, {"error": "local only"})
                     return
                 self.answer(200, {"id": link.queue(json.loads(self.body()))})
@@ -221,11 +281,33 @@ def token_for(folder):
     return path.read_text().strip()
 
 
+def public_token_for(folder):
+    """A long token for a phone through a tunnel, kept beside the short one. Typed once, or pasted."""
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / "public_token"
+    if not path.exists():
+        path.touch(mode=0o600)
+        path.write_text(secrets.token_hex(16))
+    return path.read_text().strip()
+
+
 def serve(options):
     folder = options.folder
     token = token_for(folder)
-    server = ThreadingHTTPServer((options.bind, options.port), make_handler(Link(token, folder)))
-    print(f"Server: {local_address()}:{server.server_address[1]}\nToken:  {token}\nFiles:  {folder}", flush=True)
+    if options.public:
+        public = public_token_for(folder)
+        # The tunnel's agent connects from this machine, so nothing else needs to reach the server.
+        bind = "127.0.0.1" if options.bind == "0.0.0.0" else options.bind
+        server = ThreadingHTTPServer((bind, options.port), make_handler(Link(token, folder, public)))
+        print(f"Public mode: listening on {bind}:{server.server_address[1]} for a tunnel only\n"
+              f"Start the tunnel:  ngrok http {server.server_address[1]}\n"
+              f"On the phone, enter the tunnel's https:// address and this token:\n"
+              f"Token:  {public}\nFiles:  {folder}\n"
+              "Anyone with the address and token can run tests and fetch files and stills.\n"
+              "Stop the tunnel and this server (Ctrl+C) as soon as testing ends.", flush=True)
+    else:
+        server = ThreadingHTTPServer((options.bind, options.port), make_handler(Link(token, folder)))
+        print(f"Server: {local_address()}:{server.server_address[1]}\nToken:  {token}\nFiles:  {folder}", flush=True)
     server.serve_forever()
 
 
@@ -475,6 +557,9 @@ def main():
     commands = parser.add_subparsers(dest="mode", required=True)
     serving = commands.add_parser("serve")
     serving.add_argument("--bind", default="0.0.0.0")
+    serving.add_argument(
+        "--public", action="store_true",
+        help="for a phone through a tunnel such as ngrok: this machine only, a long token, lockouts")
     serving.set_defaults(run=serve)
     sending = commands.add_parser("send")
     sending.add_argument("words", nargs="+")

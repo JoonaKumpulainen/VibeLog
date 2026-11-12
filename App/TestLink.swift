@@ -91,6 +91,8 @@ final class TestLink {
         guard let url = parts.url else { return nil }
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        // ngrok's free tunnels can answer with a warning page instead of the server; this skips it.
+        request.setValue("1", forHTTPHeaderField: "ngrok-skip-browser-warning")
         return request
     }
 

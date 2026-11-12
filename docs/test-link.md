@@ -59,7 +59,8 @@ for a file by name, or for a log, preview or status, so turn off **Connect** if 
 
 Traffic is **plain HTTP**. The token controls who may connect, but nothing is encrypted, so anyone
 able to watch your network could read the token and the data. That's why it belongs on a network you
-trust.
+trust. The one exception is a phone elsewhere through a tunnel: see **A phone elsewhere, through
+ngrok** below.
 
 ## What stays on each device
 
@@ -187,14 +188,81 @@ with the values it accepts. `send` and `suite` only work from the computer runni
 Press Ctrl+C in its terminal. The phone then shows **Waiting for the server** until you turn off
 **Connect**.
 
+## A phone elsewhere, through ngrok
+
+For a short session with a tester's phone that isn't on your network. ngrok gives the server a
+public `https://` address and passes requests to it. Run it only while testing, and stop both
+afterward.
+
+### What changes, and the risks
+
+- **Anyone with the address and the token** can do everything in **What the link can do**:
+  change settings, start takes, take stills of whatever the phone sees with no sign on it, and
+  fetch videos. So the token is long, and the address and token go only to the tester.
+- **ngrok can see everything that passes.** HTTPS ends on ngrok's servers, so videos, stills,
+  logs and status pass through them unencrypted. The tester should know this before connecting.
+- **The address is public.** Tunnel addresses appear in public certificate logs and get scanned.
+  Public mode refuses anything without the long token and locks out a sender after five wrong ones.
+
+### What public mode does
+
+`serve --public`:
+
+- **Listens on this computer only,** `127.0.0.1`, since ngrok's agent connects from here. Nothing
+  on your network can reach it.
+- **Gives the tunnel its own token,** 32 random characters in `public_token` in the results folder.
+  A request through the tunnel needs it; the six-digit token then only works from this computer.
+- **Refuses commands and replies through the tunnel.** Queuing a command and reading a reply only
+  work from this computer. ngrok's requests arrive from `127.0.0.1` too, so the server tells them
+  apart by the `X-Forwarded-For` header ngrok adds.
+- **Locks out a sender for 15 minutes after five wrong tokens,** by the address ngrok reports.
+- The phone sends `ngrok-skip-browser-warning`, so ngrok's free tier doesn't put its warning page
+  in front of the server.
+
+The app accepts an `https://` address from 0.1.115 on. Older builds only take plain HTTP.
+
+### Run it
+
+1. Start the server in public mode:
+
+   ```bash
+   python3 tools/test_server.py serve --public
+   ```
+
+   It prints the long token.
+
+2. In a second terminal, start the tunnel:
+
+   ```bash
+   ngrok http 8765
+   ```
+
+   It prints a `Forwarding` address such as `https://abc-123.ngrok-free.app`.
+
+3. Send the tester the address and the token, privately. In Diagnostics, they enter the whole
+   `https://` address as the server, the token, and turn on **Connect**. The state should read
+   **Connected**, and the server prints `phone connected`.
+
+4. Send commands from this computer as usual, `python3 tools/test_server.py send status`.
+
+### End it
+
+1. Ask the tester to turn off **Connect** and clear the server and token fields.
+2. Press Ctrl+C in both terminals: ngrok's first, then the server's.
+3. Delete `public_token` from the results folder, so the next session gets a new one:
+
+   ```bash
+   rm ~/VibeLogTest/public_token
+   ```
+
 ## Keeping it private
 
 From least to most effort:
 
 1. **Connect only when testing.** Turn **Connect** off and stop the server when you finish.
    Restarting the app also turns it off.
-2. **Never expose the server to the internet.** Don't forward port 8765 on your router, and don't
-   run it on public or shared Wi-Fi.
+2. **Never expose the server to the internet** except through public mode and a tunnel, above.
+   Don't forward port 8765 on your router, and don't run it on public or shared Wi-Fi.
 3. **Listen on one address only.** By default the server listens on every network the computer has.
    Name the one you want:
 

@@ -189,7 +189,8 @@ and removing it. It's off at every launch, and can't be switched on from the ser
   1.3`, and `frameRate` matches by label.
 - **Limits:** the app only acts on the fixed list in `App/TestCommands.swift`. Nothing there deletes
   a take. Only tools, look and punch-in change during a take. Files wait until a take ends, and
-  videos only go by `sendFile`. It's plain HTTP with a token, so it suits a private network only.
+  videos only go by `sendFile`. It's plain HTTP with a token, so it suits a private network only,
+  apart from `serve --public` behind an ngrok tunnel, with its long token and lockouts.
   The phone must be awake, with VibeLog open, and someone must point it at the scene.
 - **Cost:** one idle request stays open during a take, on its own queue. 40-second takes lost
   nothing with it connected, but no take has compared it with the link off.

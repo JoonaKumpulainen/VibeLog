@@ -1717,6 +1717,10 @@ final class TestLinkTests: XCTestCase {
         XCTAssertEqual(TestLinkAddress.base("http://box.local:8765/x")?.absoluteString, "http://box.local:8765")
         XCTAssertNil(TestLinkAddress.base(""))
         XCTAssertNil(TestLinkAddress.base("ftp://box"))
+        // A tunnel's address keeps HTTPS and its own port.
+        XCTAssertEqual(
+            TestLinkAddress.base("https://abc-123.ngrok-free.app/")?.absoluteString, "https://abc-123.ngrok-free.app")
+        XCTAssertEqual(TestLinkAddress.base("HTTPS://box.example:8443")?.absoluteString, "https://box.example:8443")
     }
 
     func testFileNamesStayInTheirFolder() {
