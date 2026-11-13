@@ -144,8 +144,13 @@ struct ExportChoice: Sendable {
         var settings = SteadyPath.Settings()
         settings.smoothSeconds = stabilizeSeconds
         // The ultra wide has no optical stabilizer, so nothing is left to the optics there: every
-        // speed is corrected on all three axes.
-        if name == "back-ultrawide" { settings.opticsSeconds = 0 }
+        // speed is corrected on all three axes. The 1x's model and timing were fitted on take
+        // 220644; the tele, unmeasured, takes the 1x's model and the ultra wide's timing.
+        switch name {
+        case "back-ultrawide": settings.optics = nil
+        case "back-wide": settings.frameOffset = 0.005
+        default: break
+        }
         guard let path = SteadyPath(samples: GyroLog.samples(from: text), settings: settings) else {
             throw SteadyFailure(description: "The take's gyro log is too short to steady it with")
         }

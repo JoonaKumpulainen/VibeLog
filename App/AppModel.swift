@@ -67,6 +67,15 @@ final class AppModel: ObservableObject {
     /// This phone's benchmark, in `Benchmark.swift`.
     @Published var benchmark = BenchmarkProgress.saved()
     @Published var benchmarkRunning = false
+    /// A whole run was cancelled part-way: the camera screen offers to continue it.
+    @Published var benchmarkPaused = false
+    /// When the running step began, for the progress bar.
+    @Published var benchmarkStepStarted: Date?
+    /// Changes with every start and cancel, so a step that ends after its run was cancelled
+    /// can't write into the next one.
+    var benchmarkRunID = UUID()
+    /// The steps a run of single steps still has to do, or nil for a whole run.
+    var benchmarkQueue: [String]?
     /// The one-time offer to measure this phone, and the question about log sharing after it.
     @Published var benchmarkOffer = false
     @Published var benchmarkAsksSharing = false
@@ -1330,7 +1339,7 @@ final class AppModel: ObservableObject {
                     DispatchQueue.main.async { self.isBusy = text }
                 }, completion: { [self] url in
                     isBusy = "Saving encoder limits"
-                    EncoderSupport.measure(frames: 45, careful: true) { [self] fresh in
+                    EncoderSupport.measure(frames: 90, careful: true) { [self] fresh in
                         var support = fresh
                         support.proven = encoderSupport.proven
                         support.strained = encoderSupport.strained
@@ -2242,7 +2251,7 @@ final class AppModel: ObservableObject {
             }
             if !takeBaked, takeSize == takeChosenSize {
                 encoderSupport.record(take: takeEncoderKey, size: takeChosenSize, seconds: finished.seconds,
-                                      fps: finished.fps, encoderDrops: encoderDrops)
+                                      fps: finished.fps, frames: finished.framesWritten, encoderDrops: encoderDrops)
                 if encoderSupport.measured { encoderSupport.save() }
             }
             var result = finished

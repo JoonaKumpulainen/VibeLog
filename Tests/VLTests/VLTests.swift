@@ -3053,27 +3053,62 @@ final class SteadyPathTests: XCTestCase {
         XCTAssertEqual(simd_length(path.excess(at: 5)), 0, accuracy: 1e-6)
     }
 
-    func testSlowSwayIsUndoneAndFastShakeIsLeftToTheOptics() throws {
-        // One degree of sway at 0.7 Hz about x, and of shake at 8 Hz about y and z.
-        let amplitude = 1.0 * Double.pi / 180
-        func rate(_ hertz: Double, _ time: Double) -> Double {
-            amplitude * 2 * Double.pi * hertz * cos(2 * Double.pi * hertz * time)
+    /// The largest turn left to undo about each axis between 4 and 8 seconds, of a 12-second
+    /// log turning `degrees` back and forth at `hertz` about each axis.
+    private func mostExcess(_ degrees: SIMD3<Double>, _ hertz: SIMD3<Double>, optics: SteadyPath.Optics?) throws -> SIMD3<Double> {
+        let amplitude = degrees * Double.pi / 180
+        func rate(_ time: Double) -> SIMD3<Double> {
+            SIMD3((0..<3).map { amplitude[$0] * 2 * Double.pi * hertz[$0] * cos(2 * Double.pi * hertz[$0] * time) })
         }
         var settings = SteadyPath.Settings()
-        settings.frameOffset = 0
-        let path = try XCTUnwrap(SteadyPath(
-            samples: samples(seconds: 12) { SIMD3(rate(0.7, $0), rate(8, $0), rate(8, $0)) }, settings: settings))
+        settings.optics = optics
+        let path = try XCTUnwrap(SteadyPath(samples: samples(seconds: 12, rate: rate), settings: settings))
         var most = SIMD3<Double>.zero
         for index in 0..<400 {
             let excess = path.excess(at: 4 + Double(index) / 100)
             most = SIMD3(max(most.x, abs(excess.x)), max(most.y, abs(excess.y)), max(most.z, abs(excess.z)))
         }
-        // The sway is nearly all there to undo, the optics' two axes keep almost none of the
-        // shake, and roll keeps all of it.
-        XCTAssertGreaterThan(most.x, amplitude * 0.8)
-        XCTAssertLessThan(most.x, amplitude * 1.05)
-        XCTAssertLessThan(most.y, amplitude * 0.05)
-        XCTAssertGreaterThan(most.z, amplitude * 0.9)
+        return most / amplitude
+    }
+
+    func testSmallFastShakeIsLeftToTheOpticsAndLargeShakeIsNot() throws {
+        // A tenth of a degree at 8 Hz fits in the optics' travel, so little is left to undo on
+        // their two axes, and roll, which they don't steady, keeps all of it.
+        let small = try mostExcess(SIMD3(0.1, 0.1, 0.1), SIMD3(8, 8, 8), optics: .wide)
+        XCTAssertLessThan(small.x, 0.2)
+        XCTAssertLessThan(small.y, 0.2)
+        XCTAssertGreaterThan(small.z, 0.9)
+        // A whole degree overruns it, so most of that reaches the picture and is undone.
+        let large = try mostExcess(SIMD3(1, 1, 1), SIMD3(8, 8, 8), optics: .wide)
+        XCTAssertGreaterThan(large.x, 0.5)
+        XCTAssertGreaterThan(large.y, 0.5)
+        // A slow sway is held back only in part, as take 220644's holds showed.
+        let sway = try mostExcess(SIMD3(1, 1, 1), SIMD3(0.7, 0.7, 0.7), optics: .wide)
+        XCTAssertGreaterThan(sway.x, 0.5)
+        XCTAssertLessThan(sway.x, 0.85)
+        XCTAssertGreaterThan(sway.z, 0.9)
+    }
+
+    func testALensWithoutOpticsHasEverySpeedUndone() throws {
+        let most = try mostExcess(SIMD3(0.1, 1, 1), SIMD3(8, 8, 0.7), optics: nil)
+        XCTAssertGreaterThan(most.x, 0.9)
+        XCTAssertGreaterThan(most.y, 0.9)
+        XCTAssertGreaterThan(most.z, 0.9)
+        XCTAssertLessThan(most.z, 1.05)
+    }
+
+    func testTheOpticsGiveWaySoftlyAtTheirTravel() {
+        let optics = SteadyPath.Optics.wide
+        // A sudden turn of 0.1 rad: the optics hold back up to their travel, then let go as the
+        // turn stops being fast.
+        let angles = (0..<300).map { $0 < 10 ? 0.0 : 0.1 }
+        let held = optics.held(angles, step: 0.01)
+        XCTAssertLessThanOrEqual(held.map(abs).max() ?? 0, optics.travel)
+        XCTAssertGreaterThan(held[10], optics.travel * 0.99)
+        XCTAssertLessThan(held[299], optics.travel * 0.01)
+        // A small one is held back by about the share.
+        let small = optics.held((0..<20).map { $0 < 10 ? 0.0 : 0.0005 }, step: 0.01)
+        XCTAssertEqual(small[10], 0.0005 * optics.share, accuracy: 0.0005 * 0.1)
     }
 
     func testNoTurnLeavesThePictureWhereItIs() throws {
@@ -3252,20 +3287,44 @@ final class EncoderEvidenceTests: XCTestCase {
         var s = support(rate: 27.3)
         XCTAssertNotNil(s.warning(for: "hevc422", size: "4032x3024"))
         XCTAssertTrue(s.warning(for: "hevc422", size: "4032x3024")!.contains("quick check"))
-        s.record(take: "hevc422", size: "4032x3024", seconds: 3, fps: 30, encoderDrops: 0)
+        s.record(take: "hevc422", size: "4032x3024", seconds: 3, fps: 30, frames: 90, encoderDrops: 0)
         XCTAssertNotNil(s.warning(for: "hevc422", size: "4032x3024"), "a take under five seconds proves nothing")
-        s.record(take: "hevc422", size: "4032x3024", seconds: 10, fps: 28.5, encoderDrops: 0)
+        s.record(take: "hevc422", size: "4032x3024", seconds: 10, fps: 28.5, frames: 285, encoderDrops: 0)
         XCTAssertNotNil(s.warning(for: "hevc422", size: "4032x3024"), "fed too slowly to say")
         // The 14 Pro's HEVC 4:4:4 take: 4 frames lost at the GPU, none at the encoder.
-        s.record(take: "hevc422", size: "4032x3024", seconds: 10, fps: 29.497, encoderDrops: 0)
+        s.record(take: "hevc422", size: "4032x3024", seconds: 10, fps: 29.497, frames: 295, encoderDrops: 0)
         XCTAssertNil(s.warning(for: "hevc422", size: "4032x3024"))
     }
 
     func testATakeWhoseEncoderRefusedFramesAlwaysWarns() {
         var s = support(rate: 57.5)
         XCTAssertNil(s.warning(for: "hevc422", size: "4032x3024"))
-        s.record(take: "hevc422", size: "4032x3024", seconds: 60, fps: 29.1, encoderDrops: 3)
+        // The base 16's ProRes 422 HQ trial take: 19 refused of 474.
+        s.record(take: "hevc422", size: "4032x3024", seconds: 16.7, fps: 28.4, frames: 474, encoderDrops: 19)
         XCTAssertTrue(s.warning(for: "hevc422", size: "4032x3024")!.contains("earlier take"))
+    }
+
+    func testAFewRefusalsAroundTheStopStillHold() {
+        // The 14 Pro's 12-bit ProRes 4444 take: 7 refused in the last half-second of 1,791.
+        var s = support(rate: 20)
+        s.record(take: "hevc422", size: "4032x3024", seconds: 60, fps: 29.78, frames: 1791, encoderDrops: 7)
+        XCTAssertNil(s.warning(for: "hevc422", size: "4032x3024"))
+        XCTAssertEqual(EncoderSupport.allowedDrops(frames: 100), 2)
+    }
+
+    func testATestReadingAFrameUnderThirtyDoesNotWarn() {
+        // Hardware HEVC read 29.5 to 30.7 on both phones and held 30 in every take.
+        XCTAssertNil(support(rate: 29.6).warning(for: "hevc422", size: "4032x3024"))
+        XCTAssertNotNil(support(rate: 28.5).warning(for: "hevc422", size: "4032x3024"))
+    }
+
+    func testSoftwareEncodersAreRememberedAndOlderFilesLackThem() throws {
+        var s = support(rate: 30)
+        s.software = ["prores422hq"]
+        let again = try JSONDecoder().decode(EncoderSupport.self, from: JSONEncoder().encode(s))
+        XCTAssertEqual(again.software, ["prores422hq"])
+        let old = #"{"device":"iPhone17,3","system":"26.6","codecs":["hevc420"],"fps":{},"measured":true}"#
+        XCTAssertEqual(try JSONDecoder().decode(EncoderSupport.self, from: Data(old.utf8)).software, [])
     }
 
     func testOlderFilesReadAsQuickChecks() throws {
@@ -3275,7 +3334,7 @@ final class EncoderEvidenceTests: XCTestCase {
         XCTAssertTrue(s.proven.isEmpty)
         var careful = s
         careful.method = .careful
-        careful.record(take: "hevc420", size: "4032x3024", seconds: 10, fps: 30, encoderDrops: 0)
+        careful.record(take: "hevc420", size: "4032x3024", seconds: 10, fps: 30, frames: 300, encoderDrops: 0)
         let again = try JSONDecoder().decode(EncoderSupport.self, from: JSONEncoder().encode(careful))
         XCTAssertEqual(again, careful)
     }

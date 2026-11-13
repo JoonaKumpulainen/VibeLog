@@ -41,19 +41,31 @@ struct BenchmarkView: View {
             LabeledContent("Status", value: statusText)
             if model.benchmarkRunning {
                 Button("Cancel Benchmark", role: .destructive) { model.cancelBenchmark() }
-            } else {
-                Button(progress.finished || progress.results.isEmpty ? "Run Benchmark" : "Resume Benchmark") {
+            } else if progress.finished || progress.results.isEmpty {
+                Button("Run Benchmark") {
                     close()
                     model.startBenchmark(fresh: progress.finished)
                 }
-                Button("Encoders and GPU Only") {
+                .disabled(!canStart)
+            } else {
+                Button("Continue Benchmark") {
                     close()
-                    model.runEncoderTest()
+                    model.startBenchmark(fresh: false)
                 }
+                .disabled(!canStart)
+                Button("Start Over") {
+                    close()
+                    model.startBenchmark(fresh: true)
+                }
+                .disabled(!canStart)
             }
         } footer: {
-            Text("The full run takes about 5 minutes. Lay the phone down still, with 50% battery or more. It measures each lens, the encoders and the GPU, and records a few short test takes, which it deletes. Nothing is ever turned off: settings past this phone's limits only warn before a take.")
+            Text("The full run takes about 6 minutes. Lay the phone down still, with 50% battery or more. It measures each lens, the encoders and the GPU, and records a few short test takes, which it deletes. Cancel any time and continue later from the step it stopped in, or run one step by itself below. Nothing is ever turned off: settings past this phone's limits only warn before a take.")
         }
+    }
+
+    private var canStart: Bool {
+        !model.benchmarkRunning && model.isBusy == nil && !model.isRecording
     }
 
     private var statusText: String {
@@ -87,6 +99,15 @@ struct BenchmarkView: View {
                         Text(AppModel.benchmarkStepNames[step] ?? step)
                         Spacer()
                         StepBadge(result: progress.results[step], running: model.benchmarkRunning && progress.running == step)
+                        if !model.benchmarkRunning {
+                            Button("Run") {
+                                close()
+                                model.startBenchmark(fresh: false, only: step)
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(!canStart)
+                            .accessibilityLabel("Run \(AppModel.benchmarkStepNames[step] ?? step) alone")
+                        }
                     }
                     Text(Self.stepPurpose[step] ?? "")
                         .font(.caption)
@@ -101,7 +122,7 @@ struct BenchmarkView: View {
         } header: {
             Text("Steps")
         } footer: {
-            Text("A step that fails is skipped, and the rest still run. Run the benchmark again to measure it.")
+            Text("A step that fails is skipped, and the rest still run. Run measures one step again by itself and keeps every other result.")
         }
     }
 
@@ -250,7 +271,7 @@ struct BenchmarkView: View {
                     verdict = (true, "Proven", "A real take held 30 fps.")
                 } else if fps >= EncoderSupport.comfortableFPS {
                     verdict = (true, "OK", nil)
-                } else if fps >= EncoderSupport.realTimeFPS {
+                } else if fps >= EncoderSupport.holdsFPS {
                     verdict = (true, "Just OK", "Little to spare once the camera and GPU share the phone.")
                 } else {
                     verdict = (false, "Warns", "Under 30, so frames may drop.")

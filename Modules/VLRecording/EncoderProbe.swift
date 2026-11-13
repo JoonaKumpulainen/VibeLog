@@ -58,6 +58,12 @@ public enum EncoderProbe {
         return lines
     }
 
+    /// When the encoder's queue reached two points of a trial, set on that queue and read after.
+    private final class Marks: @unchecked Sendable {
+        var from: Date?
+        var to: Date?
+    }
+
     /// One timed encode of synthetic frames, with nothing else asked of the encoder.
     struct Trial {
         var fps = 0.0
@@ -86,9 +92,27 @@ public enum EncoderProbe {
             buffers.append(buffer)
         }
 
+        // Timed from the end of a warm-up to the last frame taken in, so neither the encoder's
+        // start nor closing the file counts. Timed to the file's finish over 45 frames, it read
+        // the base iPhone 16's software ProRes 422 HQ at 17.7 fps, where real takes held 30.
+        let warmup = min(15, frameCount / 4)
+        let marks = Marks()
+        let timing = DispatchGroup()
         let start = Date()
         for index in 0..<frameCount {
+            if index == warmup {
+                timing.enter()
+                encoder.counts { _, _ in
+                    marks.from = Date()
+                    timing.leave()
+                }
+            }
             encoder.append(buffers[index % buffers.count], at: CMTime(value: Int64(index), timescale: 30))
+        }
+        timing.enter()
+        encoder.counts { _, _ in
+            marks.to = Date()
+            timing.leave()
         }
         let done = DispatchSemaphore(value: 0)
         var result: VideoEncoder.Result?
@@ -99,9 +123,15 @@ public enum EncoderProbe {
         guard done.wait(timeout: .now() + 120) == .success, let result else {
             return Trial(problem: "timed out")
         }
-        let elapsed = Date().timeIntervalSince(start)
+        _ = timing.wait(timeout: .now() + 5)
+        let timed: Double
+        if let from = marks.from, let to = marks.to, to > from, frameCount > warmup {
+            timed = Double(min(result.framesWritten, frameCount) - warmup) / to.timeIntervalSince(from)
+        } else {
+            timed = Double(result.framesWritten) / Date().timeIntervalSince(start)
+        }
         var trial = Trial(
-            fps: Double(result.framesWritten) / elapsed,
+            fps: timed,
             megabytesPerSecond: result.megabytes / (Double(frameCount) / 30),
             written: result.framesWritten,
             problem: result.failure.map { "failed: \($0)" })

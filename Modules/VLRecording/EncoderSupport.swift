@@ -27,6 +27,9 @@ public struct EncoderSupport: Codable, Equatable, Sendable {
     public var proven: [String: Set<String>] = [:]
     /// Codecs and sizes whose encoder refused frames in a real take. These always warn.
     public var strained: [String: Set<String>] = [:]
+    /// Presets, by ID, whose encoder runs in software on this phone, as ProRes does on the base
+    /// iPhone 16. Its speed then follows the phone's heat and the picture.
+    public var software: Set<String> = []
 
     public enum Method: String, Codable, Sendable {
         case quick = "quick check, camera running"
@@ -42,7 +45,7 @@ public struct EncoderSupport: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case device, system, codecs, fps, measured, method, heat, measuredAt, proven, strained
+        case device, system, codecs, fps, measured, method, heat, measuredAt, proven, strained, software
     }
 
     /// Files from before `method` and the take evidence still read, as quick checks.
@@ -58,19 +61,25 @@ public struct EncoderSupport: Codable, Equatable, Sendable {
         measuredAt = try? values.decodeIfPresent(Date.self, forKey: .measuredAt)
         proven = (try? values.decodeIfPresent([String: Set<String>].self, forKey: .proven)) ?? [:]
         strained = (try? values.decodeIfPresent([String: Set<String>].self, forKey: .strained)) ?? [:]
+        software = (try? values.decodeIfPresent(Set<String>.self, forKey: .software)) ?? []
     }
 
     /// What a real take showed about its encoder. Only a take of at least five seconds counts.
     /// `fps` is what the file holds a second; frames lost earlier, at the camera or the GPU,
-    /// lower it without the encoder being to blame, so a take fed at 29 or more counts.
-    public mutating func record(take key: String, size: String, seconds: Double, fps: Double, encoderDrops: Int) {
+    /// lower it without the encoder being to blame, so a take fed at 29 or more counts. A few
+    /// refusals, up to 1% of the frames, don't mark it: they came around the stop in takes that
+    /// otherwise held, on both test phones.
+    public mutating func record(take key: String, size: String, seconds: Double, fps: Double, frames: Int, encoderDrops: Int) {
         guard seconds >= 5 else { return }
-        if encoderDrops > 0 {
+        if encoderDrops > Self.allowedDrops(frames: frames) {
             strained[key, default: []].insert(size)
-        } else if fps >= 29 {
+        } else if fps >= Self.holdsFPS {
             proven[key, default: []].insert(size)
         }
     }
+
+    /// The encoder refusals a take may have and still count as held.
+    public static func allowedDrops(frames: Int) -> Int { max(2, frames / 100) }
 
     /// Why a take in this codec and size may drop frames, or nil when there's no reason to think
     /// so. A take that held outranks any trial; a take whose encoder refused frames outranks a
@@ -80,13 +89,16 @@ public struct EncoderSupport: Codable, Equatable, Sendable {
             return "This codec and size dropped frames at the encoder in an earlier take"
         }
         if proven[key]?.contains(size) == true { return nil }
-        guard let rate = fps[key]?[size], rate < Self.realTimeFPS else { return nil }
+        guard let rate = fps[key]?[size], rate < Self.holdsFPS else { return nil }
         let how = method == .quick ? " in the quick check" : ""
         return String(format: "This codec and size encoded at %.0f fps on this phone%@, so frames may drop", rate, how)
     }
 
     /// The rate a take needs.
     public static let realTimeFPS = 30.0
+    /// What counts as holding it in a test: the hardware encoders read 29.5 to 30.7 at full size
+    /// on both test phones and held 30 in every take, so a frame under is the test's own noise.
+    public static let holdsFPS = 29.0
     /// The 12-bit ProRes 4444 trial's key in `fps`, which shares 4444's preset ID.
     public static let twelveBitID = "prores4444-12"
 
@@ -116,7 +128,7 @@ public struct EncoderSupport: Codable, Equatable, Sendable {
     public func bestSize(for preset: EncoderPreset) -> EncoderSize? {
         guard measured, let sizes = fps[preset.id], !sizes.isEmpty else { return nil }
         let tried = EncoderSize.all.filter { sizes[$0.label] != nil }
-        return tried.first { sizes[$0.label]! >= Self.realTimeFPS }
+        return tried.first { sizes[$0.label]! >= Self.holdsFPS }
             ?? tried.max { sizes[$0.label]! < sizes[$1.label]! }
     }
 
@@ -130,7 +142,7 @@ public struct EncoderSupport: Codable, Equatable, Sendable {
         guard measured, let sizes = fps[preset.id] else { return nil }
         let tried = EncoderSize.all.filter { sizes[$0.label] != nil }
         if let size = tried.first(where: { sizes[$0.label]! >= Self.comfortableFPS }) { return (size, true) }
-        if let size = tried.first(where: { sizes[$0.label]! >= Self.realTimeFPS }) { return (size, false) }
+        if let size = tried.first(where: { sizes[$0.label]! >= Self.holdsFPS }) { return (size, false) }
         return nil
     }
 
@@ -192,7 +204,9 @@ public struct EncoderSupport: Codable, Equatable, Sendable {
     /// encoder may refuse 12 MP and still record smaller sizes; the trials find which.
     public static func codecList() -> EncoderSupport {
         var codecs = Set<String>()
+        var software = Set<String>()
         var found: [CMVideoCodecType: Bool] = [:]
+        var inSoftware: [CMVideoCodecType: Bool] = [:]
         for preset in presets {
             let type = codecType(preset.codec)
             if found[type] == nil {
@@ -202,11 +216,16 @@ public struct EncoderSupport: Codable, Equatable, Sendable {
                     width: 1920, height: 1080, codecType: type, encoderSpecification: nil,
                     encoderIDOut: &encoderID, supportedPropertiesOut: &properties)
                 found[type] = status == noErr
+                // The base iPhone 16 names its ProRes encoder "...videoencoder.prores.sw.apch".
+                inSoftware[type] = encoderID.map { $0 as String }?.contains(".sw.") == true
             }
             if found[type] == true { codecs.insert(preset.id) }
+            if found[type] == true, inSoftware[type] == true { software.insert(preset.id) }
         }
-        return EncoderSupport(
+        var support = EncoderSupport(
             device: SystemStatus.deviceModel, system: currentSystem, codecs: codecs, fps: [:], measured: false)
+        support.software = software
+        return support
     }
 
     static func codecType(_ codec: AVVideoCodecType) -> CMVideoCodecType {
@@ -239,7 +258,7 @@ public struct EncoderSupport: Codable, Equatable, Sendable {
                     lines.append("\(key) \(size.label): " + (trial.problem ?? String(format: "%.1f fps", trial.fps)))
                     guard trial.problem == nil else { continue }
                     results[size.label] = trial.fps
-                    if trial.fps >= realTimeFPS { break }
+                    if trial.fps >= holdsFPS { break }
                 }
                 support.fps[key] = results
             }

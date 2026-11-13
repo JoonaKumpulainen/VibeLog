@@ -247,7 +247,9 @@ extension AppModel {
             return done()
         case "benchmark":
             guard !isRecording, isBusy == nil, !benchmarkRunning else { return refused("Busy, or a take is running") }
-            startBenchmark(fresh: command.value == "fresh")
+            // "fresh" starts over; a step's name runs that step alone.
+            let step = AppModel.benchmarkSteps.contains(command.value) ? command.value : nil
+            startBenchmark(fresh: command.value == "fresh", only: step)
             return done()
         case "cancelBenchmark":
             cancelBenchmark()

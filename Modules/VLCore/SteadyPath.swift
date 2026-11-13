@@ -38,12 +38,13 @@ extension GyroLog {
 
 /// How far each frame of a take should be turned back to steady it, from the take's gyro log.
 ///
-/// It works with the optical stabilizer, which the iPhone 14 Pro runs during RAW capture: take
-/// 220644 showed pans reaching the picture whole, a hand's shake above about 2 Hz at only 0.13
-/// to 0.35 of what the gyro predicts, and roll at 0.89. So for the two axes the optics steady,
-/// the path corrects what lies between the wanted smoothness and that 2 Hz, and leaves the rest
-/// to the optics, where a plain gyro correction would add the shake back in reverse. Roll, which
-/// the optics leave alone, is corrected at every speed.
+/// It works with the optical stabilizer, which the iPhone 14 Pro's 1x runs during RAW capture.
+/// The path models what the optics did and corrects only what reached the picture: the optics
+/// take a share of each turn's fast part, above about 0.6 Hz, but only as far as their travel
+/// allows, so a large shake mostly passes and a pan's start and stop pass in full. Fitted on
+/// take 220644's own frames, this left 0.77 px a frame of shake above 2 Hz up and down in the
+/// held stretch, against 1.96 for a model that left everything above 2 Hz to the optics. Roll,
+/// which the optics leave alone, is corrected at every speed.
 ///
 /// Angles are summed axis by axis, which is exact only for small turns, but what's corrected is
 /// the difference between two smoothed copies of the same sum, a few degrees at most.
@@ -51,16 +52,51 @@ public struct SteadyPath: Sendable {
     public struct Settings: Equatable, Sendable {
         /// The spread, in seconds, of the smoothing that gives the camera's wanted path.
         public var smoothSeconds = 0.6
-        /// The spread that stands for what the optics already took out: about 2 Hz.
-        public var opticsSeconds = 0.08
+        /// What the lens's optical stabilizer takes out of the picture, or nil for a lens without
+        /// one, whose every turn reaches the picture.
+        public var optics: Optics? = .wide
         /// How far the picture may be enlarged to hide its moving edges.
         public var maxZoom = 1.3
-        /// The gyro's time for a frame's time. Fast shake fits best at 0 to 5 ms on both the 1x,
-        /// take 220644, and the ultra wide, take 000714. The first guess, 20 ms early, came from
-        /// slow pans, which barely tell, and left two thirds of the ultra wide's shake in.
+        /// The gyro's time for a frame's time. Fast shake fits best at +5 ms on the 1x, take
+        /// 220644, on all three axes, and at 0 to -5 ms on the ultra wide, take 000714. The first
+        /// guess, 20 ms early, came from slow pans, which barely tell, and left two thirds of the
+        /// ultra wide's shake in.
         public var frameOffset = 0.0
 
         public init() {}
+    }
+
+    /// A model of an optical stabilizer: it holds back `share` of the part of each turn faster
+    /// than `cornerHertz`, as a first-order high-pass does, up to about `travel` radians, past
+    /// which it gives way softly.
+    public struct Optics: Equatable, Sendable {
+        public var share: Double
+        public var cornerHertz: Double
+        public var travel: Double
+
+        public init(share: Double, cornerHertz: Double, travel: Double) {
+            self.share = share
+            self.cornerHertz = cornerHertz
+            self.travel = travel
+        }
+
+        /// The 14 Pro's 1x, fitted on take 220644's frames: a share of 0.9 above 0.6 Hz, within
+        /// about 0.006 rad, 17 px at its focal length. Both halves of the take gave the same fit.
+        public static let wide = Optics(share: 0.9, cornerHertz: 0.6, travel: 0.006)
+
+        /// How far the optics turned the picture back at each reading, from the angles turned so
+        /// far, `step` seconds apart. It runs forward in time only, as the optics do.
+        public func held(_ angles: [Double], step: Double) -> [Double] {
+            guard travel > 0, share > 0, angles.count > 1 else { return angles.map { _ in 0 } }
+            let keep = 1 / (1 + 2 * Double.pi * cornerHertz * step)
+            var fast = 0.0
+            var out = [Double](repeating: 0, count: angles.count)
+            for index in 1..<angles.count {
+                fast = keep * (fast + angles[index] - angles[index - 1])
+                out[index] = travel * tanh(share * fast / travel)
+            }
+            return out
+        }
     }
 
     public let settings: Settings
@@ -90,13 +126,19 @@ public struct SteadyPath: Sendable {
             let seconds = samples[index].seconds - samples[index - 1].seconds
             angles[index] = angles[index - 1] + (samples[index].rotation + samples[index - 1].rotation) * 0.5 * seconds
         }
-        let wanted = Self.smoothed(angles, spread: settings.smoothSeconds / step)
-        let optics = Self.smoothed(angles, spread: settings.opticsSeconds / step)
-        excess = angles.indices.map { index in
-            SIMD3(
-                optics[index].x - wanted[index].x, optics[index].y - wanted[index].y,
-                angles[index].z - wanted[index].z)
+        // What reached the picture: the turn less what the optics held back, on the two axes
+        // they steady.
+        var seen = angles
+        if let optics = settings.optics {
+            let heldX = optics.held(angles.map(\.x), step: step)
+            let heldY = optics.held(angles.map(\.y), step: step)
+            for index in seen.indices {
+                seen[index].x -= heldX[index]
+                seen[index].y -= heldY[index]
+            }
         }
+        let wanted = Self.smoothed(seen, spread: settings.smoothSeconds / step)
+        excess = seen.indices.map { seen[$0] - wanted[$0] }
     }
 
     /// A Gaussian average with its spread in steps. Near the ends it averages what there is.

@@ -536,6 +536,8 @@ struct CameraHUD: View {
             NoticeCard(title: alert.title, detail: alert.detail, isUrgent: true, hold: hold) {
                 model.takeAlert = nil
             }
+        } else if model.benchmarkRunning || model.benchmarkPaused {
+            BenchmarkCard(hold: hold)
         } else if let notice = model.notice {
             NoticeCard(title: notice, detail: nil, isUrgent: false, hold: hold) {
                 model.notice = nil
@@ -1211,6 +1213,90 @@ struct NoticeCard: View {
         .onTapGesture(perform: dismiss)
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// The benchmark's progress, where notices show, so it never covers the picture: the step, what
+/// it's doing, a bar for the whole run, and Cancel. Once cancelled part-way, it offers Continue
+/// until dismissed. The bar moves once a second and doesn't animate.
+struct BenchmarkCard: View {
+    @EnvironmentObject private var model: AppModel
+    let hold: Hold
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Tokens.panelRadius)
+        let running = model.benchmarkRunning
+        HStack(spacing: 10) {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(title)
+                        .font(Tokens.noticeFont)
+                        .foregroundStyle(Tokens.value)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.8)
+                    if let detail {
+                        Text(detail)
+                            .font(Tokens.labelFont)
+                            .foregroundStyle(Tokens.label)
+                            .lineLimit(1)
+                    }
+                    ProgressView(value: model.benchmarkFraction(at: context.date))
+                        .tint(running ? Tokens.value : Tokens.label)
+                        .accessibilityLabel("Benchmark progress")
+                }
+            }
+            .upright(hold, depth: CameraGeometry.noticeDepth - 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                if running { model.cancelBenchmark() } else { model.startBenchmark(fresh: false) }
+            } label: {
+                Text(running ? "Cancel" : "Continue")
+                    .font(Tokens.valueFont)
+                    .foregroundStyle(running ? Tokens.value : Tokens.held)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .turnedToHold()
+                    .frame(width: 84, height: 44)
+                    .background(Color.black, in: RoundedRectangle(cornerRadius: Tokens.panelRadius))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!running && (model.isBusy != nil || model.isRecording))
+            .accessibilityLabel(running ? "Cancel benchmark" : "Continue benchmark")
+            if !running {
+                Button {
+                    model.dismissBenchmarkPause()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(Tokens.valueFont)
+                        .foregroundStyle(Tokens.label)
+                        .turnedToHold()
+                        .frame(width: 36, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Hide")
+                .accessibilityHint("Continue later in Settings, Advanced, Benchmark")
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Tokens.opaquePanel, in: shape)
+        .overlay(shape.strokeBorder(Tokens.hairline, lineWidth: 0.5))
+        .contentShape(shape)
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+    }
+
+    private var title: String {
+        if model.benchmarkRunning { return model.benchmarkStepLine }
+        let left = model.benchmark.pending(AppModel.benchmarkSteps).count
+        return "Benchmark paused, \(left) of \(AppModel.benchmarkSteps.count) steps left"
+    }
+
+    private var detail: String? {
+        if model.benchmarkRunning { return model.benchmarkStepDetail }
+        // A measurement with the camera off runs to its end after a cancel.
+        return model.isBusy.map { "Finishing: \($0)" }
     }
 }
 

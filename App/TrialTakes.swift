@@ -53,9 +53,23 @@ extension AppModel {
         nextTrial()
     }
 
+    /// Stops the run: a take under way ends early, and no more start. Its settings go back.
+    func cancelTrialTakes() {
+        guard var state = trialState else { return }
+        state.cancelled = true
+        trialState = state
+        Log.shared.info("Trial takes: cancelled")
+        if isRecording {
+            // Its end calls nextTrial, which finishes the run.
+            toggleRecord()
+        } else {
+            finishTrials()
+        }
+    }
+
     private func nextTrial() {
         guard var state = trialState else { return }
-        guard state.index < state.plan.count else {
+        guard state.index < state.plan.count, !state.cancelled else {
             finishTrials()
             return
         }
@@ -75,7 +89,7 @@ extension AppModel {
         showNotice("Trial take \(state.index) of \(state.plan.count): \(trial.label)", seconds: 4)
         // A moment for the pipeline to take the new settings before the take starts.
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [self] in
-            guard trialState != nil, !isRecording else { return }
+            guard let state = trialState, !state.cancelled, !isRecording else { return }
             record(seconds: Self.trialSeconds)
         }
     }
@@ -130,4 +144,5 @@ struct TrialState {
     let saved: Saved
     var index = 0
     var lines: [String] = []
+    var cancelled = false
 }

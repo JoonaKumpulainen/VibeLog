@@ -17,6 +17,54 @@ extension AppModel {
     ]
     /// A step that hasn't finished in this long is given up on.
     static let benchmarkStepLimit: TimeInterval = 10 * 60
+    /// About how long each step takes, from the base iPhone 16's run, for the progress bar.
+    static let benchmarkStepSeconds: [String: Double] = [
+        "capture": 50, "trials": 80, "lenses": 30, "measure": 150, "probe": 45,
+    ]
+
+    /// The steps this run still has to do, in order.
+    private var benchmarkToDo: [String] {
+        benchmarkQueue ?? benchmark.pending(Self.benchmarkSteps)
+    }
+
+    /// The run's steps: one or a few asked for alone, or all of them.
+    private var benchmarkRunSteps: [String] {
+        guard let queue = benchmarkQueue else { return Self.benchmarkSteps }
+        return Self.benchmarkSteps.filter { queue.contains($0) || ($0 == benchmark.running) }
+    }
+
+    /// How far the run has come, 0 to 1, weighing each step by how long it usually takes. The
+    /// running step creeps up with its time, and stops short of done until it is.
+    func benchmarkFraction(at now: Date = Date()) -> Double {
+        let steps = benchmarkRunSteps
+        let weight = { (step: String) in Self.benchmarkStepSeconds[step] ?? 60 }
+        let total = steps.map(weight).reduce(0, +)
+        guard total > 0 else { return 0 }
+        var done = 0.0
+        for step in steps {
+            if step == benchmark.running {
+                let elapsed = benchmarkStepStarted.map { now.timeIntervalSince($0) } ?? 0
+                done += weight(step) * min(elapsed / weight(step), 0.95)
+            } else if benchmark.results[step] != nil, benchmarkQueue?.contains(step) != true {
+                done += weight(step)
+            }
+        }
+        return min(done / total, 1)
+    }
+
+    /// What the progress bar says: the step, and what it's doing within it.
+    var benchmarkStepLine: String {
+        let steps = benchmarkRunSteps
+        guard let step = benchmark.running else { return "Benchmark" }
+        let name = Self.benchmarkStepNames[step] ?? step
+        let index = (steps.firstIndex(of: step) ?? 0) + 1
+        return steps.count > 1 ? "Benchmark \(index) of \(steps.count): \(name)" : "Benchmark: \(name)"
+    }
+
+    var benchmarkStepDetail: String? {
+        if !trialProgress.isEmpty { return "Test take \(trialProgress)" }
+        return isBusy
+    }
 
     /// For Diagnostics and the test link: the step under way, or how the last run ended.
     var benchmarkStatusText: String {
@@ -54,45 +102,74 @@ extension AppModel {
     }
 
     /// Starts or resumes the benchmark. `fresh` forgets earlier results, for Run benchmark.
-    func startBenchmark(fresh: Bool) {
-        guard !isRecording, isBusy == nil, !benchmarkRunning else { return }
+    /// `only` runs that one step again by itself, keeping every other result.
+    func startBenchmark(fresh: Bool, only step: String? = nil) {
+        guard !isRecording, isBusy == nil, !benchmarkRunning, trialState == nil else { return }
         benchmarkOffer = false
-        if fresh || benchmark.finished {
-            benchmark = BenchmarkProgress(device: SystemStatus.deviceModel,
-                                          system: ProcessInfo.processInfo.operatingSystemVersionString)
+        benchmarkPaused = false
+        if let step {
+            benchmark.results[step] = nil
+            benchmarkQueue = [step]
+        } else {
+            benchmarkQueue = nil
+            if fresh || benchmark.finished {
+                benchmark = BenchmarkProgress(device: SystemStatus.deviceModel,
+                                              system: ProcessInfo.processInfo.operatingSystemVersionString)
+            }
         }
         benchmark.declined = false
+        benchmarkRunID = UUID()
         benchmarkRunning = true
-        Log.shared.info("Benchmark: starting, \(benchmark.pending(Self.benchmarkSteps).joined(separator: ", ")) to go, "
+        Log.shared.info("Benchmark: starting, \(benchmarkToDo.joined(separator: ", ")) to go, "
             + "heat \(SystemStatus.thermalName), battery \(SystemStatus.batteryText), free \(SystemStatus.freeDisk / 1_000_000_000) GB")
         nextBenchmarkStep()
     }
 
+    /// Stops the run now. A test take under way is stopped; a measurement with the camera off
+    /// finishes by itself, and its result is dropped. The cancelled step runs again on Continue.
     func cancelBenchmark() {
         guard benchmarkRunning else { return }
         benchmarkRunning = false
-        Log.shared.info("Benchmark: cancelled; it resumes where it stopped when started again")
+        benchmarkRunID = UUID()
+        let step = benchmark.running
+        benchmark.running = nil
+        benchmark.save()
+        benchmarkStepStarted = nil
+        let single = benchmarkQueue != nil
+        benchmarkQueue = nil
+        benchmarkPaused = !single && !benchmark.finished
+        if trialState != nil { cancelTrialTakes() }
+        Log.shared.info("Benchmark: cancelled" + (step.map { " during \($0)" } ?? "")
+            + "; it continues where it stopped when started again")
+    }
+
+    /// Hides the camera screen's Continue offer; Settings, Advanced, Benchmark still resumes it.
+    func dismissBenchmarkPause() {
+        benchmarkPaused = false
     }
 
     private func nextBenchmarkStep() {
         guard benchmarkRunning else { return }
-        guard let step = benchmark.pending(Self.benchmarkSteps).first else {
-            finishBenchmark()
+        guard let step = benchmarkToDo.first else {
+            if benchmarkQueue != nil { finishBenchmarkSteps() } else { finishBenchmark() }
             return
         }
         benchmark.begin(step)
         benchmark.save()
         let started = Date()
-        let name = Self.benchmarkStepNames[step] ?? step
-        let index = (Self.benchmarkSteps.firstIndex(of: step) ?? 0) + 1
-        showNotice("Benchmark, \(index) of \(Self.benchmarkSteps.count): \(name)", seconds: 4)
+        benchmarkStepStarted = started
         Log.shared.info("Benchmark: \(step) started")
+        let run = benchmarkRunID
         let finish: (String, String) -> Void = { [self] status, detail in
+            // Cancelled meanwhile: the step's result belongs to no run.
+            guard run == benchmarkRunID, benchmarkRunning else { return }
             let result = BenchmarkProgress.StepResult(
                 status: status, detail: detail, heat: SystemStatus.thermalName,
                 seconds: Date().timeIntervalSince(started))
             benchmark.finish(step, result)
             benchmark.save()
+            benchmarkQueue?.removeAll { $0 == step }
+            benchmarkStepStarted = nil
             Log.shared.info(BenchmarkProgress.logLine(step, result))
             // A moment between steps for the camera to settle.
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [self] in nextBenchmarkStep() }
@@ -146,8 +223,9 @@ extension AppModel {
         if !isStreaming, isBusy == nil { toggleStream() }
         let deadline = Date().addingTimeInterval(30)
         func check() {
+            guard benchmarkRunning else { return }
             if isStreaming, isBusy == nil { then(); return }
-            guard Date() < deadline, benchmarkRunning else { then(); return }
+            guard Date() < deadline else { then(); return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { check() }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { check() }
@@ -158,6 +236,7 @@ extension AppModel {
         let deadline = Date().addingTimeInterval(Self.benchmarkStepLimit)
         let before = lastResult
         func check() {
+            guard benchmarkRunning else { return }
             if done() {
                 let detail = lastResult != before ? (lastResult ?? "finished") : "finished"
                 finish("done", detail)
@@ -173,7 +252,8 @@ extension AppModel {
 
     // MARK: Capture on each lens
 
-    /// Streams each lens for about 8 seconds and counts what arrives. A stall moves the phone down
+    /// Streams each lens for about 8 seconds and counts what arrives, measuring a lens that reads
+    /// low once more before it counts. A stall moves the phone down
     /// the capture setup ladder as at any other time, and the lens is measured again on the new
     /// setup. A lens that can't hold 30 fps is tried at 24. Memory is sampled throughout.
     private func measureCapturePerLens(finish: @escaping (String, String) -> Void) {
@@ -185,6 +265,7 @@ extension AppModel {
             return
         }
         benchmark.capture = []
+        let run = benchmarkRunID
         var leastLeft = Int.max
         var mostUsed = 0
 
@@ -196,8 +277,9 @@ extension AppModel {
             finish(status, detail)
         }
 
-        func measure(_ index: Int, rate: Double, attempt: Int) {
-            guard benchmarkRunning else { restore("skipped", "cancelled"); return }
+        func measure(_ index: Int, rate: Double, attempt: Int, again: Bool = false) {
+            // Cancelled, or cancelled and started again: this loop belongs to no run now.
+            guard benchmarkRunning, run == benchmarkRunID else { restore("skipped", "cancelled"); return }
             guard index < order.count else {
                 let best = LensCapture.bestRates(benchmark.capture)
                 let summary = order.map { lens in
@@ -211,10 +293,11 @@ extension AppModel {
             if lensID != lens.id { lensID = lens.id }
             if frameRate != rate { frameRate = rate }
             // The lens change and the frame rate rebuild the session; give it time, then start
-            // the stream if it stopped.
+            // the stream if it stopped. Then let it settle: 5 s after the switch, the base 16's
+            // 0.5x delivered 17.5 fps, where its takes all held 30.
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [self] in
                 if !isStreaming, isBusy == nil { toggleStream() }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [self] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [self] in
                     let step = captureSupport.step
                     let first = router.stats.snapshot()
                     let started = Date()
@@ -249,12 +332,19 @@ extension AppModel {
                             missed: last.estimatedMissed - first.estimatedMissed,
                             failures: last.captureFailures - first.captureFailures,
                             setup: captureSupport.setup.label)
-                        benchmark.capture.append(result)
-                        benchmark.save()
                         Log.shared.info(String(
                             format: "Benchmark: %@ at %.0f fps delivered %.1f fps, missed %d, failures %d, on %@, memory left %d MB",
                             lens.zoomLabel, rate, result.fps, result.missed, result.failures, result.setup,
                             SystemStatus.availableMemory / 1_000_000))
+                        // A low reading is measured once more before it counts, as one stretch
+                        // can catch the camera still settling.
+                        if !result.holds, !again {
+                            Log.shared.info("Benchmark: \(lens.zoomLabel) at \(Int(rate)) fps read low, measuring again")
+                            measure(index, rate: rate, attempt: attempt, again: true)
+                            return
+                        }
+                        benchmark.capture.append(result)
+                        benchmark.save()
                         if !result.holds, rate > 24, FrameRates.all.contains(24) {
                             measure(index, rate: 24, attempt: 0)
                         } else {
@@ -333,6 +423,7 @@ extension AppModel {
 
     private func finishBenchmark() {
         benchmarkRunning = false
+        benchmarkStepStarted = nil
         benchmark.finishedAt = Date()
         benchmark.fitted = fitDefaultsToBenchmark()
         benchmark.save()
@@ -342,6 +433,21 @@ extension AppModel {
         benchmark.save()
         Log.shared.info("Benchmark: summary: " + benchmark.summary.replacingOccurrences(of: "\n", with: " / "))
         benchmarkSummaryShown = true
+    }
+
+    /// The end of steps run by themselves: a finished benchmark's summary is written again from
+    /// what's now known, without the notice or moving any setting.
+    private func finishBenchmarkSteps() {
+        benchmarkRunning = false
+        benchmarkQueue = nil
+        benchmarkStepStarted = nil
+        if benchmark.finished {
+            let failed = benchmark.results.filter { $0.value.status != "done" }.map(\.key).sorted()
+            benchmark.summary = benchmarkSummaryText(failed: failed)
+        }
+        benchmark.save()
+        Log.shared.info("Benchmark: steps done")
+        showNotice("Benchmark step done. Results are in Settings, Advanced, Benchmark.")
     }
 
     /// After the summary: without log sharing, nothing tells the owner how it went on this phone.
@@ -362,10 +468,18 @@ extension AppModel {
         }
         if !lensWords.isEmpty { lines.append("RAW streams on " + lensWords.joined(separator: ", ") + ".") }
         var cannot: [String] = []
+        let full = EncoderSize.all[0].label
         if !encoderSupport.hasProRes {
             cannot.append("no ProRes encoder, so HEVC only")
-        } else if let hq = encoderSupport.fps["prores422hq"]?[EncoderSize.all[0].label], hq < EncoderSupport.realTimeFPS {
-            cannot.append(String(format: "ProRes 422 HQ at full size encodes at %.0f fps, under the 30 a take needs", hq))
+        } else if encoderSupport.strained["prores422hq"]?.contains(full) == true {
+            cannot.append("ProRes 422 HQ at full size dropped frames at the encoder in a take")
+        } else if encoderSupport.proven["prores422hq"]?.contains(full) != true,
+                  let hq = encoderSupport.fps["prores422hq"]?[full], hq < EncoderSupport.holdsFPS {
+            cannot.append(String(format: "ProRes 422 HQ at full size encoded at %.0f fps in the encoder test, under the 30 a take needs", hq))
+        }
+        // The base 16 held 30 in short ProRes takes, then lost two thirds of its frames once hot.
+        if encoderSupport.software.contains("prores422hq") {
+            lines.append("ProRes is encoded in software on this iPhone, so it slows as the phone warms: short takes may hold, long ones drop frames. HEVC holds.")
         }
         for (lens, rate) in rates.sorted(by: { $0.key < $1.key }) where rate < 30 {
             cannot.append(rate > 0 ? "the \(lens) lens holds 24 fps, not 30" : "the \(lens) lens didn't stream RAW steadily")
